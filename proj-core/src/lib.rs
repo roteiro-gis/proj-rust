@@ -29,12 +29,12 @@ pub mod coord;
 pub mod crs;
 pub mod datum;
 pub mod ellipsoid;
+mod epsg_db;
 pub mod error;
 mod geocentric;
 mod helmert;
 mod projection;
 pub mod registry;
-mod registry_data;
 pub mod transform;
 
 pub use coord::{Coord, Transformable};

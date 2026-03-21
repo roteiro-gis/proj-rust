@@ -1,25 +1,13 @@
-/// Generate comprehensive EPSG registry from proj.db.
+/// Generate compact binary EPSG registry from proj.db.
 ///
-/// Run: cd gen-reference && cargo run --bin gen-registry > ../proj-core/src/registry_data_gen.rs
+/// Run: cd gen-reference && cargo run --bin gen-registry
+///
+/// Outputs: ../proj-core/data/epsg.bin
 
 use rusqlite::Connection;
 use std::collections::{BTreeMap, BTreeSet};
-use std::fmt;
+use std::io::Write;
 use std::path::PathBuf;
-
-/// Wrapper that always prints f64 with a decimal point (valid Rust float literal).
-struct F(f64);
-impl fmt::Display for F {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if self.0 == 0.0 {
-            write!(f, "0.0")
-        } else if self.0.fract() == 0.0 {
-            write!(f, "{:.1}", self.0)
-        } else {
-            write!(f, "{}", self.0)
-        }
-    }
-}
 
 fn find_proj_db() -> PathBuf {
     let target_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target");
@@ -36,12 +24,30 @@ fn walkdir(dir: &std::path::Path, name: &str) -> Vec<PathBuf> {
     if let Ok(es) = std::fs::read_dir(dir) {
         for e in es.flatten() {
             let p = e.path();
-            if p.is_dir() { r.extend(walkdir(&p, name)); }
-            else if p.file_name().and_then(|n| n.to_str()) == Some(name) { r.push(p); }
+            if p.is_dir() {
+                r.extend(walkdir(&p, name));
+            } else if p.file_name().and_then(|n| n.to_str()) == Some(name) {
+                r.push(p);
+            }
         }
     }
     r
 }
+
+// Binary format constants (must match epsg_db.rs)
+const MAGIC: u32 = 0x45505347;
+const ELLIPSOID_RECORD_SIZE: usize = 20;
+const DATUM_RECORD_SIZE: usize = 64;
+const GEO_CRS_RECORD_SIZE: usize = 8;
+const PROJ_CRS_RECORD_SIZE: usize = 72;
+
+const METHOD_WEB_MERCATOR: u8 = 1;
+const METHOD_TRANSVERSE_MERCATOR: u8 = 2;
+const METHOD_MERCATOR: u8 = 3;
+const METHOD_LCC: u8 = 4;
+const METHOD_ALBERS: u8 = 5;
+const METHOD_POLAR_STEREO: u8 = 6;
+const METHOD_EQUIDISTANT_CYL: u8 = 7;
 
 // EPSG parameter codes
 const LAT_ORIGIN: i64 = 8801;
@@ -58,78 +64,78 @@ const NORTHING_FALSE_ORIGIN: i64 = 8827;
 const LAT_STD_PARALLEL: i64 = 8832;
 const LON_OF_ORIGIN: i64 = 8833;
 
-// EPSG method codes → our variant names
-fn method_code_to_variant(code: i64) -> Option<&'static str> {
+fn method_code_to_id(code: i64) -> Option<u8> {
     match code {
-        9807 => Some("TransverseMercator"),         // Transverse Mercator
-        9804 => Some("Mercator"),                   // Mercator (variant A)
-        9805 => Some("Mercator"),                   // Mercator (variant B)
-        9801 => Some("LambertConformalConic"),       // Lambert Conic Conformal (1SP)
-        9802 => Some("LambertConformalConic"),       // Lambert Conic Conformal (2SP)
-        9822 => Some("AlbersEqualArea"),            // Albers Equal Area
-        9810 => Some("PolarStereographic"),         // Polar Stereographic (variant A)
-        9829 => Some("PolarStereographic"),         // Polar Stereographic (variant B)
-        9842 => Some("EquidistantCylindrical"),     // Equidistant Cylindrical
-        9843 => Some("EquidistantCylindrical"),     // Equidistant Cylindrical (Spherical)
-        1024 => Some("WebMercator"),                // Popular Visualisation Pseudo Mercator
+        9807 => Some(METHOD_TRANSVERSE_MERCATOR),
+        9804 | 9805 => Some(METHOD_MERCATOR),
+        9801 | 9802 => Some(METHOD_LCC),
+        9822 => Some(METHOD_ALBERS),
+        9810 | 9829 => Some(METHOD_POLAR_STEREO),
+        9842 | 9843 => Some(METHOD_EQUIDISTANT_CYL),
+        1024 => Some(METHOD_WEB_MERCATOR),
         _ => None,
     }
 }
 
-// UOM conversion to degrees (for angular params)
-fn uom_to_degrees(uom_code: i64) -> f64 {
-    match uom_code {
-        9102 => 1.0,            // degree
-        9110 => 1.0,            // sexagesimal DMS (we'll handle this separately)
-        9101 => 180.0 / std::f64::consts::PI, // radian
-        9105 => 1.0 / 3600.0,  // arc-second
-        9104 => 1.0 / 60.0,    // arc-minute
-        9122 => 1.0,            // degree (supplier to define representation)
-        9107 => 180.0 / 200.0,  // grad
-        _ => 1.0,               // assume degrees
-    }
-}
-
 fn convert_dms_to_degrees(dms_value: f64) -> f64 {
-    // EPSG DMS format: degrees.MMSSsss
+    // EPSG DMS format: DD.MMSSsss
+    // Must round intermediate values to avoid floating point truncation errors
+    // (e.g., 46.3 → 29.999... minutes instead of 30)
     let sign = dms_value.signum();
     let abs_val = dms_value.abs();
     let degrees = abs_val.trunc();
-    let rest = (abs_val - degrees) * 100.0;
-    let minutes = rest.trunc();
-    let seconds = (rest - minutes) * 100.0;
+    let mm_ss = (abs_val - degrees) * 100.0;
+    let minutes = mm_ss.round().min(mm_ss.trunc() + 1.0); // guard against 29.9999→30
+    let minutes = if (mm_ss - mm_ss.round()).abs() < 1e-6 {
+        mm_ss.round()
+    } else {
+        mm_ss.trunc()
+    };
+    let seconds = (mm_ss - minutes) * 100.0;
     sign * (degrees + minutes / 60.0 + seconds / 3600.0)
 }
 
-struct ConversionParams {
+fn uom_to_degrees(uom_code: i64) -> f64 {
+    match uom_code {
+        9102 | 9122 => 1.0,
+        9101 => 180.0 / std::f64::consts::PI,
+        9105 => 1.0 / 3600.0,
+        9104 => 1.0 / 60.0,
+        9107 => 180.0 / 200.0,
+        _ => 1.0,
+    }
+}
+
+struct ConvParams {
     method_code: i64,
     params: BTreeMap<i64, (f64, i64)>, // param_code → (value, uom_code)
 }
 
-fn get_param_degrees(cp: &ConversionParams, codes: &[i64]) -> f64 {
+fn get_degrees(cp: &ConvParams, codes: &[i64]) -> f64 {
     for &code in codes {
         if let Some(&(val, uom)) = cp.params.get(&code) {
-            if uom == 9110 {
-                return convert_dms_to_degrees(val);
-            }
-            return val * uom_to_degrees(uom);
+            return if uom == 9110 {
+                convert_dms_to_degrees(val)
+            } else {
+                val * uom_to_degrees(uom)
+            };
         }
     }
     0.0
 }
 
-fn get_param_meters(cp: &ConversionParams, codes: &[i64]) -> f64 {
+fn get_meters(cp: &ConvParams, codes: &[i64]) -> f64 {
     for &code in codes {
-        if let Some(&(val, _uom)) = cp.params.get(&code) {
-            return val; // assume meters or unitless for scale
+        if let Some(&(val, _)) = cp.params.get(&code) {
+            return val;
         }
     }
     0.0
 }
 
-fn get_param_scale(cp: &ConversionParams, codes: &[i64]) -> f64 {
+fn get_scale(cp: &ConvParams, codes: &[i64]) -> f64 {
     for &code in codes {
-        if let Some(&(val, _uom)) = cp.params.get(&code) {
+        if let Some(&(val, _)) = cp.params.get(&code) {
             return val;
         }
     }
@@ -141,110 +147,190 @@ fn main() {
     eprintln!("Using proj.db: {}", db_path.display());
     let conn = Connection::open(&db_path).unwrap();
 
-    // Extract ellipsoids
-    let mut ellipsoids: BTreeMap<u32, (f64, f64, bool)> = BTreeMap::new(); // code → (a, rf, is_sphere)
+    // --- Ellipsoids ---
+    let mut ellipsoids: BTreeMap<u32, (f64, f64)> = BTreeMap::new(); // code → (a, inv_f)
     {
-        let mut s = conn.prepare(
-            "SELECT code, semi_major_axis, inv_flattening, semi_minor_axis FROM ellipsoid WHERE auth_name='EPSG'"
-        ).unwrap();
-        for row in s.query_map([], |r| {
-            let code: u32 = r.get(0)?;
-            let a: f64 = r.get(1)?;
-            let inv_f: Option<f64> = r.get(2)?;
-            let b: Option<f64> = r.get(3)?;
-            let (rf, is_sphere) = match inv_f {
-                Some(rf) if rf != 0.0 => (rf, false),
-                _ => match b {
-                    Some(bv) if (a - bv).abs() > 0.001 => (a / (a - bv), false),
-                    _ => (0.0, true),
-                },
-            };
-            Ok((code, a, rf, is_sphere))
-        }).unwrap().flatten() {
-            ellipsoids.insert(row.0, (row.1, row.2, row.3));
+        let mut s = conn
+            .prepare(
+                "SELECT code, semi_major_axis, inv_flattening, semi_minor_axis
+             FROM ellipsoid WHERE auth_name='EPSG'",
+            )
+            .unwrap();
+        for row in s
+            .query_map([], |r| {
+                let code: u32 = r.get(0)?;
+                let a: f64 = r.get(1)?;
+                let inv_f: Option<f64> = r.get(2)?;
+                let b: Option<f64> = r.get(3)?;
+                let rf = match inv_f {
+                    Some(rf) if rf != 0.0 => rf,
+                    _ => match b {
+                        Some(bv) if (a - bv).abs() > 0.001 => a / (a - bv),
+                        _ => 0.0,
+                    },
+                };
+                Ok((code, a, rf))
+            })
+            .unwrap()
+            .flatten()
+        {
+            ellipsoids.insert(row.0, (row.1, row.2));
         }
     }
 
-    // Extract datums with Helmert to WGS84
-    struct DatumInfo { ellipsoid_code: u32, helmert: Option<[f64; 7]> }
+    // --- Datums ---
+    struct DatumInfo {
+        ellipsoid_code: u32,
+        helmert: [f64; 7],
+    }
     let mut datums: BTreeMap<u32, DatumInfo> = BTreeMap::new();
     {
-        let mut s = conn.prepare(
-            "SELECT code, ellipsoid_code FROM geodetic_datum WHERE auth_name='EPSG'"
-        ).unwrap();
-        for row in s.query_map([], |r| Ok((r.get::<_,u32>(0)?, r.get::<_,u32>(1)?))).unwrap().flatten() {
-            datums.insert(row.0, DatumInfo { ellipsoid_code: row.1, helmert: None });
+        let mut s = conn
+            .prepare("SELECT code, ellipsoid_code FROM geodetic_datum WHERE auth_name='EPSG'")
+            .unwrap();
+        for (code, ec) in s
+            .query_map([], |r| Ok((r.get::<_, u32>(0)?, r.get::<_, u32>(1)?)))
+            .unwrap()
+            .flatten()
+        {
+            datums.insert(
+                code,
+                DatumInfo {
+                    ellipsoid_code: ec,
+                    helmert: [0.0; 7],
+                },
+            );
         }
     }
-    // Get Helmert parameters
+    // Helmert parameters
     {
-        let mut s = conn.prepare(
-            "SELECT source_crs_code, tx, ty, tz, rx, ry, rz, px
-             FROM helmert_transformation_table
-             WHERE source_crs_auth_name='EPSG' AND target_crs_auth_name='EPSG' AND target_crs_code=4326
-               AND deprecated=0"
-        ).unwrap();
-        for row in s.query_map([], |r| {
-            Ok((r.get::<_,u32>(0)?,
-                [r.get::<_,f64>(1)?, r.get::<_,f64>(2)?, r.get::<_,f64>(3)?,
-                 r.get::<_,f64>(4)?, r.get::<_,f64>(5)?, r.get::<_,f64>(6)?,
-                 r.get::<_,f64>(7)?]))
-        }).unwrap().flatten() {
-            // helmert_transformation_table has source_crs_code → find corresponding datum
-            // The source_crs_code is a geodetic CRS code, we need to map to datum
+        // Select the best Helmert transformation for each CRS→WGS84 path.
+        // Prefer 7-parameter over 3-parameter (higher accuracy).
+        // Order by: has rotation params DESC, then accuracy ASC.
+        let mut s = conn
+            .prepare(
+                "SELECT source_crs_code, tx, ty, tz,
+                        COALESCE(rx, 0.0), COALESCE(ry, 0.0), COALESCE(rz, 0.0),
+                        COALESCE(scale_difference, 0.0),
+                        COALESCE(accuracy, 999.0)
+                 FROM helmert_transformation_table
+                 WHERE source_crs_auth_name='EPSG' AND target_crs_auth_name='EPSG'
+                   AND target_crs_code=4326 AND deprecated=0
+                 ORDER BY source_crs_code,
+                          (CASE WHEN rx IS NOT NULL AND rx != 0 THEN 0 ELSE 1 END),
+                          COALESCE(accuracy, 999.0)",
+            )
+            .unwrap();
+        // Track best accuracy per datum to avoid overwriting good params with worse ones
+        let mut datum_accuracy: BTreeMap<u32, f64> = BTreeMap::new();
+        for row in s
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, u32>(0)?,
+                    [
+                        r.get::<_, f64>(1)?,
+                        r.get::<_, f64>(2)?,
+                        r.get::<_, f64>(3)?,
+                        r.get::<_, f64>(4)?,
+                        r.get::<_, f64>(5)?,
+                        r.get::<_, f64>(6)?,
+                        r.get::<_, f64>(7)?,
+                    ],
+                    r.get::<_, f64>(8)?,
+                ))
+            })
+            .unwrap()
+            .flatten()
+        {
+            let (crs_code, helmert, accuracy) = row;
             if let Ok(datum_code) = conn.query_row(
                 "SELECT datum_code FROM geodetic_crs WHERE auth_name='EPSG' AND code=?1",
-                [row.0], |r| r.get::<_,u32>(0)
+                [crs_code],
+                |r| r.get::<_, u32>(0),
             ) {
                 if let Some(d) = datums.get_mut(&datum_code) {
-                    if d.helmert.is_none() {
-                        d.helmert = Some(row.1);
+                    let prev_acc = datum_accuracy.get(&datum_code).copied().unwrap_or(999.0);
+                    let has_rotation = helmert[3] != 0.0 || helmert[4] != 0.0 || helmert[5] != 0.0;
+                    let prev_has_rotation = d.helmert[3] != 0.0 || d.helmert[4] != 0.0 || d.helmert[5] != 0.0;
+
+                    // Prefer 7-parameter over 3-parameter, then lower accuracy value
+                    let is_first = !datum_accuracy.contains_key(&datum_code);
+                    let is_better = is_first
+                        || (has_rotation && !prev_has_rotation)
+                        || (has_rotation == prev_has_rotation && accuracy < prev_acc);
+
+                    if is_better {
+                        d.helmert = helmert;
+                        datum_accuracy.insert(datum_code, accuracy);
                     }
                 }
             }
         }
     }
 
-    // Geographic CRS
-    struct GeoCrs { code: u32, name: String, datum_code: u32 }
+    // --- Geographic CRS ---
+    struct GeoCrs {
+        code: u32,
+        datum_code: u32,
+    }
     let geo_crs: Vec<GeoCrs> = {
-        let mut s = conn.prepare(
-            "SELECT code, name, datum_code FROM geodetic_crs
-             WHERE auth_name='EPSG' AND type='geographic 2D' AND deprecated=0"
-        ).unwrap();
-        s.query_map([], |r| Ok(GeoCrs { code: r.get(0)?, name: r.get(1)?, datum_code: r.get(2)? }))
-            .unwrap().filter_map(|r| r.ok()).collect()
+        let mut s = conn
+            .prepare(
+                "SELECT code, datum_code FROM geodetic_crs
+             WHERE auth_name='EPSG' AND type='geographic 2D' AND deprecated=0
+             ORDER BY code",
+            )
+            .unwrap();
+        s.query_map([], |r| {
+            Ok(GeoCrs {
+                code: r.get(0)?,
+                datum_code: r.get(1)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|r| r.ok())
+        .collect()
     };
 
-    // Projected CRS with conversion parameters
-    struct ProjCrs { code: u32, name: String, datum_code: u32, variant: String, conv: ConversionParams }
+    // --- Projected CRS ---
+    struct ProjCrs {
+        code: u32,
+        datum_code: u32,
+        method_id: u8,
+        params: [f64; 7],
+    }
     let mut proj_crs: Vec<ProjCrs> = Vec::new();
     {
-        let mut s = conn.prepare(
-            "SELECT pc.code, pc.name, gc.datum_code, pc.conversion_auth_name, pc.conversion_code
+        let mut s = conn
+            .prepare(
+                "SELECT pc.code, gc.datum_code, pc.conversion_auth_name, pc.conversion_code
              FROM projected_crs pc
-             JOIN geodetic_crs gc ON pc.geodetic_crs_code = gc.code AND pc.geodetic_crs_auth_name = gc.auth_name
-             WHERE pc.auth_name='EPSG' AND pc.deprecated=0"
-        ).unwrap();
-        let raw: Vec<(u32, String, u32, String, i64)> = s.query_map([], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?))
-        }).unwrap().filter_map(|r| r.ok()).collect();
+             JOIN geodetic_crs gc ON pc.geodetic_crs_code = gc.code
+               AND pc.geodetic_crs_auth_name = gc.auth_name
+             WHERE pc.auth_name='EPSG' AND pc.deprecated=0
+             ORDER BY pc.code",
+            )
+            .unwrap();
+        let raw: Vec<(u32, u32, String, i64)> = s
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect();
 
-        for (code, name, datum_code, conv_auth, conv_code) in raw {
-            // Get conversion from conversion_table
+        for (code, datum_code, conv_auth, conv_code) in raw {
             let conv = match conn.query_row(
                 "SELECT method_code,
-                        param1_code, param1_value, param1_uom_code,
-                        param2_code, param2_value, param2_uom_code,
-                        param3_code, param3_value, param3_uom_code,
-                        param4_code, param4_value, param4_uom_code,
-                        param5_code, param5_value, param5_uom_code,
-                        param6_code, param6_value, param6_uom_code,
-                        param7_code, param7_value, param7_uom_code
+                    param1_code, param1_value, param1_uom_code,
+                    param2_code, param2_value, param2_uom_code,
+                    param3_code, param3_value, param3_uom_code,
+                    param4_code, param4_value, param4_uom_code,
+                    param5_code, param5_value, param5_uom_code,
+                    param6_code, param6_value, param6_uom_code,
+                    param7_code, param7_value, param7_uom_code
                  FROM conversion_table WHERE auth_name=?1 AND code=?2",
                 rusqlite::params![conv_auth, conv_code],
                 |r| {
-                    let method_code: i64 = r.get(0)?;
+                    let mc: i64 = r.get(0)?;
                     let mut params = BTreeMap::new();
                     for i in 0..7 {
                         let base = 1 + i * 3;
@@ -255,156 +341,179 @@ fn main() {
                             params.insert(c, (v, u));
                         }
                     }
-                    Ok(ConversionParams { method_code, params })
-                }
+                    Ok(ConvParams {
+                        method_code: mc,
+                        params,
+                    })
+                },
             ) {
                 Ok(c) => c,
                 Err(_) => continue,
             };
 
-            let variant = match method_code_to_variant(conv.method_code) {
-                Some(v) => v.to_string(),
+            let method_id = match method_code_to_id(conv.method_code) {
+                Some(id) => id,
                 None => continue,
             };
 
-            proj_crs.push(ProjCrs { code, name, datum_code, variant, conv });
+            let params = encode_params(method_id, &conv);
+            proj_crs.push(ProjCrs {
+                code,
+                datum_code,
+                method_id,
+                params,
+            });
         }
     }
 
-    eprintln!("Ellipsoids: {}", ellipsoids.len());
-    eprintln!("Datums: {}", datums.len());
+    // --- Determine used ellipsoids/datums ---
+    let used_datum_codes: BTreeSet<u32> = geo_crs
+        .iter()
+        .map(|c| c.datum_code)
+        .chain(proj_crs.iter().map(|c| c.datum_code))
+        .collect();
+    let used_ellipsoid_codes: BTreeSet<u32> = used_datum_codes
+        .iter()
+        .filter_map(|dc| datums.get(dc).map(|d| d.ellipsoid_code))
+        .collect();
+
+    // Filter to used only, sorted
+    let used_ellipsoids: Vec<(u32, f64, f64)> = used_ellipsoid_codes
+        .iter()
+        .filter_map(|&ec| ellipsoids.get(&ec).map(|&(a, rf)| (ec, a, rf)))
+        .collect();
+    let used_datums: Vec<(u32, &DatumInfo)> = used_datum_codes
+        .iter()
+        .filter_map(|&dc| datums.get(&dc).map(|d| (dc, d)))
+        .collect();
+
+    eprintln!("Ellipsoids: {}", used_ellipsoids.len());
+    eprintln!("Datums: {}", used_datums.len());
     eprintln!("Geographic CRS: {}", geo_crs.len());
-    eprintln!("Projected CRS (supported): {}", proj_crs.len());
+    eprintln!("Projected CRS: {}", proj_crs.len());
 
-    // Determine used ellipsoids/datums
-    let used_datum_codes: BTreeSet<u32> = geo_crs.iter().map(|c| c.datum_code)
-        .chain(proj_crs.iter().map(|c| c.datum_code)).collect();
-    let used_ellipsoid_codes: BTreeSet<u32> = used_datum_codes.iter()
-        .filter_map(|dc| datums.get(dc).map(|d| d.ellipsoid_code)).collect();
+    // --- Write binary ---
+    let out_path =
+        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../proj-core/data/epsg.bin");
+    let mut buf: Vec<u8> = Vec::new();
 
-    eprintln!("Used datums: {}", used_datum_codes.len());
-    eprintln!("Used ellipsoids: {}", used_ellipsoid_codes.len());
+    // Header (16 bytes)
+    buf.extend_from_slice(&MAGIC.to_le_bytes());
+    buf.extend_from_slice(&1u16.to_le_bytes()); // version
+    buf.extend_from_slice(&(used_ellipsoids.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&(used_datums.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&(geo_crs.len() as u16).to_le_bytes());
+    buf.extend_from_slice(&(proj_crs.len() as u32).to_le_bytes());
 
-    // Generate output
-    println!("//! Auto-generated EPSG registry from proj.db.");
-    println!("//! DO NOT EDIT — regenerate with gen-reference/src/gen_registry.rs");
-    println!("//!");
-    println!("//! Geographic CRS: {}", geo_crs.len());
-    println!("//! Projected CRS: {}", proj_crs.len());
-    println!("//! Ellipsoids: {}", used_ellipsoid_codes.len());
-    println!("//! Datums: {}", used_datum_codes.len());
-    println!();
-    println!("use crate::crs::*;");
-    println!("use crate::datum::{{Datum, HelmertParams}};");
-    println!("use crate::ellipsoid::Ellipsoid;");
-    println!();
-
-    // Ellipsoids
-    for &ec in &used_ellipsoid_codes {
-        if let Some(&(a, rf, is_sphere)) = ellipsoids.get(&ec) {
-            if is_sphere {
-                println!("const E{ec}: Ellipsoid = Ellipsoid::sphere({});", F(a));
-            } else {
-                println!("const E{ec}: Ellipsoid = Ellipsoid::from_a_rf({}, {});", F(a), F(rf));
-            }
-        }
+    // Ellipsoid table
+    for &(code, a, inv_f) in &used_ellipsoids {
+        let mut rec = [0u8; ELLIPSOID_RECORD_SIZE];
+        rec[0..4].copy_from_slice(&code.to_le_bytes());
+        rec[4..12].copy_from_slice(&a.to_le_bytes());
+        rec[12..20].copy_from_slice(&inv_f.to_le_bytes());
+        buf.extend_from_slice(&rec);
     }
-    println!();
 
-    // Datums
-    // WGS84 datum code is 6326
-    for &dc in &used_datum_codes {
-        if let Some(d) = datums.get(&dc) {
-            let eref = format!("E{}", d.ellipsoid_code);
-            match &d.helmert {
-                Some(h) if h.iter().any(|&v| v != 0.0) => {
-                    let is_trans = h[3] == 0.0 && h[4] == 0.0 && h[5] == 0.0 && h[6] == 0.0;
-                    if is_trans {
-                        println!("const D{dc}: Datum = Datum {{ ellipsoid: {eref}, to_wgs84: Some(HelmertParams::translation({}, {}, {})) }};", F(h[0]), F(h[1]), F(h[2]));
-                    } else {
-                        println!("const D{dc}: Datum = Datum {{ ellipsoid: {eref}, to_wgs84: Some(HelmertParams {{ dx: {}, dy: {}, dz: {}, rx: {}, ry: {}, rz: {}, ds: {} }}) }};",
-                            F(h[0]), F(h[1]), F(h[2]), F(h[3]), F(h[4]), F(h[5]), F(h[6]));
-                    }
-                }
-                _ => {
-                    println!("const D{dc}: Datum = Datum {{ ellipsoid: {eref}, to_wgs84: None }};");
-                }
-            }
+    // Datum table
+    for &(code, datum) in &used_datums {
+        let mut rec = [0u8; DATUM_RECORD_SIZE];
+        rec[0..4].copy_from_slice(&code.to_le_bytes());
+        rec[4..8].copy_from_slice(&datum.ellipsoid_code.to_le_bytes());
+        for (i, &val) in datum.helmert.iter().enumerate() {
+            let offset = 8 + i * 8;
+            rec[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
         }
+        buf.extend_from_slice(&rec);
     }
-    println!();
 
-    // Geographic CRS
-    println!("pub(crate) const GEOGRAPHIC_CRS: &[(u32, GeographicCrsDef)] = &[");
+    // Geographic CRS table
     for c in &geo_crs {
-        let name = c.name.replace('"', "\\\"");
-        println!("    ({}, GeographicCrsDef {{ epsg: {}, datum: D{}, name: \"{}\" }}),", c.code, c.code, c.datum_code, name);
+        let mut rec = [0u8; GEO_CRS_RECORD_SIZE];
+        rec[0..4].copy_from_slice(&c.code.to_le_bytes());
+        rec[4..8].copy_from_slice(&c.datum_code.to_le_bytes());
+        buf.extend_from_slice(&rec);
     }
-    println!("];");
-    println!();
 
-    // Projected CRS
-    println!("pub(crate) const PROJECTED_CRS: &[(u32, ProjectedCrsDef)] = &[");
+    // Projected CRS table
     for c in &proj_crs {
-        let name = c.name.replace('"', "\\\"");
-        let method = format_method(&c.variant, &c.conv);
-        println!("    ({}, ProjectedCrsDef {{ epsg: {}, datum: D{}, method: {}, name: \"{}\" }}),", c.code, c.code, c.datum_code, method, name);
+        let mut rec = [0u8; PROJ_CRS_RECORD_SIZE];
+        rec[0..4].copy_from_slice(&c.code.to_le_bytes());
+        rec[4..8].copy_from_slice(&c.datum_code.to_le_bytes());
+        rec[8] = c.method_id;
+        // rec[9..16] = padding (zeros)
+        for (i, &val) in c.params.iter().enumerate() {
+            let offset = 16 + i * 8;
+            rec[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
+        }
+        buf.extend_from_slice(&rec);
     }
-    println!("];");
+
+    std::fs::write(&out_path, &buf).unwrap();
+    eprintln!(
+        "Wrote {} bytes ({:.1} KB) to {}",
+        buf.len(),
+        buf.len() as f64 / 1024.0,
+        out_path.display()
+    );
 }
 
-fn format_method(variant: &str, cp: &ConversionParams) -> String {
-    match variant {
-        "WebMercator" => "ProjectionMethod::WebMercator".to_string(),
-        "TransverseMercator" => format!(
-            "ProjectionMethod::TransverseMercator {{ lon0: {}, lat0: {}, k0: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN]),
-            get_param_degrees(cp, &[LAT_ORIGIN, LAT_FALSE_ORIGIN]),
-            get_param_scale(cp, &[SCALE_FACTOR]),
-            get_param_meters(cp, &[FALSE_EASTING, EASTING_FALSE_ORIGIN]),
-            get_param_meters(cp, &[FALSE_NORTHING, NORTHING_FALSE_ORIGIN]),
-        ),
-        "Mercator" => format!(
-            "ProjectionMethod::Mercator {{ lon0: {}, lat_ts: {}, k0: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_ORIGIN]),
-            get_param_degrees(cp, &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL]),
-            get_param_scale(cp, &[SCALE_FACTOR]),
-            get_param_meters(cp, &[FALSE_EASTING]),
-            get_param_meters(cp, &[FALSE_NORTHING]),
-        ),
-        "LambertConformalConic" => format!(
-            "ProjectionMethod::LambertConformalConic {{ lon0: {}, lat0: {}, lat1: {}, lat2: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
-            get_param_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
-            get_param_degrees(cp, &[LAT_1ST_PARALLEL]),
-            get_param_degrees(cp, &[LAT_2ND_PARALLEL]),
-            get_param_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING]),
-            get_param_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING]),
-        ),
-        "AlbersEqualArea" => format!(
-            "ProjectionMethod::AlbersEqualArea {{ lon0: {}, lat0: {}, lat1: {}, lat2: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_FALSE_ORIGIN]),
-            get_param_degrees(cp, &[LAT_FALSE_ORIGIN]),
-            get_param_degrees(cp, &[LAT_1ST_PARALLEL]),
-            get_param_degrees(cp, &[LAT_2ND_PARALLEL]),
-            get_param_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING]),
-            get_param_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING]),
-        ),
-        "PolarStereographic" => format!(
-            "ProjectionMethod::PolarStereographic {{ lon0: {}, lat_ts: {}, k0: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_ORIGIN, LON_OF_ORIGIN]),
-            get_param_degrees(cp, &[LAT_STD_PARALLEL, LAT_ORIGIN]),
-            get_param_scale(cp, &[SCALE_FACTOR]),
-            get_param_meters(cp, &[FALSE_EASTING]),
-            get_param_meters(cp, &[FALSE_NORTHING]),
-        ),
-        "EquidistantCylindrical" => format!(
-            "ProjectionMethod::EquidistantCylindrical {{ lon0: {}, lat_ts: {}, false_easting: {}, false_northing: {} }}",
-            get_param_degrees(cp, &[LON_ORIGIN]),
-            get_param_degrees(cp, &[LAT_1ST_PARALLEL]),
-            get_param_meters(cp, &[FALSE_EASTING]),
-            get_param_meters(cp, &[FALSE_NORTHING]),
-        ),
-        _ => format!("/* unsupported: {variant} */"),
+fn encode_params(method_id: u8, cp: &ConvParams) -> [f64; 7] {
+    match method_id {
+        METHOD_WEB_MERCATOR => [0.0; 7],
+        METHOD_TRANSVERSE_MERCATOR => [
+            get_degrees(cp, &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN]),
+            get_degrees(cp, &[LAT_ORIGIN, LAT_FALSE_ORIGIN]),
+            get_scale(cp, &[SCALE_FACTOR]),
+            get_meters(cp, &[FALSE_EASTING, EASTING_FALSE_ORIGIN]),
+            get_meters(cp, &[FALSE_NORTHING, NORTHING_FALSE_ORIGIN]),
+            0.0,
+            0.0,
+        ],
+        METHOD_MERCATOR => [
+            get_degrees(cp, &[LON_ORIGIN]),
+            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL]),
+            get_scale(cp, &[SCALE_FACTOR]),
+            get_meters(cp, &[FALSE_EASTING]),
+            get_meters(cp, &[FALSE_NORTHING]),
+            0.0,
+            0.0,
+        ],
+        METHOD_LCC => [
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
+            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING]),
+            0.0, // unused slot
+            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING]),
+        ],
+        METHOD_ALBERS => [
+            get_degrees(cp, &[LON_FALSE_ORIGIN]),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN]),
+            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING]),
+            0.0,
+            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING]),
+        ],
+        METHOD_POLAR_STEREO => [
+            get_degrees(cp, &[LON_ORIGIN, LON_OF_ORIGIN]),
+            get_degrees(cp, &[LAT_STD_PARALLEL, LAT_ORIGIN]),
+            get_scale(cp, &[SCALE_FACTOR]),
+            get_meters(cp, &[FALSE_EASTING]),
+            get_meters(cp, &[FALSE_NORTHING]),
+            0.0,
+            0.0,
+        ],
+        METHOD_EQUIDISTANT_CYL => [
+            get_degrees(cp, &[LON_ORIGIN]),
+            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            0.0,
+            get_meters(cp, &[FALSE_EASTING]),
+            get_meters(cp, &[FALSE_NORTHING]),
+            0.0,
+            0.0,
+        ],
+        _ => [0.0; 7],
     }
 }
