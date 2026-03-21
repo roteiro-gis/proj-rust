@@ -120,7 +120,7 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
     )))
 }
 
-/// Create a [`Transform`](proj_core::Transform) from two CRS strings in any format.
+/// Create a [`Transform`] from two CRS strings in any format.
 ///
 /// Convenience function for downstream projects that need to handle free-form CRS strings.
 pub fn transform_from_crs_strings(
