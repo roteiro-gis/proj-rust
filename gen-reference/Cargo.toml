@@ -6,5 +6,19 @@ publish = false
 
 [dependencies]
 proj = { version = "0.31", features = ["bundled_proj"] }
+proj-sys = { version = "0.27", features = ["bundled_proj"] }
+rusqlite = { version = "0.35", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[[bin]]
+name = "gen-reference"
+path = "src/main.rs"
+
+[[bin]]
+name = "gen-registry"
+path = "src/gen_registry.rs"
+
+[[bin]]
+name = "inspect-schema"
+path = "src/inspect_schema.rs"
