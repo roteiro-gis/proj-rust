@@ -34,12 +34,12 @@ Coordinates use the CRS's native units: degrees for geographic CRS, meters for p
 | Web Mercator | Implemented | 3857 |
 | Transverse Mercator / UTM | Implemented | 32601-32660, 32701-32760 |
 | Polar Stereographic | Implemented | 3413, 3031, 3995, 32661, 32761 |
-| Lambert Conformal Conic | Planned | various |
-| Albers Equal Area | Planned | various |
-| Mercator | Planned | 3395 |
-| Equidistant Cylindrical | Planned | 4326 (plate carree) |
+| Lambert Conformal Conic | Implemented | 2154, 3347 |
+| Albers Equal Area | Implemented | 5070, 3005 |
+| Mercator | Implemented | 3395 |
+| Equidistant Cylindrical | Implemented | 32662 |
 
-Custom CRS definitions can be constructed and passed to `Transform::from_crs_defs()`.
+Custom CRS definitions can be constructed and passed to `Transform::from_crs_defs()`. The companion `proj-wkt` crate parses EPSG codes, a subset of WKT/PROJ strings, and basic PROJJSON inputs into `CrsDef` values.
 
 ## Feature Flags
 
@@ -52,7 +52,7 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 
 ```sh
 cargo test                        # all tests
-cargo test --no-default-features  # without rayon/geo-types
+cargo test -p proj-core --no-default-features  # core crate without rayon/geo-types
 cargo clippy --all-targets -- -D warnings
 ```
 

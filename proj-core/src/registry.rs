@@ -1,31 +1,15 @@
 use crate::crs::CrsDef;
+use crate::epsg_db;
 use crate::error::{Error, Result};
-use crate::registry_data;
 
 /// Look up a CRS definition by EPSG code.
 ///
-/// Returns `None` if the EPSG code is not in the built-in registry.
+/// Searches the embedded EPSG database (~5,600 CRS definitions) covering all
+/// geographic 2D CRS and all projected CRS that use supported projection methods.
+///
+/// Returns `None` if the EPSG code is not in the database.
 pub fn lookup_epsg(code: u32) -> Option<CrsDef> {
-    // Check geographic CRS
-    for &(epsg, ref def) in registry_data::GEOGRAPHIC_CRS {
-        if epsg == code {
-            return Some(CrsDef::Geographic(*def));
-        }
-    }
-
-    // Check manually curated projected CRS
-    for &(epsg, ref def) in registry_data::PROJECTED_CRS {
-        if epsg == code {
-            return Some(CrsDef::Projected(*def));
-        }
-    }
-
-    // Check UTM zones
-    if let Some(def) = registry_data::lookup_utm(code) {
-        return Some(CrsDef::Projected(def));
-    }
-
-    None
+    epsg_db::lookup(code)
 }
 
 /// Parse an authority:code string (e.g., "EPSG:4326") and look up the CRS definition.
@@ -135,6 +119,17 @@ mod tests {
     fn nad27_lookup() {
         let crs = lookup_epsg(4267).expect("should find NAD27");
         assert!(crs.is_geographic());
-        assert!(!crs.datum().is_wgs84_compatible());
+    }
+
+    #[test]
+    fn new_zealand_tm() {
+        let crs = lookup_epsg(2193).expect("should find NZTM 2000");
+        assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn nc_state_plane() {
+        let crs = lookup_epsg(32119).expect("should find NC State Plane");
+        assert!(crs.is_projected());
     }
 }

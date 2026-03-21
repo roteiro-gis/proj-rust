@@ -20,51 +20,13 @@ pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
 
 /// Extract EPSG code from AUTHORITY["EPSG","XXXX"] anywhere in the string.
 fn extract_authority_epsg(s: &str) -> Option<u32> {
-    // Look for AUTHORITY["EPSG","XXXX"] pattern
     let upper = s.to_uppercase();
-    let auth_pos = upper.find("AUTHORITY[\"EPSG\"")?;
-    let rest = &s[auth_pos..];
-
-    // Find the code between the second quote pair
-    let mut in_quotes = false;
-    let mut quote_count = 0;
-    let mut code_start = 0;
-    let mut code_end = 0;
-
-    for (i, ch) in rest.char_indices() {
-        if ch == '"' {
-            if in_quotes {
-                in_quotes = false;
-                quote_count += 1;
-                if quote_count == 4 {
-                    code_end = i;
-                    break;
-                }
-            } else {
-                in_quotes = true;
-                if quote_count == 2 {
-                    // This is the opening quote of the code value
-                    // But we need to handle AUTHORITY["EPSG","4326"]
-                    // quote_count 0,1 = EPSG quotes, 2,3 = code quotes
-                }
-                if quote_count == 3 {
-                    code_start = i + 1;
-                }
-            }
-        }
-    }
-
-    // Simpler approach: use regex-like extraction
-    // Find pattern: AUTHORITY["EPSG","NNNN"]
     let marker = "AUTHORITY[\"EPSG\",\"";
-    let upper_marker = marker.to_uppercase();
-    let pos = upper.find(&upper_marker)?;
+    let pos = upper.find(marker)?;
     let start = pos + marker.len();
     let rest = &s[start..];
     let end = rest.find('"')?;
-    let code_str = &rest[..end];
-    let _ = (code_start, code_end); // suppress unused warnings from earlier approach
-    code_str.parse().ok()
+    rest[..end].parse().ok()
 }
 
 /// Attempt to parse WKT structure to extract projection parameters.
@@ -88,28 +50,7 @@ fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
 fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
     // Extract datum name to determine which datum to use
     let upper = s.to_uppercase();
-
-    let datum = if upper.contains("WGS 84") || upper.contains("WGS84") || upper.contains("WGS_1984")
-    {
-        proj_core::datum::WGS84
-    } else if upper.contains("NAD83")
-        || upper.contains("NAD 83")
-        || upper.contains("NORTH_AMERICAN_1983")
-    {
-        proj_core::datum::NAD83
-    } else if upper.contains("NAD27")
-        || upper.contains("NAD 27")
-        || upper.contains("NORTH_AMERICAN_1927")
-    {
-        proj_core::datum::NAD27
-    } else if upper.contains("ETRS89") || upper.contains("ETRS 89") {
-        proj_core::datum::ETRS89
-    } else if upper.contains("OSGB") || upper.contains("AIRY") {
-        proj_core::datum::OSGB36
-    } else {
-        // Default to WGS84 if we can't identify the datum
-        proj_core::datum::WGS84
-    };
+    let datum = infer_datum(&upper)?;
 
     Ok(CrsDef::Geographic(proj_core::GeographicCrsDef {
         epsg: 0,
@@ -136,18 +77,7 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let fn_ = extract_wkt_parameter(&upper, "FALSE_NORTHING").unwrap_or(0.0);
 
     // Determine datum from GEOGCS section
-    let datum = if upper.contains("WGS 84") || upper.contains("WGS84") || upper.contains("WGS_1984")
-    {
-        proj_core::datum::WGS84
-    } else if upper.contains("NAD83") || upper.contains("NAD 83") {
-        proj_core::datum::NAD83
-    } else if upper.contains("NAD27") || upper.contains("NAD 27") {
-        proj_core::datum::NAD27
-    } else if upper.contains("OSGB") {
-        proj_core::datum::OSGB36
-    } else {
-        proj_core::datum::WGS84
-    };
+    let datum = infer_datum(&upper)?;
 
     let method = match proj_name.as_deref() {
         Some(name)
@@ -221,6 +151,42 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     }))
 }
 
+fn infer_datum(upper: &str) -> Result<proj_core::Datum> {
+    if upper.contains("WGS 84") || upper.contains("WGS84") || upper.contains("WGS_1984") {
+        return Ok(proj_core::datum::WGS84);
+    }
+    if upper.contains("NAD83") || upper.contains("NAD 83") || upper.contains("NORTH_AMERICAN_1983")
+    {
+        return Ok(proj_core::datum::NAD83);
+    }
+    if upper.contains("NAD27") || upper.contains("NAD 27") || upper.contains("NORTH_AMERICAN_1927")
+    {
+        return Ok(proj_core::datum::NAD27);
+    }
+    if upper.contains("ETRS89") || upper.contains("ETRS 89") {
+        return Ok(proj_core::datum::ETRS89);
+    }
+    if upper.contains("OSGB")
+        || upper.contains("AIRY")
+        || upper.contains("ORDNANCE_SURVEY_GREAT_BRITAIN_1936")
+    {
+        return Ok(proj_core::datum::OSGB36);
+    }
+    if upper.contains("ED50") || upper.contains("EUROPEAN_DATUM_1950") {
+        return Ok(proj_core::datum::ED50);
+    }
+    if upper.contains("PULKOVO") {
+        return Ok(proj_core::datum::PULKOVO1942);
+    }
+    if upper.contains("TOKYO") {
+        return Ok(proj_core::datum::TOKYO);
+    }
+
+    Err(ParseError::Parse(
+        "unsupported or unrecognized WKT datum".into(),
+    ))
+}
+
 /// Extract a quoted value like PROJECTION["Transverse_Mercator"]
 fn extract_wkt_value(upper: &str, key: &str) -> Option<String> {
     let marker = format!("{key}[\"");
@@ -280,5 +246,14 @@ mod tests {
         let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
         let crs = parse_wkt(wkt).unwrap();
         assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn reject_unknown_geographic_datum() {
+        let err =
+            parse_wkt(r#"GEOGCS["Unknown",DATUM["Custom",SPHEROID["Custom",1,1]]]"#).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported or unrecognized WKT datum"));
     }
 }
