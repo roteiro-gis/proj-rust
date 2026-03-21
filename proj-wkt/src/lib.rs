@@ -25,6 +25,7 @@
 //! ```
 
 mod proj_string;
+mod projjson;
 mod wkt;
 
 use proj_core::CrsDef;
@@ -59,6 +60,11 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
     // PROJ string
     if s.starts_with('+') {
         return proj_string::parse_proj_string(s);
+    }
+
+    // PROJJSON
+    if s.starts_with('{') {
+        return projjson::parse_projjson(s);
     }
 
     // WKT

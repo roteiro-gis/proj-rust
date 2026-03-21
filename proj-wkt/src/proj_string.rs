@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use proj_core::crs::*;
 use proj_core::datum;
 use proj_core::ellipsoid;
+use proj_core::Datum;
 
 use crate::{ParseError, Result};
 
@@ -17,7 +18,7 @@ pub(crate) fn parse_proj_string(s: &str) -> Result<CrsDef> {
         "utm" => parse_utm(&params),
         "tmerc" => parse_tmerc(&params),
         "merc" => parse_merc(&params),
-        "stere" | "sterea" => parse_stereo(&params),
+        "stere" => parse_stereo(&params),
         "lcc" => parse_lcc(&params),
         "aea" => parse_aea(&params),
         "eqc" => parse_eqc(&params),
@@ -41,14 +42,21 @@ fn parse_params(s: &str) -> Result<HashMap<String, String>> {
     Ok(params)
 }
 
-fn resolve_datum(params: &HashMap<String, String>) -> proj_core::Datum {
+fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
     if let Some(d) = params.get("datum") {
         match d.to_uppercase().as_str() {
-            "WGS84" => return datum::WGS84,
-            "NAD83" => return datum::NAD83,
-            "NAD27" => return datum::NAD27,
-            "OSGB36" => return datum::OSGB36,
-            _ => {}
+            "WGS84" => return Ok(datum::WGS84),
+            "NAD83" => return Ok(datum::NAD83),
+            "NAD27" => return Ok(datum::NAD27),
+            "OSGB36" => return Ok(datum::OSGB36),
+            "ETRS89" => return Ok(datum::ETRS89),
+            "ED50" => return Ok(datum::ED50),
+            "TOKYO" => return Ok(datum::TOKYO),
+            other => {
+                return Err(ParseError::Parse(format!(
+                    "unsupported PROJ datum: {other}"
+                )));
+            }
         }
     }
 
@@ -61,15 +69,19 @@ fn resolve_datum(params: &HashMap<String, String>) -> proj_core::Datum {
             "BESSEL" | "BESSEL1841" => ellipsoid::BESSEL1841,
             "KRASS" | "KRASSOWSKY" => ellipsoid::KRASSOWSKY,
             "AIRY" => ellipsoid::AIRY1830,
-            _ => ellipsoid::WGS84,
+            other => {
+                return Err(ParseError::Parse(format!(
+                    "unsupported PROJ ellipsoid: {other}"
+                )));
+            }
         };
-        return proj_core::Datum {
+        return Ok(proj_core::Datum {
             ellipsoid: ellps,
             to_wgs84: parse_towgs84(params),
-        };
+        });
     }
 
-    datum::WGS84
+    Ok(datum::WGS84)
 }
 
 fn parse_towgs84(params: &HashMap<String, String>) -> Option<proj_core::HelmertParams> {
@@ -95,7 +107,7 @@ fn get_f64(params: &HashMap<String, String>, key: &str) -> f64 {
 }
 
 fn parse_geographic(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Geographic(GeographicCrsDef {
         epsg: 0,
         datum: d,
@@ -108,9 +120,14 @@ fn parse_utm(params: &HashMap<String, String>) -> Result<CrsDef> {
         .get("zone")
         .and_then(|v| v.parse().ok())
         .ok_or_else(|| ParseError::Parse("UTM requires +zone parameter".into()))?;
+    if !(1..=60).contains(&zone) {
+        return Err(ParseError::Parse(format!(
+            "UTM zone out of range: {zone} (expected 1..=60)"
+        )));
+    }
 
     let south = params.contains_key("south");
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
 
     let lon0 = (zone as f64 - 1.0) * 6.0 - 180.0 + 3.0;
     let false_northing = if south { 10_000_000.0 } else { 0.0 };
@@ -130,7 +147,7 @@ fn parse_utm(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_tmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
@@ -150,7 +167,7 @@ fn parse_tmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
@@ -170,13 +187,28 @@ fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let lat0 = get_f64(params, "lat_0");
+    let lat_ts = if params.contains_key("lat_ts") {
+        get_f64(params, "lat_ts")
+    } else {
+        lat0
+    };
+    let pole = if lat0.abs() > 89.999_999 {
+        lat0
+    } else if lat_ts.abs() > 89.999_999 {
+        lat_ts
+    } else {
+        return Err(ParseError::Parse(
+            "only polar stereographic PROJ strings are supported".into(),
+        ));
+    };
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
         method: ProjectionMethod::PolarStereographic {
             lon0: get_f64(params, "lon_0"),
-            lat_ts: get_f64(params, "lat_ts"),
+            lat_ts: lat_ts.copysign(pole),
             k0: params
                 .get("k_0")
                 .or(params.get("k"))
@@ -190,7 +222,7 @@ fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
@@ -207,7 +239,7 @@ fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_aea(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
@@ -224,7 +256,7 @@ fn parse_aea(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
-    let d = resolve_datum(params);
+    let d = resolve_datum(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef {
         epsg: 0,
         datum: d,
@@ -286,5 +318,31 @@ mod tests {
         let t = proj_core::Transform::from_crs_defs(&from, &to).unwrap();
         let (x, _y) = t.convert((-74.006, 40.7128)).unwrap();
         assert!((x - 583960.0).abs() < 1.0, "easting = {x}");
+    }
+
+    #[test]
+    fn reject_unknown_datum() {
+        let err = parse_proj_string("+proj=longlat +datum=FOO").unwrap_err();
+        assert!(err.to_string().contains("unsupported PROJ datum"));
+    }
+
+    #[test]
+    fn reject_invalid_utm_zone() {
+        let err = parse_proj_string("+proj=utm +zone=0 +datum=WGS84").unwrap_err();
+        assert!(err.to_string().contains("UTM zone out of range"));
+    }
+
+    #[test]
+    fn reject_oblique_stereographic() {
+        let err = parse_proj_string("+proj=sterea +lat_0=52 +lon_0=5 +k=0.9999").unwrap_err();
+        assert!(err.to_string().contains("unsupported PROJ projection"));
+    }
+
+    #[test]
+    fn reject_non_polar_stereographic() {
+        let err = parse_proj_string("+proj=stere +lat_0=52 +lon_0=5 +k=0.9999").unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("only polar stereographic PROJ strings are supported"));
     }
 }
