@@ -8,7 +8,9 @@ pub(crate) mod web_mercator;
 
 use crate::crs::ProjectionMethod;
 use crate::datum::Datum;
-use crate::error::Result;
+use crate::error::{Error, Result};
+
+const LAT_EPSILON: f64 = 1e-12;
 
 /// Internal trait for projection math.
 ///
@@ -28,7 +30,7 @@ pub(crate) fn make_projection(
     datum: &Datum,
 ) -> Result<Box<dyn ProjectionImpl>> {
     match method {
-        ProjectionMethod::WebMercator => Ok(Box::new(web_mercator::WebMercator::new())),
+        ProjectionMethod::WebMercator => Ok(Box::new(web_mercator::WebMercator::new()?)),
         ProjectionMethod::TransverseMercator {
             lon0,
             lat0,
@@ -42,7 +44,7 @@ pub(crate) fn make_projection(
             *k0,
             *false_easting,
             *false_northing,
-        ))),
+        )?)),
         ProjectionMethod::PolarStereographic {
             lon0,
             lat_ts,
@@ -56,7 +58,7 @@ pub(crate) fn make_projection(
             *k0,
             *false_easting,
             *false_northing,
-        ))),
+        )?)),
         ProjectionMethod::LambertConformalConic {
             lon0,
             lat0,
@@ -73,7 +75,7 @@ pub(crate) fn make_projection(
                 lat2.to_radians(),
                 *false_easting,
                 *false_northing,
-            ),
+            )?,
         )),
         ProjectionMethod::AlbersEqualArea {
             lon0,
@@ -90,7 +92,7 @@ pub(crate) fn make_projection(
             lat2.to_radians(),
             *false_easting,
             *false_northing,
-        ))),
+        )?)),
         ProjectionMethod::Mercator {
             lon0,
             lat_ts,
@@ -104,7 +106,7 @@ pub(crate) fn make_projection(
             *k0,
             *false_easting,
             *false_northing,
-        ))),
+        )?)),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,
@@ -117,7 +119,99 @@ pub(crate) fn make_projection(
                 lat_ts.to_radians(),
                 *false_easting,
                 *false_northing,
-            ),
+            )?,
         )),
     }
+}
+
+pub(crate) fn validate_lon_lat(lon: f64, lat: f64) -> Result<()> {
+    if !lon.is_finite() || !lat.is_finite() {
+        return Err(Error::OutOfRange(
+            "geographic input coordinate must be finite".into(),
+        ));
+    }
+    if lat.abs() > std::f64::consts::FRAC_PI_2 + LAT_EPSILON {
+        return Err(Error::OutOfRange(format!(
+            "latitude {:.8}° is outside the valid range [-90°, 90°]",
+            lat.to_degrees()
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_projected(x: f64, y: f64) -> Result<()> {
+    if !x.is_finite() || !y.is_finite() {
+        return Err(Error::OutOfRange(
+            "projected input coordinate must be finite".into(),
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_finite_xy(kind: &str, x: f64, y: f64) -> Result<(f64, f64)> {
+    if !x.is_finite() || !y.is_finite() {
+        return Err(Error::OutOfRange(format!(
+            "{kind} projection produced a non-finite result"
+        )));
+    }
+    Ok((x, y))
+}
+
+pub(crate) fn ensure_finite_lon_lat(kind: &str, lon: f64, lat: f64) -> Result<(f64, f64)> {
+    if !lon.is_finite() || !lat.is_finite() {
+        return Err(Error::OutOfRange(format!(
+            "{kind} inverse projection produced a non-finite result"
+        )));
+    }
+    if lat.abs() > std::f64::consts::FRAC_PI_2 + LAT_EPSILON {
+        return Err(Error::OutOfRange(format!(
+            "{kind} inverse projection produced latitude {:.8}° outside [-90°, 90°]",
+            lat.to_degrees()
+        )));
+    }
+    Ok((normalize_longitude(lon), lat))
+}
+
+pub(crate) fn validate_angle(name: &str, value: f64) -> Result<()> {
+    if !value.is_finite() {
+        return Err(Error::InvalidDefinition(format!("{name} must be finite")));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_latitude_param(name: &str, value: f64) -> Result<()> {
+    validate_angle(name, value)?;
+    if value.abs() > std::f64::consts::FRAC_PI_2 + LAT_EPSILON {
+        return Err(Error::InvalidDefinition(format!(
+            "{name} {:.8}° is outside [-90°, 90°]",
+            value.to_degrees()
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_scale(name: &str, value: f64) -> Result<()> {
+    if !value.is_finite() || value <= 0.0 {
+        return Err(Error::InvalidDefinition(format!(
+            "{name} must be a finite positive number"
+        )));
+    }
+    Ok(())
+}
+
+pub(crate) fn validate_offset(name: &str, value: f64) -> Result<()> {
+    if !value.is_finite() {
+        return Err(Error::InvalidDefinition(format!("{name} must be finite")));
+    }
+    Ok(())
+}
+
+pub(crate) fn normalize_longitude(mut lon: f64) -> f64 {
+    while lon > std::f64::consts::PI {
+        lon -= 2.0 * std::f64::consts::PI;
+    }
+    while lon < -std::f64::consts::PI {
+        lon += 2.0 * std::f64::consts::PI;
+    }
+    lon
 }

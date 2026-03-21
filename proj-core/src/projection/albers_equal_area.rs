@@ -1,5 +1,9 @@
 use crate::ellipsoid::Ellipsoid;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::projection::{
+    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
+    validate_lon_lat, validate_offset, validate_projected,
+};
 
 /// Albers Equal Area Conic projection.
 ///
@@ -24,7 +28,14 @@ impl AlbersEqualArea {
         lat2: f64,
         false_easting: f64,
         false_northing: f64,
-    ) -> Self {
+    ) -> Result<Self> {
+        validate_angle("central meridian", lon0)?;
+        validate_latitude_param("latitude of origin", lat0)?;
+        validate_latitude_param("first standard parallel", lat1)?;
+        validate_latitude_param("second standard parallel", lat2)?;
+        validate_offset("false easting", false_easting)?;
+        validate_offset("false northing", false_northing)?;
+
         let e2 = ellipsoid.e2();
         let m1 = m_func(lat1, e2);
         let m2 = m_func(lat2, e2);
@@ -37,11 +48,16 @@ impl AlbersEqualArea {
         } else {
             (m1 * m1 - m2 * m2) / (q2 - q1)
         };
+        if n.abs() < 1e-12 {
+            return Err(Error::InvalidDefinition(
+                "Albers Equal Area standard parallels yield a zero cone constant".into(),
+            ));
+        }
 
         let c = m1 * m1 + n * q1;
         let rho0 = ellipsoid.a * (c - n * q0).abs().sqrt() / n;
 
-        Self {
+        Ok(Self {
             ellipsoid,
             lon0,
             n,
@@ -49,7 +65,7 @@ impl AlbersEqualArea {
             rho0,
             false_easting,
             false_northing,
-        }
+        })
     }
 }
 
@@ -88,6 +104,7 @@ fn lat_from_q(q: f64, e2: f64) -> f64 {
 
 impl super::ProjectionImpl for AlbersEqualArea {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
+        validate_lon_lat(lon, lat)?;
         let a = self.ellipsoid.a;
         let e2 = self.ellipsoid.e2();
         let q = q_func(lat, e2);
@@ -97,10 +114,11 @@ impl super::ProjectionImpl for AlbersEqualArea {
         let x = self.false_easting + rho * theta.sin();
         let y = self.false_northing + self.rho0 - rho * theta.cos();
 
-        Ok((x, y))
+        ensure_finite_xy("Albers Equal Area", x, y)
     }
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+        validate_projected(x, y)?;
         let a = self.ellipsoid.a;
         let e2 = self.ellipsoid.e2();
 
@@ -113,7 +131,7 @@ impl super::ProjectionImpl for AlbersEqualArea {
         let lat = lat_from_q(q, e2);
         let lon = self.lon0 + theta / self.n;
 
-        Ok((lon, lat))
+        ensure_finite_lon_lat("Albers Equal Area", lon, lat)
     }
 }
 
@@ -134,7 +152,8 @@ mod tests {
             45.5_f64.to_radians(),
             0.0,
             0.0,
-        );
+        )
+        .unwrap();
 
         let lon = (-96.0_f64).to_radians();
         let lat = 37.0_f64.to_radians();

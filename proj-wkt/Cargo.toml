@@ -8,8 +8,11 @@ license.workspace = true
 repository.workspace = true
 homepage.workspace = true
 readme = "../README.md"
+documentation = "https://docs.rs/proj-wkt"
+keywords = ["projection", "crs", "wkt", "projjson", "gis"]
+categories = ["science", "mathematics", "parser-implementations"]
 
 [dependencies]
-proj-core = { path = "../proj-core" }
+proj-core = { version = "0.1.0", path = "../proj-core" }
 serde_json = "1"
 thiserror = "2"

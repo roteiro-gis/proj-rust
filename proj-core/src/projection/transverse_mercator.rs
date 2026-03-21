@@ -1,5 +1,9 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::Result;
+use crate::projection::{
+    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
+    validate_lon_lat, validate_offset, validate_projected, validate_scale,
+};
 
 /// Transverse Mercator projection.
 ///
@@ -27,15 +31,21 @@ impl TransverseMercator {
         k0: f64,
         false_easting: f64,
         false_northing: f64,
-    ) -> Self {
-        Self {
+    ) -> Result<Self> {
+        validate_angle("central meridian", lon0)?;
+        validate_latitude_param("latitude of origin", lat0)?;
+        validate_scale("scale factor", k0)?;
+        validate_offset("false easting", false_easting)?;
+        validate_offset("false northing", false_northing)?;
+
+        Ok(Self {
             ellipsoid,
             lon0,
             lat0,
             k0,
             false_easting,
             false_northing,
-        }
+        })
     }
 
     /// Compute meridional arc length from equator to latitude phi.
@@ -54,6 +64,7 @@ impl TransverseMercator {
 
 impl super::ProjectionImpl for TransverseMercator {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
+        validate_lon_lat(lon, lat)?;
         let e2 = self.ellipsoid.e2();
         let a = self.ellipsoid.a;
         let k0 = self.k0;
@@ -101,10 +112,11 @@ impl super::ProjectionImpl for TransverseMercator {
                             * a2
                             / 720.0));
 
-        Ok((x, y))
+        ensure_finite_xy("Transverse Mercator", x, y)
     }
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+        validate_projected(x, y)?;
         let e2 = self.ellipsoid.e2();
         let a = self.ellipsoid.a;
         let k0 = self.k0;
@@ -166,7 +178,7 @@ impl super::ProjectionImpl for TransverseMercator {
                     / 120.0)
                 / cos_phi1;
 
-        Ok((lon, lat))
+        ensure_finite_lon_lat("Transverse Mercator", lon, lat)
     }
 }
 
@@ -188,6 +200,7 @@ mod tests {
             500_000.0,
             if north { 0.0 } else { 10_000_000.0 },
         )
+        .unwrap()
     }
 
     #[test]

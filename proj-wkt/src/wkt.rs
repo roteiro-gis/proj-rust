@@ -1,5 +1,6 @@
 use crate::{ParseError, Result};
 use proj_core::CrsDef;
+use std::collections::HashMap;
 
 /// Parse a WKT CRS string.
 ///
@@ -33,7 +34,7 @@ fn extract_authority_epsg(s: &str) -> Option<u32> {
 fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
     let upper = s.to_uppercase();
 
-    if upper.starts_with("GEOGCS") || upper.starts_with("GEODCRS") {
+    if upper.starts_with("GEOGCS") || upper.starts_with("GEODCRS") || upper.starts_with("GEOGCRS") {
         return parse_wkt_geographic(s);
     }
 
@@ -62,75 +63,139 @@ fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
 fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let upper = s.to_uppercase();
 
-    // Try to identify the projection method from WKT PROJECTION["name"]
-    let proj_name = extract_wkt_value(&upper, "PROJECTION");
+    // WKT1 uses PROJECTION["name"], WKT2 uses METHOD["name"].
+    let proj_name =
+        extract_wkt_value(&upper, "PROJECTION").or_else(|| extract_wkt_value(&upper, "METHOD"));
+    let normalized_method = proj_name.as_deref().map(normalize_key).ok_or_else(|| {
+        ParseError::Parse("WKT projected CRS is missing a projection method".into())
+    })?;
+
+    let params = parse_wkt_parameters(s);
 
     // Extract common parameters
-    let lon0 = extract_wkt_parameter(&upper, "CENTRAL_MERIDIAN")
-        .or_else(|| extract_wkt_parameter(&upper, "LONGITUDE_OF_CENTER"))
-        .unwrap_or(0.0);
-    let lat0 = extract_wkt_parameter(&upper, "LATITUDE_OF_ORIGIN")
-        .or_else(|| extract_wkt_parameter(&upper, "LATITUDE_OF_CENTER"))
-        .unwrap_or(0.0);
-    let k0 = extract_wkt_parameter(&upper, "SCALE_FACTOR").unwrap_or(1.0);
-    let fe = extract_wkt_parameter(&upper, "FALSE_EASTING").unwrap_or(0.0);
-    let fn_ = extract_wkt_parameter(&upper, "FALSE_NORTHING").unwrap_or(0.0);
+    let lon0 = first_param(
+        &params,
+        &[
+            "centralmeridian",
+            "longitudeofcenter",
+            "longitudeofnaturalorigin",
+            "longitudeoffalseorigin",
+        ],
+    )
+    .unwrap_or(0.0);
+    let lat0 = first_param(
+        &params,
+        &[
+            "latitudeoforigin",
+            "latitudeofcenter",
+            "latitudeofnaturalorigin",
+            "latitudeoffalseorigin",
+        ],
+    )
+    .unwrap_or(0.0);
+    let k0 = first_param(
+        &params,
+        &[
+            "scalefactor",
+            "scalefactoratnaturalorigin",
+            "scalefactoratprojectionorigin",
+        ],
+    )
+    .unwrap_or(1.0);
+    let fe = first_param(&params, &["falseeasting"]).unwrap_or(0.0);
+    let fn_ = first_param(&params, &["falsenorthing"]).unwrap_or(0.0);
 
     // Determine datum from GEOGCS section
     let datum = infer_datum(&upper)?;
 
-    let method = match proj_name.as_deref() {
-        Some(name)
-            if name.contains("TRANSVERSE_MERCATOR") || name.contains("TRANSVERSE MERCATOR") =>
-        {
-            proj_core::ProjectionMethod::TransverseMercator {
-                lon0,
-                lat0,
-                k0,
-                false_easting: fe,
-                false_northing: fn_,
-            }
-        }
-        Some(name) if name.contains("MERCATOR") && !name.contains("TRANSVERSE") => {
-            proj_core::ProjectionMethod::Mercator {
-                lon0,
-                lat_ts: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_1").unwrap_or(0.0),
-                k0,
-                false_easting: fe,
-                false_northing: fn_,
-            }
-        }
-        Some(name) if name.contains("LAMBERT") && name.contains("CONIC") => {
-            proj_core::ProjectionMethod::LambertConformalConic {
-                lon0,
-                lat0,
-                lat1: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_1").unwrap_or(lat0),
-                lat2: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_2").unwrap_or(lat0),
-                false_easting: fe,
-                false_northing: fn_,
-            }
-        }
-        Some(name) if name.contains("ALBERS") => proj_core::ProjectionMethod::AlbersEqualArea {
+    let method = match normalized_method.as_str() {
+        "transversemercator" => proj_core::ProjectionMethod::TransverseMercator {
             lon0,
             lat0,
-            lat1: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_1").unwrap_or(lat0),
-            lat2: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_2").unwrap_or(lat0),
+            k0,
             false_easting: fe,
             false_northing: fn_,
         },
-        Some(name) if name.contains("POLAR") && name.contains("STEREOGRAPHIC") => {
+        name if name.starts_with("mercator") => proj_core::ProjectionMethod::Mercator {
+            lon0,
+            lat_ts: first_param(
+                &params,
+                &[
+                    "standardparallel1",
+                    "latitudeof1ststandardparallel",
+                    "latitudeofstandardparallel",
+                ],
+            )
+            .unwrap_or(0.0),
+            k0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
+        "lambertconformalconic1sp" | "lambertconformalconic2sp" | "lambertconformalconic" => {
+            proj_core::ProjectionMethod::LambertConformalConic {
+                lon0,
+                lat0,
+                lat1: first_param(
+                    &params,
+                    &["standardparallel1", "latitudeof1ststandardparallel"],
+                )
+                .unwrap_or(lat0),
+                lat2: first_param(
+                    &params,
+                    &["standardparallel2", "latitudeof2ndstandardparallel"],
+                )
+                .unwrap_or(lat0),
+                false_easting: fe,
+                false_northing: fn_,
+            }
+        }
+        "albersequalareaconic" | "albersequalarea" => {
+            proj_core::ProjectionMethod::AlbersEqualArea {
+                lon0,
+                lat0,
+                lat1: first_param(
+                    &params,
+                    &["standardparallel1", "latitudeof1ststandardparallel"],
+                )
+                .unwrap_or(lat0),
+                lat2: first_param(
+                    &params,
+                    &["standardparallel2", "latitudeof2ndstandardparallel"],
+                )
+                .unwrap_or(lat0),
+                false_easting: fe,
+                false_northing: fn_,
+            }
+        }
+        "polarstereographicvarianta" | "polarstereographicvariantb" | "polarstereographic" => {
             proj_core::ProjectionMethod::PolarStereographic {
                 lon0,
-                lat_ts: extract_wkt_parameter(&upper, "STANDARD_PARALLEL").unwrap_or(lat0),
+                lat_ts: first_param(
+                    &params,
+                    &[
+                        "standardparallel",
+                        "latitudeofstandardparallel",
+                        "latitudeof1ststandardparallel",
+                    ],
+                )
+                .unwrap_or(lat0),
                 k0,
                 false_easting: fe,
                 false_northing: fn_,
             }
         }
-        Some(name) if name.contains("EQUIDISTANT") || name.contains("PLATE") => {
+        "equidistantcylindrical" | "platecarree" => {
             proj_core::ProjectionMethod::EquidistantCylindrical {
                 lon0,
-                lat_ts: extract_wkt_parameter(&upper, "STANDARD_PARALLEL_1").unwrap_or(0.0),
+                lat_ts: first_param(
+                    &params,
+                    &[
+                        "standardparallel1",
+                        "latitudeof1ststandardparallel",
+                        "latitudeofstandardparallel",
+                    ],
+                )
+                .unwrap_or(0.0),
                 false_easting: fe,
                 false_northing: fn_,
             }
@@ -197,15 +262,57 @@ fn extract_wkt_value(upper: &str, key: &str) -> Option<String> {
     Some(rest[..end].to_string())
 }
 
-/// Extract a numeric parameter like PARAMETER["false_easting",500000]
-fn extract_wkt_parameter(upper: &str, param_name: &str) -> Option<f64> {
-    let marker = format!("\"{param_name}\",");
-    let pos = upper.find(&marker)?;
-    let start = pos + marker.len();
-    let rest = &upper[start..];
-    // Find the end of the number (next ] or ,)
-    let end = rest.find(']').unwrap_or(rest.len());
-    rest[..end].trim().parse().ok()
+fn parse_wkt_parameters(s: &str) -> HashMap<String, f64> {
+    let upper = s.to_uppercase();
+    let mut params = HashMap::new();
+    let mut search_start = 0usize;
+
+    while let Some(rel) = upper[search_start..].find("PARAMETER[") {
+        let start = search_start + rel + "PARAMETER[".len();
+        let rest = &s[start..];
+        let quote_start = match rest.find('"') {
+            Some(pos) => pos,
+            None => break,
+        };
+        let name_start = start + quote_start + 1;
+        let name_rest = &s[name_start..];
+        let name_end = match name_rest.find('"') {
+            Some(pos) => pos,
+            None => break,
+        };
+        let name = &name_rest[..name_end];
+        let after_name = &name_rest[name_end + 1..];
+        let comma = match after_name.find(',') {
+            Some(pos) => pos,
+            None => break,
+        };
+        let value_rest = after_name[comma + 1..].trim_start();
+        let value_len = value_rest
+            .find(|c: char| !(c.is_ascii_digit() || matches!(c, '.' | '-' | '+' | 'e' | 'E')))
+            .unwrap_or(value_rest.len());
+
+        if let Ok(value) = value_rest[..value_len].parse::<f64>() {
+            params.insert(normalize_key(name), value);
+        }
+
+        search_start = name_start + name_end + 1;
+    }
+
+    params
+}
+
+fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
+    names
+        .iter()
+        .find_map(|name| params.get(&normalize_key(name)).copied())
+}
+
+fn normalize_key(value: &str) -> String {
+    value
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric())
+        .flat_map(|c| c.to_lowercase())
+        .collect()
 }
 
 #[cfg(test)]
@@ -255,5 +362,12 @@ mod tests {
         assert!(err
             .to_string()
             .contains("unsupported or unrecognized WKT datum"));
+    }
+
+    #[test]
+    fn parse_wkt2_projected_without_authority() {
+        let wkt = r#"PROJCRS["WGS 84 / UTM zone 18N",BASEGEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]]],CONVERSION["UTM zone 18N",METHOD["Transverse Mercator"],PARAMETER["Latitude of natural origin",0,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Longitude of natural origin",-75,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Scale factor at natural origin",0.9996,SCALEUNIT["unity",1]],PARAMETER["False easting",500000,LENGTHUNIT["metre",1]],PARAMETER["False northing",0,LENGTHUNIT["metre",1]]],CS[Cartesian,2],AXIS["easting",east],AXIS["northing",north],LENGTHUNIT["metre",1]]"#;
+        let crs = parse_wkt(wkt).unwrap();
+        assert!(crs.is_projected());
     }
 }

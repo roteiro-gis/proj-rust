@@ -1,5 +1,9 @@
 use crate::ellipsoid::Ellipsoid;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::projection::{
+    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
+    validate_lon_lat, validate_offset, validate_projected,
+};
 
 /// Lambert Conformal Conic projection (1SP and 2SP).
 ///
@@ -24,7 +28,14 @@ impl LambertConformalConic {
         lat2: f64,
         false_easting: f64,
         false_northing: f64,
-    ) -> Self {
+    ) -> Result<Self> {
+        validate_angle("central meridian", lon0)?;
+        validate_latitude_param("latitude of origin", lat0)?;
+        validate_latitude_param("first standard parallel", lat1)?;
+        validate_latitude_param("second standard parallel", lat2)?;
+        validate_offset("false easting", false_easting)?;
+        validate_offset("false northing", false_northing)?;
+
         let e = ellipsoid.e();
         let m1 = m_func(lat1, e);
         let m2 = m_func(lat2, e);
@@ -37,11 +48,16 @@ impl LambertConformalConic {
         } else {
             (m1.ln() - m2.ln()) / (t1.ln() - t2.ln())
         };
+        if n.abs() < 1e-12 {
+            return Err(Error::InvalidDefinition(
+                "Lambert Conformal Conic standard parallels yield a zero cone constant".into(),
+            ));
+        }
 
         let f_const = m1 / (n * t1.powf(n));
         let rho0 = ellipsoid.a * f_const * t0.powf(n);
 
-        Self {
+        Ok(Self {
             ellipsoid,
             lon0,
             n,
@@ -49,7 +65,7 @@ impl LambertConformalConic {
             rho0,
             false_easting,
             false_northing,
-        }
+        })
     }
 }
 
@@ -80,6 +96,7 @@ fn lat_from_t_lcc(t: f64, e: f64) -> f64 {
 
 impl super::ProjectionImpl for LambertConformalConic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
+        validate_lon_lat(lon, lat)?;
         let a = self.ellipsoid.a;
         let e = self.ellipsoid.e();
         let t = t_func(lat, e);
@@ -89,10 +106,11 @@ impl super::ProjectionImpl for LambertConformalConic {
         let x = self.false_easting + rho * theta.sin();
         let y = self.false_northing + self.rho0 - rho * theta.cos();
 
-        Ok((x, y))
+        ensure_finite_xy("Lambert Conformal Conic", x, y)
     }
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+        validate_projected(x, y)?;
         let a = self.ellipsoid.a;
         let e = self.ellipsoid.e();
 
@@ -106,7 +124,7 @@ impl super::ProjectionImpl for LambertConformalConic {
         let lat = lat_from_t_lcc(t, e);
         let lon = self.lon0 + theta / self.n;
 
-        Ok((lon, lat))
+        ensure_finite_lon_lat("Lambert Conformal Conic", lon, lat)
     }
 }
 
@@ -127,7 +145,8 @@ mod tests {
             49.0_f64.to_radians(),
             700_000.0,
             6_600_000.0,
-        );
+        )
+        .unwrap();
 
         let lon = 2.3522_f64.to_radians(); // Paris
         let lat = 48.8566_f64.to_radians();
@@ -159,7 +178,8 @@ mod tests {
             33.0_f64.to_radians(),
             500_000.0,
             0.0,
-        );
+        )
+        .unwrap();
 
         let lon = (-96.0_f64).to_radians();
         let lat = 33.0_f64.to_radians();

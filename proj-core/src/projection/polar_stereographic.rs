@@ -1,7 +1,11 @@
 use std::f64::consts::FRAC_PI_2;
 
 use crate::ellipsoid::Ellipsoid;
-use crate::error::Result;
+use crate::error::{Error, Result};
+use crate::projection::{
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected, validate_scale,
+};
 
 /// Polar Stereographic projection.
 ///
@@ -35,7 +39,13 @@ impl PolarStereographic {
         k0_input: f64,
         false_easting: f64,
         false_northing: f64,
-    ) -> Self {
+    ) -> Result<Self> {
+        validate_angle("central meridian", lon0)?;
+        validate_latitude_param("latitude of true scale", lat_ts)?;
+        validate_scale("scale factor", k0_input)?;
+        validate_offset("false easting", false_easting)?;
+        validate_offset("false northing", false_northing)?;
+
         let is_north = lat_ts >= 0.0;
         let e = ellipsoid.e();
         let e2 = ellipsoid.e2();
@@ -60,17 +70,22 @@ impl PolarStereographic {
 
             m_ts / (2.0 * t_ts / t_90)
         };
+        if !k0.is_finite() || k0 <= 0.0 {
+            return Err(Error::InvalidDefinition(
+                "Polar Stereographic scale factor must resolve to a finite positive number".into(),
+            ));
+        }
 
         let two_a_k0 = 2.0 * a * k0;
 
-        Self {
+        Ok(Self {
             lon0,
             is_north,
             false_easting,
             false_northing,
             e,
             two_a_k0,
-        }
+        })
     }
 }
 
@@ -102,6 +117,7 @@ fn lat_from_t(t: f64, e: f64) -> f64 {
 
 impl super::ProjectionImpl for PolarStereographic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
+        validate_lon_lat(lon, lat)?;
         let e = self.e;
         let t_polar = compute_t_polar(e);
 
@@ -121,10 +137,11 @@ impl super::ProjectionImpl for PolarStereographic {
         let x = self.false_easting + rho * d_lon.sin();
         let y = self.false_northing - sign * rho * d_lon.cos();
 
-        Ok((x, y))
+        ensure_finite_xy("Polar Stereographic", x, y)
     }
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+        validate_projected(x, y)?;
         let e = self.e;
         let t_polar = compute_t_polar(e);
 
@@ -142,23 +159,16 @@ impl super::ProjectionImpl for PolarStereographic {
         if rho < 1e-10 {
             // At the pole
             let lat = if self.is_north { FRAC_PI_2 } else { -FRAC_PI_2 };
-            return Ok((self.lon0, lat));
+            return Ok((normalize_longitude(self.lon0), lat));
         }
 
         let t = rho * t_polar / self.two_a_k0;
         let lat_unsigned = lat_from_t(t, e);
         let lat = sign * lat_unsigned;
 
-        let mut lon = self.lon0 + dx.atan2(dy_eff);
-        // Normalize longitude to [-PI, PI]
-        while lon > std::f64::consts::PI {
-            lon -= 2.0 * std::f64::consts::PI;
-        }
-        while lon < -std::f64::consts::PI {
-            lon += 2.0 * std::f64::consts::PI;
-        }
+        let lon = self.lon0 + dx.atan2(dy_eff);
 
-        Ok((lon, lat))
+        ensure_finite_lon_lat("Polar Stereographic", lon, lat)
     }
 }
 
@@ -179,6 +189,7 @@ mod tests {
             0.0,
             0.0,
         )
+        .unwrap()
     }
 
     /// EPSG:3031 — WGS 84 / Antarctic Polar Stereographic
@@ -192,6 +203,7 @@ mod tests {
             0.0,
             0.0,
         )
+        .unwrap()
     }
 
     #[test]

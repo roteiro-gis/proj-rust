@@ -28,7 +28,7 @@ mod proj_string;
 mod projjson;
 mod wkt;
 
-use proj_core::CrsDef;
+use proj_core::{Coord, CrsDef, Transform, Transformable};
 
 /// Parse error.
 #[derive(Debug, thiserror::Error)]
@@ -108,6 +108,7 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
     if upper.starts_with("GEOGCS")
         || upper.starts_with("PROJCS")
         || upper.starts_with("GEODCRS")
+        || upper.starts_with("GEOGCRS")
         || upper.starts_with("PROJCRS")
     {
         return wkt::parse_wkt(s);
@@ -119,7 +120,7 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
     )))
 }
 
-/// Create a [`Transform`](proj_core::Transform) from two CRS strings in any format.
+/// Create a [`Transform`] from two CRS strings in any format.
 ///
 /// Convenience function for downstream projects that need to handle free-form CRS strings.
 pub fn transform_from_crs_strings(
@@ -129,6 +130,74 @@ pub fn transform_from_crs_strings(
     let from_crs = parse_crs(from)?;
     let to_crs = parse_crs(to)?;
     Ok(proj_core::Transform::from_crs_defs(&from_crs, &to_crs)?)
+}
+
+/// Lightweight compatibility facade for downstream code that currently expects
+/// a `proj::Proj`-like flow:
+/// 1. parse a CRS definition with [`Proj::new`]
+/// 2. build a CRS-to-CRS transform with [`Proj::create_crs_to_crs_from_pj`]
+/// 3. convert coordinates with [`Proj::convert`]
+pub struct Proj {
+    inner: ProjInner,
+}
+
+enum ProjInner {
+    Definition(CrsDef),
+    Transform(Transform),
+}
+
+impl Proj {
+    /// Parse a single CRS definition in any supported format.
+    pub fn new(definition: &str) -> Result<Self> {
+        Ok(Self {
+            inner: ProjInner::Definition(parse_crs(definition)?),
+        })
+    }
+
+    /// Build a transform directly from two CRS strings.
+    pub fn new_known_crs(from: &str, to: &str, _area: Option<&str>) -> Result<Self> {
+        Ok(Self {
+            inner: ProjInner::Transform(transform_from_crs_strings(from, to)?),
+        })
+    }
+
+    /// Build a transform from two parsed CRS definitions.
+    pub fn create_crs_to_crs_from_pj(
+        &self,
+        target: &Self,
+        _area: Option<&str>,
+        _options: Option<&str>,
+    ) -> Result<Self> {
+        let source = self.definition()?;
+        let target = target.definition()?;
+        Ok(Self {
+            inner: ProjInner::Transform(Transform::from_crs_defs(source, target)?),
+        })
+    }
+
+    /// Transform a coordinate using a CRS-to-CRS transform.
+    pub fn convert<T: Transformable>(&self, coord: T) -> proj_core::Result<T> {
+        match &self.inner {
+            ProjInner::Transform(transform) => transform.convert(coord),
+            ProjInner::Definition(_) => Err(proj_core::Error::InvalidDefinition(
+                "coordinate conversion requires a CRS-to-CRS transform, not a standalone CRS definition".into(),
+            )),
+        }
+    }
+
+    /// Transform a coordinate using the native [`Coord`] type.
+    pub fn convert_coord(&self, coord: Coord) -> proj_core::Result<Coord> {
+        self.convert(coord)
+    }
+
+    fn definition(&self) -> Result<&CrsDef> {
+        match &self.inner {
+            ProjInner::Definition(crs) => Ok(crs),
+            ProjInner::Transform(_) => Err(ParseError::Parse(
+                "expected a CRS definition, found a transform".into(),
+            )),
+        }
+    }
 }
 
 #[cfg(test)]
@@ -195,6 +264,22 @@ mod tests {
     fn transform_bare_to_authority() {
         let t = transform_from_crs_strings("4326", "EPSG:3857").unwrap();
         let (x, _y) = t.convert((-74.006, 40.7128)).unwrap();
+        assert!((x - (-8238310.0)).abs() < 100.0);
+    }
+
+    #[test]
+    fn proj_facade_from_known_crs() {
+        let proj = Proj::new_known_crs("EPSG:4326", "EPSG:3857", None).unwrap();
+        let (x, _y) = proj.convert((-74.006, 40.7128)).unwrap();
+        assert!((x - (-8238310.0)).abs() < 100.0);
+    }
+
+    #[test]
+    fn proj_facade_create_from_definitions() {
+        let from = Proj::new("+proj=longlat +datum=WGS84").unwrap();
+        let to = Proj::new("EPSG:3857").unwrap();
+        let proj = from.create_crs_to_crs_from_pj(&to, None, None).unwrap();
+        let (x, _y) = proj.convert((-74.006, 40.7128)).unwrap();
         assert!((x - (-8238310.0)).abs() < 100.0);
     }
 }

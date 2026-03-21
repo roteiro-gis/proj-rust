@@ -10,6 +10,9 @@ pub enum Error {
     #[error("unsupported projection: {0}")]
     UnsupportedProjection(String),
 
+    #[error("invalid CRS definition: {0}")]
+    InvalidDefinition(String),
+
     #[error("coordinate out of range: {0}")]
     OutOfRange(String),
 }
