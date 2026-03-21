@@ -1,0 +1,1352 @@
+[
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": 0.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "origin 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -74.0445,
+    "input_y": 40.6892,
+    "expected_x": -8242596.036042544,
+    "expected_y": 4966606.2573076505,
+    "tolerance": 0.001,
+    "description": "NYC 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": 15550408.912046732,
+    "expected_y": 4257980.732184108,
+    "tolerance": 0.001,
+    "description": "Tokyo 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": -14226.630923380362,
+    "expected_y": 6711542.475587634,
+    "tolerance": 0.001,
+    "description": "London 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 261845.70624393807,
+    "expected_y": 6250564.349543124,
+    "tolerance": 0.001,
+    "description": "Paris 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -43.1729,
+    "input_y": -22.9068,
+    "expected_x": -4805985.24406892,
+    "expected_y": -2620751.5585329696,
+    "tolerance": 0.001,
+    "description": "Rio 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 151.2093,
+    "input_y": -33.8688,
+    "expected_x": 16832542.27920734,
+    "expected_y": -4011198.647307572,
+    "tolerance": 0.001,
+    "description": "Sydney 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 37.6173,
+    "input_y": 55.7558,
+    "expected_x": 4187538.6810178095,
+    "expected_y": 7509955.142338095,
+    "tolerance": 0.001,
+    "description": "Moscow 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -96.0,
+    "input_y": 37.0,
+    "expected_x": -10686671.116154263,
+    "expected_y": 4439106.787250585,
+    "tolerance": 0.001,
+    "description": "US center 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 180.0,
+    "input_y": 0.0,
+    "expected_x": 20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "dateline equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -180.0,
+    "input_y": 0.0,
+    "expected_x": -20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "antimeridian equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": 85.0,
+    "expected_x": 0.0,
+    "expected_y": 19971868.88040857,
+    "tolerance": 0.001,
+    "description": "near north pole 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": -85.0,
+    "expected_x": 0.0,
+    "expected_y": -19971868.88040857,
+    "tolerance": 0.001,
+    "description": "near south pole 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 90.0,
+    "input_y": 0.0,
+    "expected_x": 10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "90E equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -90.0,
+    "input_y": 0.0,
+    "expected_x": -10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "90W equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": 45.0,
+    "expected_x": 0.0,
+    "expected_y": 5621521.486192066,
+    "tolerance": 0.001,
+    "description": "45N prime meridian 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": -45.0,
+    "expected_x": 0.0,
+    "expected_y": -5621521.486192066,
+    "tolerance": 0.001,
+    "description": "45S prime meridian 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 179.9,
+    "input_y": 0.0,
+    "expected_x": 20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "near dateline 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": -179.9,
+    "input_y": 0.0,
+    "expected_x": -20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.001,
+    "description": "near antimeridian 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": 0.01,
+    "expected_x": 0.0,
+    "expected_y": 1113.1949135843784,
+    "tolerance": 0.001,
+    "description": "just north of equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3857,
+    "input_x": 0.0,
+    "input_y": -0.01,
+    "expected_x": 0.0,
+    "expected_y": -1113.1949135843784,
+    "tolerance": 0.001,
+    "description": "just south of equator 4326→3857"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 0.0,
+    "input_y": 0.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "origin 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -74.0445,
+    "input_y": 40.6892,
+    "expected_x": -8242596.036042544,
+    "expected_y": 4938742.827496657,
+    "tolerance": 0.01,
+    "description": "NYC 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": 15550408.912046732,
+    "expected_y": 4233052.291386305,
+    "tolerance": 0.01,
+    "description": "Tokyo 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": -14226.630923380362,
+    "expected_y": 6678077.699681731,
+    "tolerance": 0.01,
+    "description": "London 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 261845.70624393807,
+    "expected_y": 6218369.433471467,
+    "tolerance": 0.01,
+    "description": "Paris 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -43.1729,
+    "input_y": -22.9068,
+    "expected_x": -4805985.24406892,
+    "expected_y": -2604126.5815546648,
+    "tolerance": 0.01,
+    "description": "Rio 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 151.2093,
+    "input_y": -33.8688,
+    "expected_x": 16832542.27920734,
+    "expected_y": -3987387.0195967252,
+    "tolerance": 0.01,
+    "description": "Sydney 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 37.6173,
+    "input_y": 55.7558,
+    "expected_x": 4187538.6810178095,
+    "expected_y": 7474605.281984747,
+    "tolerance": 0.01,
+    "description": "Moscow 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -96.0,
+    "input_y": 37.0,
+    "expected_x": -10686671.116154263,
+    "expected_y": 4413389.888685758,
+    "tolerance": 0.01,
+    "description": "US center 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 180.0,
+    "input_y": 0.0,
+    "expected_x": 20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "dateline equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -180.0,
+    "input_y": 0.0,
+    "expected_x": -20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "antimeridian equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 90.0,
+    "input_y": 0.0,
+    "expected_x": 10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "90E equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -90.0,
+    "input_y": 0.0,
+    "expected_x": -10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "90W equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 0.0,
+    "input_y": 45.0,
+    "expected_x": 0.0,
+    "expected_y": 5591295.9185533915,
+    "tolerance": 0.01,
+    "description": "45N prime meridian 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 0.0,
+    "input_y": -45.0,
+    "expected_x": 0.0,
+    "expected_y": -5591295.9185533915,
+    "tolerance": 0.01,
+    "description": "45S prime meridian 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 179.9,
+    "input_y": 0.0,
+    "expected_x": 20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "near dateline 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": -179.9,
+    "input_y": 0.0,
+    "expected_x": -20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "near antimeridian 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 0.0,
+    "input_y": 0.01,
+    "expected_x": 0.0,
+    "expected_y": 1105.7427639049138,
+    "tolerance": 0.01,
+    "description": "just north of equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3395,
+    "input_x": 0.0,
+    "input_y": -0.01,
+    "expected_x": 0.0,
+    "expected_y": -1105.7427639049138,
+    "tolerance": 0.01,
+    "description": "just south of equator 4326→3395"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32601,
+    "input_x": -177.0,
+    "input_y": 10.0,
+    "expected_x": 500000.0,
+    "expected_y": 1105412.4913010783,
+    "tolerance": 0.01,
+    "description": "zone1N 4326→UTM32601"
+  },
+  {
+    "from_epsg": 32601,
+    "to_epsg": 4326,
+    "input_x": 500000.0,
+    "input_y": 1105412.4913010783,
+    "expected_x": -177.0,
+    "expected_y": 10.0,
+    "tolerance": 2e-7,
+    "description": "zone1N UTM32601→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32610,
+    "input_x": -123.0,
+    "input_y": 37.0,
+    "expected_x": 500000.0,
+    "expected_y": 4094872.370453846,
+    "tolerance": 0.01,
+    "description": "zone10N SF 4326→UTM32610"
+  },
+  {
+    "from_epsg": 32610,
+    "to_epsg": 4326,
+    "input_x": 500000.0,
+    "input_y": 4094872.370453846,
+    "expected_x": -123.00000000000001,
+    "expected_y": 37.0,
+    "tolerance": 2e-7,
+    "description": "zone10N SF UTM32610→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32618,
+    "input_x": -74.006,
+    "input_y": 40.7128,
+    "expected_x": 583959.372324085,
+    "expected_y": 4507350.998243321,
+    "tolerance": 0.01,
+    "description": "zone18N NYC 4326→UTM32618"
+  },
+  {
+    "from_epsg": 32618,
+    "to_epsg": 4326,
+    "input_x": 583959.372324085,
+    "input_y": 4507350.998243321,
+    "expected_x": -74.006,
+    "expected_y": 40.712799999999994,
+    "tolerance": 2e-7,
+    "description": "zone18N NYC UTM32618→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32630,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": 699316.2343119299,
+    "expected_y": 5710163.758080996,
+    "tolerance": 0.01,
+    "description": "zone30N London 4326→UTM32630"
+  },
+  {
+    "from_epsg": 32630,
+    "to_epsg": 4326,
+    "input_x": 699316.2343119299,
+    "input_y": 5710163.758080996,
+    "expected_x": -0.12779999999999989,
+    "expected_y": 51.5074,
+    "tolerance": 2e-7,
+    "description": "zone30N London UTM32630→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32631,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 452482.5327026278,
+    "expected_y": 5411717.176868899,
+    "tolerance": 0.01,
+    "description": "zone31N Paris 4326→UTM32631"
+  },
+  {
+    "from_epsg": 32631,
+    "to_epsg": 4326,
+    "input_x": 452482.5327026278,
+    "input_y": 5411717.176868899,
+    "expected_x": 2.3522000000000003,
+    "expected_y": 48.8566,
+    "tolerance": 2e-7,
+    "description": "zone31N Paris UTM32631→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32636,
+    "input_x": 37.6173,
+    "input_y": 55.7558,
+    "expected_x": 789668.9625072046,
+    "expected_y": 6188558.336875086,
+    "tolerance": 0.01,
+    "description": "zone36N Moscow 4326→UTM32636"
+  },
+  {
+    "from_epsg": 32636,
+    "to_epsg": 4326,
+    "input_x": 789668.9625072046,
+    "input_y": 6188558.336875086,
+    "expected_x": 37.6173,
+    "expected_y": 55.75580000000001,
+    "tolerance": 2e-7,
+    "description": "zone36N Moscow UTM32636→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32654,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": 381622.23003942776,
+    "expected_y": 3950298.9078813544,
+    "tolerance": 0.01,
+    "description": "zone54N Tokyo 4326→UTM32654"
+  },
+  {
+    "from_epsg": 32654,
+    "to_epsg": 4326,
+    "input_x": 381622.23003942776,
+    "input_y": 3950298.9078813544,
+    "expected_x": 139.6917,
+    "expected_y": 35.6895,
+    "tolerance": 2e-7,
+    "description": "zone54N Tokyo UTM32654→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32660,
+    "input_x": 179.0,
+    "input_y": 10.0,
+    "expected_x": 719233.1388338234,
+    "expected_y": 1106077.1297056568,
+    "tolerance": 0.01,
+    "description": "zone60N 4326→UTM32660"
+  },
+  {
+    "from_epsg": 32660,
+    "to_epsg": 4326,
+    "input_x": 719233.1388338234,
+    "input_y": 1106077.1297056568,
+    "expected_x": 179.0,
+    "expected_y": 10.0,
+    "tolerance": 2e-7,
+    "description": "zone60N UTM32660→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32718,
+    "input_x": -74.0,
+    "input_y": -10.0,
+    "expected_x": 609600.7725144544,
+    "expected_y": 8894421.4108076,
+    "tolerance": 0.01,
+    "description": "zone18S 4326→UTM32718"
+  },
+  {
+    "from_epsg": 32718,
+    "to_epsg": 4326,
+    "input_x": 609600.7725144544,
+    "input_y": 8894421.4108076,
+    "expected_x": -74.0,
+    "expected_y": -10.000000000000004,
+    "tolerance": 2e-7,
+    "description": "zone18S UTM32718→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32723,
+    "input_x": -43.1729,
+    "input_y": -22.9068,
+    "expected_x": 687394.5932911221,
+    "expected_y": 7465634.127714328,
+    "tolerance": 0.01,
+    "description": "zone23S Rio 4326→UTM32723"
+  },
+  {
+    "from_epsg": 32723,
+    "to_epsg": 4326,
+    "input_x": 687394.5932911221,
+    "input_y": 7465634.127714328,
+    "expected_x": -43.1729,
+    "expected_y": -22.906800000000004,
+    "tolerance": 2e-7,
+    "description": "zone23S Rio UTM32723→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32756,
+    "input_x": 151.2093,
+    "input_y": -33.8688,
+    "expected_x": 334368.633648097,
+    "expected_y": 6250948.345385009,
+    "tolerance": 0.01,
+    "description": "zone56S Sydney 4326→UTM32756"
+  },
+  {
+    "from_epsg": 32756,
+    "to_epsg": 4326,
+    "input_x": 334368.633648097,
+    "input_y": 6250948.345385009,
+    "expected_x": 151.2093,
+    "expected_y": -33.8688,
+    "tolerance": 2e-7,
+    "description": "zone56S Sydney UTM32756→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32701,
+    "input_x": -177.0,
+    "input_y": -10.0,
+    "expected_x": 500000.0,
+    "expected_y": 8894587.508698922,
+    "tolerance": 0.01,
+    "description": "zone1S 4326→UTM32701"
+  },
+  {
+    "from_epsg": 32701,
+    "to_epsg": 4326,
+    "input_x": 500000.0,
+    "input_y": 8894587.508698922,
+    "expected_x": -177.0,
+    "expected_y": -10.0,
+    "tolerance": 2e-7,
+    "description": "zone1S UTM32701→4326 inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -45.0,
+    "input_y": 90.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "north pole 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -45.0,
+    "input_y": 85.0,
+    "expected_x": 0.0,
+    "expected_y": -541966.700613481,
+    "tolerance": 0.01,
+    "description": "85N on CM 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -45.0,
+    "input_y": 75.0,
+    "expected_x": 0.0,
+    "expected_y": -1633879.4974707854,
+    "tolerance": 0.01,
+    "description": "75N on CM 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -45.0,
+    "input_y": 65.0,
+    "expected_x": 0.0,
+    "expected_y": -2750247.6700959816,
+    "tolerance": 0.01,
+    "description": "65N on CM 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": 0.0,
+    "input_y": 80.0,
+    "expected_x": 767861.6061147726,
+    "expected_y": -767861.6061147728,
+    "tolerance": 0.01,
+    "description": "80N 0E 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": 90.0,
+    "input_y": 80.0,
+    "expected_x": 767861.6061147728,
+    "expected_y": 767861.6061147726,
+    "tolerance": 0.01,
+    "description": "80N 90E 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -90.0,
+    "input_y": 80.0,
+    "expected_x": -767861.6061147726,
+    "expected_y": -767861.6061147728,
+    "tolerance": 0.01,
+    "description": "80N 90W 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": 135.0,
+    "input_y": 70.0,
+    "expected_x": 2.6794385924555466e-10,
+    "expected_y": 2187927.649279021,
+    "tolerance": 0.01,
+    "description": "70N 135E 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3413,
+    "input_x": -135.0,
+    "input_y": 70.0,
+    "expected_x": -2187927.649279021,
+    "expected_y": -1.3397192962277733e-10,
+    "tolerance": 0.01,
+    "description": "70N 135W 4326→3413"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3031,
+    "input_x": 0.0,
+    "input_y": -90.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 0.1,
+    "description": "south pole 4326→3031"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3031,
+    "input_x": 0.0,
+    "input_y": -85.0,
+    "expected_x": 0.0,
+    "expected_y": 543593.2981074246,
+    "tolerance": 0.1,
+    "description": "85S 0E 4326→3031"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3031,
+    "input_x": 0.0,
+    "input_y": -75.0,
+    "expected_x": 0.0,
+    "expected_y": 1638783.2384072365,
+    "tolerance": 0.1,
+    "description": "75S 0E 4326→3031"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3031,
+    "input_x": 90.0,
+    "input_y": -80.0,
+    "expected_x": 1089179.4556261837,
+    "expected_y": 6.669300670148313e-11,
+    "tolerance": 0.1,
+    "description": "80S 90E 4326→3031"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3031,
+    "input_x": -90.0,
+    "input_y": -80.0,
+    "expected_x": -1089179.4556261837,
+    "expected_y": 6.669300670148313e-11,
+    "tolerance": 0.1,
+    "description": "80S 90W 4326→3031"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3995,
+    "input_x": 0.0,
+    "input_y": 80.0,
+    "expected_x": 0.0,
+    "expected_y": -1089179.4556261837,
+    "tolerance": 0.01,
+    "description": "80N 0E 4326→3995"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3995,
+    "input_x": 90.0,
+    "input_y": 75.0,
+    "expected_x": 1638783.2384072365,
+    "expected_y": -1.0034653237058779e-10,
+    "tolerance": 0.01,
+    "description": "75N 90E 4326→3995"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 2154,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 652469.0227091359,
+    "expected_y": 6862035.259420077,
+    "tolerance": 0.1,
+    "description": "Paris 4326→2154"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 2154,
+    "input_x": -1.6778,
+    "input_y": 48.1173,
+    "expected_x": 352107.37983203674,
+    "expected_y": 6789966.541944365,
+    "tolerance": 0.1,
+    "description": "Rennes 4326→2154"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 2154,
+    "input_x": 7.262,
+    "input_y": 43.7102,
+    "expected_x": 1043410.1597223439,
+    "expected_y": 6299400.042972826,
+    "tolerance": 0.1,
+    "description": "Nice 4326→2154"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 5070,
+    "input_x": -96.0,
+    "input_y": 37.0,
+    "expected_x": 0.0,
+    "expected_y": 1550756.1682043858,
+    "tolerance": 0.1,
+    "description": "US center 4326→5070"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 5070,
+    "input_x": -74.0,
+    "input_y": 40.7,
+    "expected_x": 1827122.1735598098,
+    "expected_y": 2177832.001080314,
+    "tolerance": 0.1,
+    "description": "NYC 4326→5070"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 5070,
+    "input_x": -122.4,
+    "input_y": 37.8,
+    "expected_x": -2273032.7875102824,
+    "expected_y": 1958176.3912927466,
+    "tolerance": 0.1,
+    "description": "SF 4326→5070"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3005,
+    "input_x": -123.1,
+    "input_y": 49.3,
+    "expected_x": 1211046.6482358535,
+    "expected_y": 480285.14042682794,
+    "tolerance": 0.1,
+    "description": "Vancouver 4326→3005"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 3347,
+    "input_x": -75.7,
+    "input_y": 45.4,
+    "expected_x": 7471636.525325254,
+    "expected_y": 1188239.5457879659,
+    "tolerance": 0.1,
+    "description": "Ottawa 4326→3347"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 27700,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": 530028.7469491747,
+    "expected_y": 180380.0942512554,
+    "tolerance": 1.0,
+    "description": "London 4326→27700"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": 0.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "origin 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -74.0445,
+    "input_y": 40.6892,
+    "expected_x": -8242596.036042544,
+    "expected_y": 4529501.024785667,
+    "tolerance": 0.01,
+    "description": "NYC 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": 15550408.912046732,
+    "expected_y": 3972936.9666665373,
+    "tolerance": 0.01,
+    "description": "Tokyo 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": -14226.630923380362,
+    "expected_y": 5733777.540085458,
+    "tolerance": 0.01,
+    "description": "London 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 261845.70624393807,
+    "expected_y": 5438691.8338906495,
+    "tolerance": 0.01,
+    "description": "Paris 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -43.1729,
+    "input_y": -22.9068,
+    "expected_x": -4805985.24406892,
+    "expected_y": -2549973.3117033592,
+    "tolerance": 0.01,
+    "description": "Rio 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 151.2093,
+    "input_y": -33.8688,
+    "expected_x": 16832542.27920734,
+    "expected_y": -3770257.5697792238,
+    "tolerance": 0.01,
+    "description": "Sydney 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 37.6173,
+    "input_y": 55.7558,
+    "expected_x": 4187538.6810178095,
+    "expected_y": 6206707.264771602,
+    "tolerance": 0.01,
+    "description": "Moscow 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -96.0,
+    "input_y": 37.0,
+    "expected_x": -10686671.116154263,
+    "expected_y": 4118821.159351122,
+    "tolerance": 0.01,
+    "description": "US center 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 180.0,
+    "input_y": 0.0,
+    "expected_x": 20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "dateline equator 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -180.0,
+    "input_y": 0.0,
+    "expected_x": -20037508.342789244,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "antimeridian equator 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": 85.0,
+    "expected_x": 0.0,
+    "expected_y": 9462156.717428254,
+    "tolerance": 0.01,
+    "description": "near north pole 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": -85.0,
+    "expected_x": 0.0,
+    "expected_y": -9462156.717428254,
+    "tolerance": 0.01,
+    "description": "near south pole 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 90.0,
+    "input_y": 0.0,
+    "expected_x": 10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "90E equator 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -90.0,
+    "input_y": 0.0,
+    "expected_x": -10018754.171394622,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "90W equator 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": 45.0,
+    "expected_x": 0.0,
+    "expected_y": 5009377.085697311,
+    "tolerance": 0.01,
+    "description": "45N prime meridian 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": -45.0,
+    "expected_x": 0.0,
+    "expected_y": -5009377.085697311,
+    "tolerance": 0.01,
+    "description": "45S prime meridian 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 179.9,
+    "input_y": 0.0,
+    "expected_x": 20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "near dateline 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": -179.9,
+    "input_y": 0.0,
+    "expected_x": -20026376.393709917,
+    "expected_y": 0.0,
+    "tolerance": 0.01,
+    "description": "near antimeridian 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": 0.01,
+    "expected_x": 0.0,
+    "expected_y": 1113.1949079327358,
+    "tolerance": 0.01,
+    "description": "just north of equator 4326→32662"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 32662,
+    "input_x": 0.0,
+    "input_y": -0.01,
+    "expected_x": 0.0,
+    "expected_y": -1113.1949079327358,
+    "tolerance": 0.01,
+    "description": "just south of equator 4326→32662"
+  },
+  {
+    "from_epsg": 3857,
+    "to_epsg": 4326,
+    "input_x": -8242596.0,
+    "input_y": 4966606.0,
+    "expected_x": -74.0444996762243,
+    "expected_y": 40.68919824733844,
+    "tolerance": 1e-8,
+    "description": "NYC 3857→4326"
+  },
+  {
+    "from_epsg": 3857,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": 0.0,
+    "expected_x": 0.0,
+    "expected_y": 0.0,
+    "tolerance": 1e-8,
+    "description": "origin 3857→4326"
+  },
+  {
+    "from_epsg": 3857,
+    "to_epsg": 4326,
+    "input_x": 15550408.0,
+    "input_y": 4257980.0,
+    "expected_x": 139.6916918069448,
+    "expected_y": 35.68949465796189,
+    "tolerance": 1e-8,
+    "description": "Tokyo 3857→4326"
+  },
+  {
+    "from_epsg": 3413,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": 0.0,
+    "expected_x": -45.0,
+    "expected_y": 90.0,
+    "tolerance": 1e-6,
+    "description": "north pole 3413→4326"
+  },
+  {
+    "from_epsg": 3413,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": -1633879.0,
+    "expected_x": -45.0,
+    "expected_y": 75.0000045171285,
+    "tolerance": 1e-6,
+    "description": "75N on CM 3413→4326"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -90.0,
+    "input_y": 45.0,
+    "expected_x": -90.00010146311452,
+    "expected_y": 44.9999843467126,
+    "tolerance": 0.001,
+    "description": "US Midwest NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -74.0,
+    "input_y": 40.7,
+    "expected_x": -73.99956916683668,
+    "expected_y": 40.70000039620913,
+    "tolerance": 0.001,
+    "description": "NYC area NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -122.4,
+    "input_y": 37.8,
+    "expected_x": -122.40104406361809,
+    "expected_y": 37.799889052113095,
+    "tolerance": 0.001,
+    "description": "SF area NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -96.0,
+    "input_y": 32.0,
+    "expected_x": -96.00026008650092,
+    "expected_y": 32.00016451115477,
+    "tolerance": 0.001,
+    "description": "Dallas area NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -80.0,
+    "input_y": 25.8,
+    "expected_x": -79.99980151452345,
+    "expected_y": 25.80037531552832,
+    "tolerance": 0.001,
+    "description": "Miami area NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 4326,
+    "input_x": -105.0,
+    "input_y": 40.0,
+    "expected_x": -105.00057240492646,
+    "expected_y": 39.99997555706656,
+    "tolerance": 0.001,
+    "description": "Denver area NAD27→WGS84"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 4267,
+    "input_x": -90.0,
+    "input_y": 45.0,
+    "expected_x": -89.99989854103295,
+    "expected_y": 45.00001565313545,
+    "tolerance": 0.001,
+    "description": "US Midwest WGS84→NAD27"
+  },
+  {
+    "from_epsg": 4277,
+    "to_epsg": 4326,
+    "input_x": -0.1278,
+    "input_y": 51.5074,
+    "expected_x": -0.12940630149646004,
+    "expected_y": 51.50791032017188,
+    "tolerance": 0.001,
+    "description": "London OSGB36→WGS84"
+  },
+  {
+    "from_epsg": 4277,
+    "to_epsg": 4326,
+    "input_x": -3.1883,
+    "input_y": 55.9533,
+    "expected_x": -3.189724614874883,
+    "expected_y": 55.95324207065823,
+    "tolerance": 0.001,
+    "description": "Edinburgh OSGB36→WGS84"
+  },
+  {
+    "from_epsg": 4277,
+    "to_epsg": 4326,
+    "input_x": -1.8904,
+    "input_y": 52.4862,
+    "expected_x": -1.8918416889112462,
+    "expected_y": 52.48656971779872,
+    "tolerance": 0.001,
+    "description": "Birmingham OSGB36→WGS84"
+  },
+  {
+    "from_epsg": 4230,
+    "to_epsg": 4326,
+    "input_x": 2.3522,
+    "input_y": 48.8566,
+    "expected_x": 2.3509262716463275,
+    "expected_y": 48.85568855308142,
+    "tolerance": 0.001,
+    "description": "Paris ED50→WGS84"
+  },
+  {
+    "from_epsg": 4230,
+    "to_epsg": 4326,
+    "input_x": 13.405,
+    "input_y": 52.52,
+    "expected_x": 13.403921417229716,
+    "expected_y": 52.51931241783094,
+    "tolerance": 0.001,
+    "description": "Berlin ED50→WGS84"
+  },
+  {
+    "from_epsg": 3857,
+    "to_epsg": 4326,
+    "input_x": -8242596.036042544,
+    "input_y": 4966606.2573076505,
+    "expected_x": -74.0445,
+    "expected_y": 40.68919999999999,
+    "tolerance": 1e-7,
+    "description": "roundtrip NYC↔3857 inverse"
+  },
+  {
+    "from_epsg": 32618,
+    "to_epsg": 4326,
+    "input_x": 583959.372324085,
+    "input_y": 4507350.998243321,
+    "expected_x": -74.006,
+    "expected_y": 40.712799999999994,
+    "tolerance": 1e-7,
+    "description": "roundtrip NYC↔UTM18N inverse"
+  },
+  {
+    "from_epsg": 3413,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": -1633879.4974707854,
+    "expected_x": -45.0,
+    "expected_y": 74.99999999999999,
+    "tolerance": 1e-7,
+    "description": "roundtrip 75N↔3413 inverse"
+  },
+  {
+    "from_epsg": 3031,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": 1638783.2384072365,
+    "expected_x": 0.0,
+    "expected_y": -74.99999999999999,
+    "tolerance": 1e-7,
+    "description": "roundtrip 75S↔3031 inverse"
+  },
+  {
+    "from_epsg": 2154,
+    "to_epsg": 4326,
+    "input_x": 652469.0227091359,
+    "input_y": 6862035.259420077,
+    "expected_x": 2.352199999999999,
+    "expected_y": 48.85660000000001,
+    "tolerance": 1e-7,
+    "description": "roundtrip Paris↔Lambert93 inverse"
+  },
+  {
+    "from_epsg": 5070,
+    "to_epsg": 4326,
+    "input_x": 0.0,
+    "input_y": 1550756.1682043858,
+    "expected_x": -96.00000000000001,
+    "expected_y": 37.00000000000002,
+    "tolerance": 1e-7,
+    "description": "roundtrip USCenter↔Albers inverse"
+  },
+  {
+    "from_epsg": 3395,
+    "to_epsg": 4326,
+    "input_x": -8238310.235647004,
+    "input_y": 4942194.778102551,
+    "expected_x": -74.006,
+    "expected_y": 40.7128,
+    "tolerance": 1e-7,
+    "description": "roundtrip NYC↔WorldMerc inverse"
+  },
+  {
+    "from_epsg": 32662,
+    "to_epsg": 4326,
+    "input_x": -8238310.235647004,
+    "input_y": 4532128.1647683885,
+    "expected_x": -74.006,
+    "expected_y": 40.7128,
+    "tolerance": 1e-7,
+    "description": "roundtrip NYC↔PlateCarree inverse"
+  }
+]
