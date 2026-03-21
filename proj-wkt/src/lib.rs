@@ -43,16 +43,53 @@ pub type Result<T> = std::result::Result<T, ParseError>;
 
 /// Parse a CRS definition string in any supported format.
 ///
-/// Automatically detects the format:
-/// - Strings containing `":"` are tried as authority codes first
-/// - Strings starting with `"+"` are parsed as PROJ strings
-/// - Strings starting with `GEOGCS`, `PROJCS`, `GEODCRS`, or `PROJCRS` are parsed as WKT
+/// Automatically detects and handles:
+/// - **Authority codes**: `"EPSG:4326"`
+/// - **Bare EPSG codes**: `"4326"` (numeric-only strings)
+/// - **URN format**: `"urn:ogc:def:crs:EPSG::4326"`
+/// - **OGC CRS84**: `"CRS:84"`, `"OGC:CRS84"`
+/// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`
+/// - **PROJJSON**: `{"type": "ProjectedCRS", ...}`
+/// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]`
+/// - **WKT2**: `GEODCRS[...]` / `PROJCRS[...]`
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     let s = s.trim();
 
-    // Try authority code first (EPSG:XXXX)
-    if s.contains(':') && !s.starts_with('+') && !s.starts_with("GEOG") && !s.starts_with("PROJ") {
+    // Normalize common aliases
+    let upper = s.to_uppercase();
+    if upper == "CRS:84" || upper == "OGC:CRS84" {
+        return proj_core::lookup_epsg(4326)
+            .ok_or_else(|| ParseError::Parse("CRS:84 not found in registry".into()));
+    }
+
+    // URN format: urn:ogc:def:crs:EPSG::4326
+    if upper.starts_with("URN:OGC:DEF:CRS:") {
+        let parts: Vec<&str> = s.split(':').collect();
+        // Format: urn:ogc:def:crs:AUTHORITY::CODE or urn:ogc:def:crs:AUTHORITY:VERSION:CODE
+        if parts.len() >= 7 {
+            let code_str = parts.last().unwrap_or(&"");
+            if let Ok(code) = code_str.parse::<u32>() {
+                return proj_core::lookup_epsg(code)
+                    .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in URN: {code}")));
+            }
+        }
+        return Err(ParseError::Parse(format!("invalid URN format: {s}")));
+    }
+
+    // Try authority code (EPSG:XXXX)
+    if s.contains(':')
+        && !s.starts_with('+')
+        && !upper.starts_with("GEOG")
+        && !upper.starts_with("PROJ")
+    {
         if let Ok(crs) = proj_core::lookup_authority_code(s) {
+            return Ok(crs);
+        }
+    }
+
+    // Bare numeric EPSG code (e.g., "4326")
+    if let Ok(code) = s.parse::<u32>() {
+        if let Some(crs) = proj_core::lookup_epsg(code) {
             return Ok(crs);
         }
     }
@@ -68,7 +105,6 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
     }
 
     // WKT
-    let upper = s.to_uppercase();
     if upper.starts_with("GEOGCS")
         || upper.starts_with("PROJCS")
         || upper.starts_with("GEODCRS")
@@ -93,4 +129,72 @@ pub fn transform_from_crs_strings(
     let from_crs = parse_crs(from)?;
     let to_crs = parse_crs(to)?;
     Ok(proj_core::Transform::from_crs_defs(&from_crs, &to_crs)?)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn bare_epsg_code() {
+        let crs = parse_crs("4326").unwrap();
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 4326);
+    }
+
+    #[test]
+    fn bare_epsg_projected() {
+        let crs = parse_crs("32618").unwrap();
+        assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn urn_format() {
+        let crs = parse_crs("urn:ogc:def:crs:EPSG::4326").unwrap();
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 4326);
+    }
+
+    #[test]
+    fn urn_with_version() {
+        let crs = parse_crs("urn:ogc:def:crs:EPSG:9.8.15:3857").unwrap();
+        assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn crs84() {
+        let crs = parse_crs("CRS:84").unwrap();
+        assert!(crs.is_geographic());
+    }
+
+    #[test]
+    fn ogc_crs84() {
+        let crs = parse_crs("OGC:CRS84").unwrap();
+        assert!(crs.is_geographic());
+    }
+
+    #[test]
+    fn epsg_authority_code() {
+        let crs = parse_crs("EPSG:3857").unwrap();
+        assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn unsupported_format_error() {
+        assert!(parse_crs("not a crs").is_err());
+    }
+
+    #[test]
+    fn transform_from_strings() {
+        let t = transform_from_crs_strings("EPSG:4326", "EPSG:3857").unwrap();
+        let (x, _y) = t.convert((-74.006, 40.7128)).unwrap();
+        assert!((x - (-8238310.0)).abs() < 100.0);
+    }
+
+    #[test]
+    fn transform_bare_to_authority() {
+        let t = transform_from_crs_strings("4326", "EPSG:3857").unwrap();
+        let (x, _y) = t.convert((-74.006, 40.7128)).unwrap();
+        assert!((x - (-8238310.0)).abs() < 100.0);
+    }
 }
