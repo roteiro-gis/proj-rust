@@ -23,6 +23,11 @@ optional = true
 version = "0.7"
 optional = true
 
+[dependencies.proj]
+version = "0.31"
+features = ["bundled_proj"]
+optional = true
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
@@ -33,7 +38,13 @@ serde_json = "1"
 name = "transform_bench"
 harness = false
 
+[[bench]]
+name = "transform_compare_bench"
+harness = false
+required-features = ["c-proj-compat"]
+
 [features]
 default = ["rayon", "geo-types"]
 rayon = ["dep:rayon"]
 geo-types = ["dep:geo-types"]
+c-proj-compat = ["dep:proj"]
