@@ -2,27 +2,25 @@
 
 Date: 2026-03-21
 
-This document summarizes the current parity and comparison benchmark suite for
-`proj-rust` against bundled C PROJ. The goal is to capture the current
-performance shape for representative single-point transforms, a batch workload,
-and the live parity status against the reference implementation.
+This report summarizes the current parity and comparison benchmark suite for
+`proj-rust` against bundled C PROJ. It captures live parity status and the
+current performance shape for representative single-point and batch transforms.
 
 ## System Under Test
 
-- Machine: same local Apple M1 host used for the current `netcdf-rust` report
+- Machine: Apple M1
 - CPU topology: 8 logical CPUs
 - Memory: 16 GiB
 - OS: macOS 13.0
 - Architecture: `arm64`
 - Rust toolchain: `rustc 1.92.0`
 
-These numbers are local measurements for this machine, not universal
+These measurements reflect this machine and should not be read as universal
 throughput claims.
 
 ## Scope
 
-- Live parity test against bundled C PROJ using the checked-in 135-point
-  reference corpus
+- Live parity against bundled C PROJ using the checked-in 135-point reference corpus
 - Single-point comparisons for:
   - `EPSG:4326 -> 3857`
   - `EPSG:4326 -> 32618`
@@ -45,7 +43,7 @@ Notes:
 
 - The parity run passed both live C PROJ tests.
 - The parity corpus currently contains 135 reference points.
-- Criterion is used for the comparison benchmarks.
+- Criterion is used for all timing.
 - The batch benchmark reports element throughput for 10,000 coordinate pairs.
 
 ## Current Results
@@ -56,7 +54,7 @@ Notes:
 - The 135-point corpus remained in sync with live bundled C PROJ
 - `proj-core` matched live bundled C PROJ for all supported corpus cases
 
-### Single-point summary
+### Single-Point Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
@@ -65,7 +63,7 @@ Notes:
 | `4326 -> 3413` | 49.3 ns | 99.2 ns | `proj-rust` 2.01x faster |
 | `4267 -> 4326` | 169.2 ns | 296.5 ns | `proj-rust` 1.75x faster |
 
-### Batch summary
+### Batch Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
@@ -76,20 +74,18 @@ Notes:
 
 ## Interpretation
 
-- `proj-rust` is ahead of bundled C PROJ on every measured case in this suite.
-- The largest wins are the simple projected single-point transforms and the
+- `proj-rust` is ahead of bundled C PROJ in every measured case in this suite.
+- The largest gains are the simple projected single-point transforms and the
   sequential 10K Web Mercator batch.
 - On this host and at this batch size, `convert_batch_parallel()` is slower
-  than `convert_batch()` due to parallel overhead, even though it still remains
-  ahead of the C PROJ baseline.
-- The live parity suite gives a tighter signal than the frozen JSON alone,
-  because it verifies both corpus drift and current Rust-vs-C behavior in the
-  same run.
+  than `convert_batch()` because parallel overhead dominates, though it still
+  remains ahead of the C PROJ baseline.
+- The live parity suite provides a stronger signal than the frozen JSON corpus
+  alone because it checks both corpus drift and current Rust-versus-C behavior.
 
 ## Limits
 
 - This report reflects one machine.
-- The benchmark suite is representative, not exhaustive across the full CRS
-  registry.
+- The benchmark suite is representative, not exhaustive across the full CRS registry.
 - The batch comparison uses one 10K Web Mercator workload; different sizes or
-  thread topologies may shift the parallel/sequential crossover point.
+  thread topologies may shift the parallel-versus-sequential crossover point.

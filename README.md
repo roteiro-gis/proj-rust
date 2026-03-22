@@ -79,7 +79,7 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 |---|---|---|
 | `rayon` | yes | Parallel batch transforms via `convert_batch_parallel()` |
 | `geo-types` | yes | `From`/`Into` conversions for `geo_types::Coord<f64>` |
-| `c-proj-compat` | no | Optional test/bench integration against bundled C PROJ for live parity checks and side-by-side performance comparisons |
+| `c-proj-compat` | no | Optional reference-compatibility integration against bundled C PROJ |
 
 ## Testing
 
@@ -91,17 +91,8 @@ cargo clippy --all-targets -- -D warnings
 cargo package -p proj-core --allow-dirty
 ```
 
-Benchmark comparisons against bundled C PROJ are also available when the
-optional feature is enabled:
-
-```sh
-cargo bench -p proj-core --bench transform_bench
-./scripts/run-reference-benchmarks.sh
-```
-
-The manual reference-compat workflow uploads `target/criterion` artifacts for
-inspection. Treat benchmark numbers from shared CI runners as smoke signals,
-not authoritative performance claims.
+For reference comparisons and current benchmark results against bundled C PROJ,
+see [docs/benchmark-report.md](docs/benchmark-report.md).
 
 ## Publishing
 
