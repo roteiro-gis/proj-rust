@@ -52,7 +52,7 @@ fn bench_single_point(c: &mut Criterion) {
         let c_transform = c_proj_transform(case.from_epsg, case.to_epsg);
 
         group.bench_with_input(
-            BenchmarkId::new("proj-core", case.name),
+            BenchmarkId::new("proj-rust", case.name),
             &case.coord,
             |b, coord| b.iter(|| rust_transform.convert(black_box(*coord)).unwrap()),
         );
@@ -76,12 +76,16 @@ fn bench_batch_web_mercator(c: &mut Criterion) {
     let mut group = c.benchmark_group("batch-10k-4326->3857-vs-c-proj");
     group.throughput(Throughput::Elements(coords.len() as u64));
 
-    group.bench_function("proj-core sequential", |b| {
+    group.bench_function("proj-rust sequential", |b| {
         b.iter(|| rust_transform.convert_batch(black_box(&coords)).unwrap())
     });
     #[cfg(feature = "rayon")]
-    group.bench_function("proj-core parallel", |b| {
-        b.iter(|| rust_transform.convert_batch_parallel(black_box(&coords)).unwrap())
+    group.bench_function("proj-rust parallel", |b| {
+        b.iter(|| {
+            rust_transform
+                .convert_batch_parallel(black_box(&coords))
+                .unwrap()
+        })
     });
     group.bench_function("c-proj sequential", |b| {
         b.iter(|| {

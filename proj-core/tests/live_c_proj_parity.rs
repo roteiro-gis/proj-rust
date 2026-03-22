@@ -108,19 +108,22 @@ fn proj_core_matches_live_c_proj_for_supported_corpus_cases() {
             }
         };
 
-        let expected = match live_c_proj(point.from_epsg, point.to_epsg, point.input_x, point.input_y)
-        {
-            Ok(result) => result,
-            Err(error) => {
-                failures.push(format!("{}: {error}", point.description));
-                continue;
-            }
-        };
+        let expected =
+            match live_c_proj(point.from_epsg, point.to_epsg, point.input_x, point.input_y) {
+                Ok(result) => result,
+                Err(error) => {
+                    failures.push(format!("{}: {error}", point.description));
+                    continue;
+                }
+            };
 
         let actual = match transform.convert((point.input_x, point.input_y)) {
             Ok(result) => result,
             Err(error) => {
-                failures.push(format!("{}: proj-core convert failed: {error}", point.description));
+                failures.push(format!(
+                    "{}: proj-core convert failed: {error}",
+                    point.description
+                ));
                 continue;
             }
         };

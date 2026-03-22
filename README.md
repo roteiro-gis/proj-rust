@@ -86,7 +86,7 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 ```sh
 cargo test                        # all tests
 cargo test -p proj-core --no-default-features  # core crate without rayon/geo-types
-cargo test -p proj-core --features c-proj-compat --test live_c_proj_parity
+./scripts/run-reference-parity.sh
 cargo clippy --all-targets -- -D warnings
 cargo package -p proj-core --allow-dirty
 ```
@@ -96,8 +96,12 @@ optional feature is enabled:
 
 ```sh
 cargo bench -p proj-core --bench transform_bench
-cargo bench -p proj-core --features c-proj-compat --bench transform_compare_bench
+./scripts/run-reference-benchmarks.sh
 ```
+
+The manual reference-compat workflow uploads `target/criterion` artifacts for
+inspection. Treat benchmark numbers from shared CI runners as smoke signals,
+not authoritative performance claims.
 
 ## Publishing
 

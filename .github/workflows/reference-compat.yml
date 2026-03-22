@@ -1,4 +1,4 @@
-name: C PROJ Compat
+name: Reference Compat
 
 on:
   workflow_dispatch:
@@ -6,8 +6,15 @@ on:
       run_benchmarks:
         description: Run the Criterion comparison benchmark and upload reports
         required: false
-        default: true
+        default: false
         type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
@@ -23,7 +30,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run live parity test against bundled C PROJ
-        run: cargo test -p proj-core --features c-proj-compat --test live_c_proj_parity
+        run: ./scripts/run-reference-parity.sh
 
   benchmark:
     name: C PROJ Comparison Bench
@@ -36,7 +43,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: Run Criterion comparison bench
-        run: cargo bench -p proj-core --features c-proj-compat --bench transform_compare_bench
+        run: ./scripts/run-reference-benchmarks.sh
       - name: Upload Criterion reports
         uses: actions/upload-artifact@v4
         with:
