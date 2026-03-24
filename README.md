@@ -96,7 +96,7 @@ see [docs/benchmark-report.md](docs/benchmark-report.md).
 
 ## Publishing
 
-The workspace version is currently `0.1.0`. Release this workspace as an initial `0.x` line with scoped claims: production-ready for the supported projection families and CRS formats above, but not a claim of full PROJ parity.
+Release this workspace as a `0.x` line with scoped claims: production-ready for the supported projection families and CRS formats above, but not a claim of full PROJ parity.
 
 Publish order matters because `proj-wkt` depends on `proj-core` as a separately published crate:
 
@@ -104,7 +104,7 @@ Publish order matters because `proj-wkt` depends on `proj-core` as a separately 
 cargo package -p proj-core --allow-dirty
 cargo publish -p proj-core
 
-# wait for crates.io to index proj-core v0.1.0
+# wait for crates.io to index the new proj-core version
 
 cargo package -p proj-wkt --allow-dirty
 cargo publish -p proj-wkt

@@ -4,9 +4,9 @@ exclude = ["gen-reference"]
 resolver = "2"
 
 [workspace.package]
-version = "0.1.0"
+version = "0.1.1"
 edition = "2021"
 rust-version = "1.85"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/i-norden/proj-rust"
-homepage = "https://github.com/i-norden/proj-rust"
+repository = "https://github.com/roteiro-gis/proj-rust"
+homepage = "https://github.com/roteiro-gis/proj-rust"
