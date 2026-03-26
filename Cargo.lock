@@ -613,7 +613,7 @@ dependencies = [
 
 [[package]]
 name = "proj-core"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "criterion",
  "geo-types",
@@ -642,7 +642,7 @@ dependencies = [
 
 [[package]]
 name = "proj-wkt"
-version = "0.1.1"
+version = "0.1.2"
 dependencies = [
  "proj-core",
  "serde_json",

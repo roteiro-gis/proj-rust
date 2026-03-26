@@ -5,11 +5,12 @@ use std::collections::HashMap;
 /// Parse a WKT CRS string.
 ///
 /// Strategy:
-/// 1. Extract AUTHORITY["EPSG","XXXX"] if present → look up in registry
+/// 1. Extract a top-level AUTHORITY["EPSG","XXXX"] or ID["EPSG",XXXX] if present
+///    → look up in registry
 /// 2. Otherwise, extract projection parameters from the WKT structure
 pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
-    // Try to extract AUTHORITY tag first — most reliable approach
-    if let Some(epsg) = extract_authority_epsg(s) {
+    // Try to extract a top-level CRS identifier first — most reliable approach.
+    if let Some(epsg) = extract_top_level_epsg(s) {
         if let Some(crs) = proj_core::lookup_epsg(epsg) {
             return Ok(crs);
         }
@@ -19,15 +20,150 @@ pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     parse_wkt_structure(s)
 }
 
-/// Extract EPSG code from AUTHORITY["EPSG","XXXX"] anywhere in the string.
-fn extract_authority_epsg(s: &str) -> Option<u32> {
-    let upper = s.to_uppercase();
-    let marker = "AUTHORITY[\"EPSG\",\"";
-    let pos = upper.find(marker)?;
-    let start = pos + marker.len();
-    let rest = &s[start..];
-    let end = rest.find('"')?;
-    rest[..end].parse().ok()
+/// Extract a top-level EPSG code from AUTHORITY[...] or ID[...].
+fn extract_top_level_epsg(s: &str) -> Option<u32> {
+    let root_start = s.find('[')?;
+    let mut depth = 1usize;
+    let mut i = root_start + 1;
+    let bytes = s.as_bytes();
+    let mut in_string = false;
+
+    while i < bytes.len() && depth > 0 {
+        match bytes[i] {
+            b'"' => {
+                if in_string && bytes.get(i + 1) == Some(&b'"') {
+                    i += 2;
+                } else {
+                    in_string = !in_string;
+                    i += 1;
+                }
+            }
+            _ if in_string => i += 1,
+            b'[' => {
+                depth += 1;
+                i += 1;
+            }
+            b']' => {
+                depth -= 1;
+                i += 1;
+            }
+            _ if depth == 1 => {
+                if let Some((name, inner, next)) = parse_wkt_element(s, i) {
+                    if name.eq_ignore_ascii_case("AUTHORITY") || name.eq_ignore_ascii_case("ID") {
+                        if let Some(epsg) = parse_epsg_element(inner) {
+                            return Some(epsg);
+                        }
+                    }
+                    i = next;
+                } else {
+                    i += 1;
+                }
+            }
+            _ => i += 1,
+        }
+    }
+
+    None
+}
+
+fn parse_wkt_element(s: &str, start: usize) -> Option<(&str, &str, usize)> {
+    let bytes = s.as_bytes();
+    let first = *bytes.get(start)?;
+    if !first.is_ascii_alphabetic() {
+        return None;
+    }
+
+    let mut name_end = start + 1;
+    while let Some(byte) = bytes.get(name_end) {
+        if byte.is_ascii_alphanumeric() || *byte == b'_' {
+            name_end += 1;
+        } else {
+            break;
+        }
+    }
+
+    let mut bracket_start = name_end;
+    while let Some(byte) = bytes.get(bracket_start) {
+        if byte.is_ascii_whitespace() {
+            bracket_start += 1;
+        } else {
+            break;
+        }
+    }
+    if bytes.get(bracket_start) != Some(&b'[') {
+        return None;
+    }
+
+    let mut depth = 1usize;
+    let mut i = bracket_start + 1;
+    let mut in_string = false;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'"' => {
+                if in_string && bytes.get(i + 1) == Some(&b'"') {
+                    i += 2;
+                } else {
+                    in_string = !in_string;
+                    i += 1;
+                }
+            }
+            _ if in_string => i += 1,
+            b'[' => {
+                depth += 1;
+                i += 1;
+            }
+            b']' => {
+                depth -= 1;
+                i += 1;
+                if depth == 0 {
+                    let name = &s[start..name_end];
+                    let inner = &s[bracket_start + 1..i - 1];
+                    return Some((name, inner, i));
+                }
+            }
+            _ => i += 1,
+        }
+    }
+
+    None
+}
+
+fn parse_epsg_element(inner: &str) -> Option<u32> {
+    let (authority, code) = first_two_fields(inner)?;
+    if !trim_wkt_token(authority).eq_ignore_ascii_case("EPSG") {
+        return None;
+    }
+    trim_wkt_token(code).parse().ok()
+}
+
+fn first_two_fields(s: &str) -> Option<(&str, &str)> {
+    let mut depth = 0usize;
+    let mut in_string = false;
+    let bytes = s.as_bytes();
+
+    for (idx, byte) in bytes.iter().enumerate() {
+        match *byte {
+            b'"' => {
+                if in_string && bytes.get(idx + 1) == Some(&b'"') {
+                    continue;
+                }
+                in_string = !in_string;
+            }
+            _ if in_string => {}
+            b'[' => depth += 1,
+            b']' => depth = depth.saturating_sub(1),
+            b',' if depth == 0 => {
+                return Some((&s[..idx], &s[idx + 1..]));
+            }
+            _ => {}
+        }
+    }
+
+    None
+}
+
+fn trim_wkt_token(token: &str) -> &str {
+    token.trim().trim_matches('"')
 }
 
 /// Attempt to parse WKT structure to extract projection parameters.
@@ -320,9 +456,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn extract_epsg_from_wkt() {
+    fn extract_top_level_epsg_from_wkt() {
         let wkt = r#"GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],AUTHORITY["EPSG","4326"]]"#;
-        assert_eq!(extract_authority_epsg(wkt), Some(4326));
+        assert_eq!(extract_top_level_epsg(wkt), Some(4326));
     }
 
     #[test]
@@ -356,6 +492,14 @@ mod tests {
     }
 
     #[test]
+    fn parse_wkt_projcs_ignores_nested_base_authority() {
+        let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],AUTHORITY["EPSG","4326"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
+        let crs = parse_wkt(wkt).unwrap();
+        assert!(crs.is_projected());
+        assert_eq!(crs.epsg(), 0);
+    }
+
+    #[test]
     fn reject_unknown_geographic_datum() {
         let err =
             parse_wkt(r#"GEOGCS["Unknown",DATUM["Custom",SPHEROID["Custom",1,1]]]"#).unwrap_err();
@@ -369,5 +513,13 @@ mod tests {
         let wkt = r#"PROJCRS["WGS 84 / UTM zone 18N",BASEGEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]]],CONVERSION["UTM zone 18N",METHOD["Transverse Mercator"],PARAMETER["Latitude of natural origin",0,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Longitude of natural origin",-75,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Scale factor at natural origin",0.9996,SCALEUNIT["unity",1]],PARAMETER["False easting",500000,LENGTHUNIT["metre",1]],PARAMETER["False northing",0,LENGTHUNIT["metre",1]]],CS[Cartesian,2],AXIS["easting",east],AXIS["northing",north],LENGTHUNIT["metre",1]]"#;
         let crs = parse_wkt(wkt).unwrap();
         assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn parse_wkt2_geographic_with_id() {
+        let wkt = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",4326]]"#;
+        let crs = parse_wkt(wkt).unwrap();
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 4326);
     }
 }

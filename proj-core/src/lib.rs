@@ -37,7 +37,7 @@ mod projection;
 pub mod registry;
 pub mod transform;
 
-pub use coord::{Coord, Coord3D, Transformable, Transformable3D};
+pub use coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
 pub use crs::{CrsDef, GeographicCrsDef, ProjectedCrsDef, ProjectionMethod};
 pub use datum::{Datum, HelmertParams};
 pub use ellipsoid::Ellipsoid;

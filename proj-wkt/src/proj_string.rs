@@ -11,6 +11,12 @@ use crate::{ParseError, Result};
 pub(crate) fn parse_proj_string(s: &str) -> Result<CrsDef> {
     let params = parse_params(s)?;
 
+    if !params.contains_key("proj") {
+        if let Some(crs) = parse_init_authority(&params)? {
+            return Ok(crs);
+        }
+    }
+
     let proj = params.get("proj").map(|s| s.as_str()).unwrap_or("longlat");
 
     match proj {
@@ -40,6 +46,29 @@ fn parse_params(s: &str) -> Result<HashMap<String, String>> {
         }
     }
     Ok(params)
+}
+
+fn parse_init_authority(params: &HashMap<String, String>) -> Result<Option<CrsDef>> {
+    let Some(init) = params.get("init") else {
+        return Ok(None);
+    };
+    let Some((authority, code)) = init.split_once(':') else {
+        return Err(ParseError::Parse(format!(
+            "unsupported +init authority reference: {init}"
+        )));
+    };
+    if !authority.eq_ignore_ascii_case("epsg") {
+        return Err(ParseError::Parse(format!(
+            "unsupported +init authority reference: {init}"
+        )));
+    }
+
+    let code = code
+        .parse::<u32>()
+        .map_err(|_| ParseError::Parse(format!("invalid EPSG code in +init: {init}")))?;
+    let crs = proj_core::lookup_epsg(code)
+        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in +init: {code}")))?;
+    Ok(Some(crs))
 }
 
 fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
@@ -330,6 +359,13 @@ mod tests {
     fn reject_invalid_utm_zone() {
         let err = parse_proj_string("+proj=utm +zone=0 +datum=WGS84").unwrap_err();
         assert!(err.to_string().contains("UTM zone out of range"));
+    }
+
+    #[test]
+    fn parse_init_epsg() {
+        let crs = parse_proj_string("+init=epsg:3857 +type=crs").unwrap();
+        assert!(crs.is_projected());
+        assert_eq!(crs.epsg(), 3857);
     }
 
     #[test]

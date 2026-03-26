@@ -1,4 +1,4 @@
-use crate::coord::{Coord, Coord3D, Transformable, Transformable3D};
+use crate::coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
 use crate::crs::{CrsDef, ProjectionMethod};
 use crate::datum::Datum;
 use crate::error::{Error, Result};
@@ -25,6 +25,8 @@ use crate::registry;
 /// assert!((x - (-8238310.0)).abs() < 1.0);
 /// ```
 pub struct Transform {
+    source: CrsDef,
+    target: CrsDef,
     pipeline: TransformPipeline,
 }
 
@@ -76,6 +78,8 @@ impl Transform {
         // Identity check for known EPSG codes and semantically identical custom CRS definitions.
         if (from.epsg() != 0 && from.epsg() == to.epsg()) || same_crs_definition(from, to) {
             return Ok(Self {
+                source: *from,
+                target: *to,
                 pipeline: TransformPipeline::Identity,
             });
         }
@@ -136,7 +140,11 @@ impl Transform {
             }
         };
 
-        Ok(Self { pipeline })
+        Ok(Self {
+            source: *from,
+            target: *to,
+            pipeline,
+        })
     }
 
     /// Transform a single coordinate.
@@ -168,6 +176,63 @@ impl Transform {
         let c = coord.into_coord3d();
         let result = self.convert_coord3d(c)?;
         Ok(T::from_coord3d(result))
+    }
+
+    /// Return the source CRS definition for this transform.
+    pub fn source_crs(&self) -> &CrsDef {
+        &self.source
+    }
+
+    /// Return the target CRS definition for this transform.
+    pub fn target_crs(&self) -> &CrsDef {
+        &self.target
+    }
+
+    /// Build the inverse transform by swapping the source and target CRS.
+    pub fn inverse(&self) -> Result<Self> {
+        Self::from_crs_defs(&self.target, &self.source)
+    }
+
+    /// Reproject a 2D bounding box by sampling its perimeter.
+    ///
+    /// `densify_points` controls how many evenly spaced interior points are sampled
+    /// on each edge between the corners. `0` samples only the four corners.
+    ///
+    /// The returned bounds are axis-aligned in the target CRS. Geographic outputs
+    /// that cross the antimeridian are not normalized into a wrapped representation.
+    pub fn transform_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
+        if !bounds.is_valid() {
+            return Err(Error::OutOfRange(
+                "bounds must be finite and satisfy min <= max".into(),
+            ));
+        }
+
+        let segments = densify_points
+            .checked_add(1)
+            .ok_or_else(|| Error::OutOfRange("densify point count is too large".into()))?;
+
+        let mut transformed: Option<Bounds> = None;
+        for i in 0..=segments {
+            let t = i as f64 / segments as f64;
+            let x = bounds.min_x + bounds.width() * t;
+            let y = bounds.min_y + bounds.height() * t;
+
+            for sample in [
+                Coord::new(x, bounds.min_y),
+                Coord::new(x, bounds.max_y),
+                Coord::new(bounds.min_x, y),
+                Coord::new(bounds.max_x, y),
+            ] {
+                let coord = self.convert_coord(sample)?;
+                if let Some(accum) = &mut transformed {
+                    accum.expand_to_include(coord);
+                } else {
+                    transformed = Some(Bounds::new(coord.x, coord.y, coord.x, coord.y));
+                }
+            }
+        }
+
+        transformed.ok_or_else(|| Error::OutOfRange("failed to sample bounds".into()))
     }
 
     /// Transform a single `Coord` value.
@@ -487,7 +552,7 @@ mod tests {
     #[test]
     fn roundtrip_4326_3857() {
         let fwd = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
-        let inv = Transform::new("EPSG:3857", "EPSG:4326").unwrap();
+        let inv = fwd.inverse().unwrap();
 
         let original = (-74.0445, 40.6892);
         let projected = fwd.convert(original).unwrap();
@@ -537,7 +602,7 @@ mod tests {
     #[test]
     fn roundtrip_4326_3413() {
         let fwd = Transform::new("EPSG:4326", "EPSG:3413").unwrap();
-        let inv = Transform::new("EPSG:3413", "EPSG:4326").unwrap();
+        let inv = fwd.inverse().unwrap();
 
         let original = (-45.0, 75.0);
         let projected = fwd.convert(original).unwrap();
@@ -584,7 +649,7 @@ mod tests {
     #[test]
     fn cross_datum_roundtrip_nad27() {
         let fwd = Transform::new("EPSG:4267", "EPSG:4326").unwrap();
-        let inv = Transform::new("EPSG:4326", "EPSG:4267").unwrap();
+        let inv = fwd.inverse().unwrap();
         let original = (-90.0, 45.0);
         let shifted = fwd.convert(original).unwrap();
         let back = inv.convert(shifted).unwrap();
@@ -623,7 +688,7 @@ mod tests {
     #[test]
     fn cross_datum_roundtrip_nad27_3d() {
         let fwd = Transform::new("EPSG:4267", "EPSG:4326").unwrap();
-        let inv = Transform::new("EPSG:4326", "EPSG:4267").unwrap();
+        let inv = fwd.inverse().unwrap();
         let original = (-90.0, 45.0, 250.0);
         let shifted = fwd.convert_3d(original).unwrap();
         let back = inv.convert_3d(shifted).unwrap();
@@ -664,6 +729,40 @@ mod tests {
 
         let t = Transform::from_crs_defs(&from, &to).unwrap();
         assert!(matches!(t.pipeline, TransformPipeline::Identity));
+    }
+
+    #[test]
+    fn inverse_exposes_swapped_crs() {
+        let fwd = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let inv = fwd.inverse().unwrap();
+
+        assert_eq!(fwd.source_crs().epsg(), 4326);
+        assert_eq!(fwd.target_crs().epsg(), 3857);
+        assert_eq!(inv.source_crs().epsg(), 3857);
+        assert_eq!(inv.target_crs().epsg(), 4326);
+    }
+
+    #[test]
+    fn transform_bounds_web_mercator() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let bounds = Bounds::new(-74.3, 40.45, -73.65, 40.95);
+
+        let result = t.transform_bounds(bounds, 8).unwrap();
+
+        assert!(result.min_x < -8_200_000.0);
+        assert!(result.max_x < -8_100_000.0);
+        assert!(result.min_y > 4_900_000.0);
+        assert!(result.max_y > result.min_y);
+    }
+
+    #[test]
+    fn transform_bounds_rejects_invalid_input() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let err = t
+            .transform_bounds(Bounds::new(10.0, 5.0, -10.0, 20.0), 0)
+            .unwrap_err();
+
+        assert!(matches!(err, Error::OutOfRange(_)));
     }
 
     #[test]

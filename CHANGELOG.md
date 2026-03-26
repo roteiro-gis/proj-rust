@@ -5,6 +5,10 @@
 - add native 3D coordinate APIs in `proj-core` and `proj-wkt`, with `z` preserved by the current horizontal-only transform pipeline
 - add live bundled C PROJ parity coverage and benchmark coverage for the new 3D transform path
 - optimize exact same-definition custom CRS transforms to use the identity pipeline
+- add `Transform::inverse()` plus source/target CRS introspection for reusable forward/reverse transform pairs
+- add `Bounds` and sampled `transform_bounds()` APIs in `proj-core`, with matching `Proj` facade support in `proj-wkt`
+- fix WKT EPSG detection to respect top-level CRS identifiers instead of nested base CRS metadata, and add WKT2 `ID["EPSG", ...]` support
+- add legacy `+init=epsg:XXXX` parsing support for downstream `Proj`-style compatibility flows
 
 ## 0.1.0
 

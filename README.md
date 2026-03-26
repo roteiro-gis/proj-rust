@@ -21,14 +21,14 @@ Current non-goals for `v0.1.0` include:
 ## Usage
 
 ```rust
-use proj_core::Transform;
+use proj_core::{Bounds, Transform};
 
 // WGS84 geographic (degrees) -> Web Mercator (meters)
 let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
 let (x, y) = t.convert((-74.006, 40.7128)).unwrap();
 
 // Inverse: Web Mercator -> WGS84
-let inv = Transform::new("EPSG:3857", "EPSG:4326").unwrap();
+let inv = t.inverse().unwrap();
 let (lon, lat) = inv.convert((x, y)).unwrap();
 
 // Works with geo_types::Coord<f64> (with `geo-types` feature)
@@ -42,6 +42,11 @@ let results = t.convert_batch_parallel(&coords).unwrap();
 // 3D transforms preserve the third ordinate unchanged
 let (x, y, h) = t.convert_3d((-74.006, 40.7128, 15.0)).unwrap();
 assert_eq!(h, 15.0);
+
+// Reproject an extent by densifying its perimeter
+let bounds = Bounds::new(-74.3, 40.45, -73.65, 40.95);
+let projected_bounds = t.transform_bounds(bounds, 8).unwrap();
+assert!(projected_bounds.max_x > projected_bounds.min_x);
 ```
 
 Coordinates use the CRS's native units: degrees for geographic CRS, meters for projected CRS.
@@ -55,8 +60,8 @@ With `proj-wkt`, the following CRS definition formats are supported:
 
 - EPSG authority codes and bare EPSG numbers
 - OGC `CRS:84` aliases and EPSG URNs
-- common PROJ strings for the implemented projection families
-- WKT1 and the supported WKT2 projected/geographic CRS forms
+- common PROJ strings for the implemented projection families, including legacy `+init=epsg:XXXX`
+- WKT1 and the supported WKT2 projected/geographic CRS forms, including top-level EPSG `ID[...]`
 - basic PROJJSON geographic and projected CRS definitions for the implemented methods
 
 ## Supported CRS
@@ -77,6 +82,8 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 ## Compatibility Surface
 
 `proj-wkt` also exposes a lightweight `Proj` compatibility facade for downstream code that currently uses the common `new_known_crs` / `new` / `create_crs_to_crs_from_pj` / `convert` flow. It is intentionally narrow and only covers the supported CRS semantics in this workspace.
+
+`proj-core::Transform` and `proj-wkt::Proj` also expose inverse-transform construction and sampled bounds reprojection via `inverse()` and `transform_bounds()`.
 
 ## Feature Flags
 

@@ -34,6 +34,54 @@ impl Coord3D {
     }
 }
 
+/// A 2D axis-aligned bounding box in CRS-native units.
+///
+/// At the public API boundary, units match the CRS:
+/// - **Geographic CRS**: degrees
+/// - **Projected CRS**: meters
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Bounds {
+    pub min_x: f64,
+    pub min_y: f64,
+    pub max_x: f64,
+    pub max_y: f64,
+}
+
+impl Bounds {
+    pub fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Self {
+        Self {
+            min_x,
+            min_y,
+            max_x,
+            max_y,
+        }
+    }
+
+    pub fn width(&self) -> f64 {
+        self.max_x - self.min_x
+    }
+
+    pub fn height(&self) -> f64 {
+        self.max_y - self.min_y
+    }
+
+    pub(crate) fn is_valid(&self) -> bool {
+        self.min_x.is_finite()
+            && self.min_y.is_finite()
+            && self.max_x.is_finite()
+            && self.max_y.is_finite()
+            && self.min_x <= self.max_x
+            && self.min_y <= self.max_y
+    }
+
+    pub(crate) fn expand_to_include(&mut self, coord: Coord) {
+        self.min_x = self.min_x.min(coord.x);
+        self.min_y = self.min_y.min(coord.y);
+        self.max_x = self.max_x.max(coord.x);
+        self.max_y = self.max_y.max(coord.y);
+    }
+}
+
 impl From<(f64, f64)> for Coord {
     fn from((x, y): (f64, f64)) -> Self {
         Self { x, y }
@@ -194,5 +242,13 @@ mod tests {
         let coord = original.into_coord3d();
         let back = <(f64, f64, f64)>::from_coord3d(coord);
         assert_eq!(original, back);
+    }
+
+    #[test]
+    fn bounds_basics() {
+        let bounds = Bounds::new(-10.0, 20.0, 30.0, 40.0);
+        assert_eq!(bounds.width(), 40.0);
+        assert_eq!(bounds.height(), 20.0);
+        assert!(bounds.is_valid());
     }
 }
