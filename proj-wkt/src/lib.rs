@@ -28,7 +28,7 @@ mod proj_string;
 mod projjson;
 mod wkt;
 
-use proj_core::{Coord, Coord3D, CrsDef, Transform, Transformable, Transformable3D};
+use proj_core::{Bounds, Coord, Coord3D, CrsDef, Transform, Transformable, Transformable3D};
 
 /// Parse error.
 #[derive(Debug, thiserror::Error)]
@@ -143,7 +143,7 @@ pub struct Proj {
 
 enum ProjInner {
     Definition(CrsDef),
-    Transform(Transform),
+    Transform(Box<Transform>),
 }
 
 impl Proj {
@@ -157,7 +157,7 @@ impl Proj {
     /// Build a transform directly from two CRS strings.
     pub fn new_known_crs(from: &str, to: &str, _area: Option<&str>) -> Result<Self> {
         Ok(Self {
-            inner: ProjInner::Transform(transform_from_crs_strings(from, to)?),
+            inner: ProjInner::Transform(Box::new(transform_from_crs_strings(from, to)?)),
         })
     }
 
@@ -171,7 +171,7 @@ impl Proj {
         let source = self.definition()?;
         let target = target.definition()?;
         Ok(Self {
-            inner: ProjInner::Transform(Transform::from_crs_defs(source, target)?),
+            inner: ProjInner::Transform(Box::new(Transform::from_crs_defs(source, target)?)),
         })
     }
 
@@ -203,6 +203,32 @@ impl Proj {
     /// Transform a 3D coordinate using the native [`Coord3D`] type.
     pub fn convert_coord_3d(&self, coord: Coord3D) -> proj_core::Result<Coord3D> {
         self.convert_3d(coord)
+    }
+
+    /// Return the inverse of a CRS-to-CRS transform.
+    pub fn inverse(&self) -> Result<Self> {
+        match &self.inner {
+            ProjInner::Transform(transform) => Ok(Self {
+                inner: ProjInner::Transform(Box::new(transform.inverse()?)),
+            }),
+            ProjInner::Definition(_) => Err(ParseError::Parse(
+                "inverse requires a CRS-to-CRS transform, not a standalone CRS definition".into(),
+            )),
+        }
+    }
+
+    /// Reproject an axis-aligned bounding box by sampling its perimeter.
+    pub fn transform_bounds(
+        &self,
+        bounds: Bounds,
+        densify_points: usize,
+    ) -> proj_core::Result<Bounds> {
+        match &self.inner {
+            ProjInner::Transform(transform) => transform.transform_bounds(bounds, densify_points),
+            ProjInner::Definition(_) => Err(proj_core::Error::InvalidDefinition(
+                "bounds reprojection requires a CRS-to-CRS transform, not a standalone CRS definition".into(),
+            )),
+        }
     }
 
     fn definition(&self) -> Result<&CrsDef> {
@@ -304,5 +330,24 @@ mod tests {
         let proj = from.create_crs_to_crs_from_pj(&to, None, None).unwrap();
         let (x, _y) = proj.convert((-74.006, 40.7128)).unwrap();
         assert!((x - (-8238310.0)).abs() < 100.0);
+    }
+
+    #[test]
+    fn proj_facade_inverse() {
+        let proj = Proj::new_known_crs("EPSG:4326", "EPSG:3857", None).unwrap();
+        let inv = proj.inverse().unwrap();
+        let (lon, lat) = inv.convert((-8_238_310.0, 4_970_072.0)).unwrap();
+        assert!(lon < -70.0);
+        assert!(lat > 40.0);
+    }
+
+    #[test]
+    fn proj_facade_transform_bounds() {
+        let proj = Proj::new_known_crs("EPSG:4326", "EPSG:3857", None).unwrap();
+        let result = proj
+            .transform_bounds(Bounds::new(-74.3, 40.45, -73.65, 40.95), 4)
+            .unwrap();
+        assert!(result.max_x > result.min_x);
+        assert!(result.max_y > result.min_y);
     }
 }
