@@ -2,9 +2,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::{ParseError, Result};
-use proj_core::{
-    CrsDef, Datum, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod,
-};
+use proj_core::{CrsDef, Datum, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
 
 pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
     let value: Value =
@@ -235,9 +233,11 @@ fn any_name_contains(value: &Value, needles: &[&str]) -> bool {
     match value {
         Value::Object(map) => map.iter().any(|(key, val)| {
             (key == "name"
-                && val
-                    .as_str()
-                    .is_some_and(|s| needles.iter().any(|needle| contains_ascii_case_insensitive(s, needle))))
+                && val.as_str().is_some_and(|s| {
+                    needles
+                        .iter()
+                        .any(|needle| contains_ascii_case_insensitive(s, needle))
+                }))
                 || any_name_contains(val, needles)
         }),
         Value::Array(values) => values.iter().any(|val| any_name_contains(val, needles)),
@@ -300,12 +300,14 @@ fn parameter_factor_from_json(
             .get("unit")
             .and_then(angle_unit_to_degree_from_json)
             .or_else(|| {
-                param.get("unit_conversion_factor")
+                param
+                    .get("unit_conversion_factor")
                     .and_then(Value::as_f64)
                     .map(radians_to_degrees_factor)
             })
             .or_else(|| {
-                param.get("conversion_factor")
+                param
+                    .get("conversion_factor")
                     .and_then(Value::as_f64)
                     .map(radians_to_degrees_factor)
             })
@@ -338,10 +340,9 @@ fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
         | "latitudeofstandardparallel"
         | "latitudeof1ststandardparallel"
         | "latitudeof2ndstandardparallel" => ParameterUnitKind::Angle,
-        "falseeasting"
-        | "falsenorthing"
-        | "eastingatfalseorigin"
-        | "northingatfalseorigin" => ParameterUnitKind::Length,
+        "falseeasting" | "falsenorthing" | "eastingatfalseorigin" | "northingatfalseorigin" => {
+            ParameterUnitKind::Length
+        }
         "scalefactor" | "scalefactoratnaturalorigin" | "scalefactoratprojectionorigin" => {
             ParameterUnitKind::Scale
         }
@@ -350,7 +351,8 @@ fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
 }
 
 fn projected_linear_unit(value: &Value) -> Option<LinearUnit> {
-    value.get("coordinate_system")
+    value
+        .get("coordinate_system")
         .and_then(|cs| cs.get("axis"))
         .and_then(Value::as_array)
         .and_then(|axis| axis.first())

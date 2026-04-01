@@ -342,10 +342,7 @@ impl Transform {
 
     fn source_projected_native_to_meters(&self, x: f64, y: f64) -> (f64, f64) {
         match self.source {
-            CrsDef::Projected(p) => (
-                p.linear_unit().to_meters(x),
-                p.linear_unit().to_meters(y),
-            ),
+            CrsDef::Projected(p) => (p.linear_unit().to_meters(x), p.linear_unit().to_meters(y)),
             CrsDef::Geographic(_) => (x, y),
         }
     }
@@ -625,8 +622,14 @@ mod tests {
         let (mx, my) = meter_tx.convert(coord).unwrap();
         let (fx, fy) = foot_tx.convert(coord).unwrap();
 
-        assert!((fx * US_FOOT_TO_METER - mx).abs() < 0.02, "x mismatch: {fx} ft vs {mx} m");
-        assert!((fy * US_FOOT_TO_METER - my).abs() < 0.02, "y mismatch: {fy} ft vs {my} m");
+        assert!(
+            (fx * US_FOOT_TO_METER - mx).abs() < 0.02,
+            "x mismatch: {fx} ft vs {mx} m"
+        );
+        assert!(
+            (fy * US_FOOT_TO_METER - my).abs() < 0.02,
+            "y mismatch: {fy} ft vs {my} m"
+        );
     }
 
     #[test]

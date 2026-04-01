@@ -290,24 +290,22 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
                 false_northing: fn_,
             }
         }
-        "albersequalareaconic" | "albersequalarea" => {
-            ProjectionMethod::AlbersEqualArea {
-                lon0,
-                lat0,
-                lat1: first_param(
-                    &params,
-                    &["standardparallel1", "latitudeof1ststandardparallel"],
-                )
-                .unwrap_or(lat0),
-                lat2: first_param(
-                    &params,
-                    &["standardparallel2", "latitudeof2ndstandardparallel"],
-                )
-                .unwrap_or(lat0),
-                false_easting: fe,
-                false_northing: fn_,
-            }
-        }
+        "albersequalareaconic" | "albersequalarea" => ProjectionMethod::AlbersEqualArea {
+            lon0,
+            lat0,
+            lat1: first_param(
+                &params,
+                &["standardparallel1", "latitudeof1ststandardparallel"],
+            )
+            .unwrap_or(lat0),
+            lat2: first_param(
+                &params,
+                &["standardparallel2", "latitudeof2ndstandardparallel"],
+            )
+            .unwrap_or(lat0),
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "polarstereographicvarianta" | "polarstereographicvariantb" | "polarstereographic" => {
             ProjectionMethod::PolarStereographic {
                 lon0,
@@ -325,22 +323,20 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
                 false_northing: fn_,
             }
         }
-        "equidistantcylindrical" | "platecarree" => {
-            ProjectionMethod::EquidistantCylindrical {
-                lon0,
-                lat_ts: first_param(
-                    &params,
-                    &[
-                        "standardparallel1",
-                        "latitudeof1ststandardparallel",
-                        "latitudeofstandardparallel",
-                    ],
-                )
-                .unwrap_or(0.0),
-                false_easting: fe,
-                false_northing: fn_,
-            }
-        }
+        "equidistantcylindrical" | "platecarree" => ProjectionMethod::EquidistantCylindrical {
+            lon0,
+            lat_ts: first_param(
+                &params,
+                &[
+                    "standardparallel1",
+                    "latitudeof1ststandardparallel",
+                    "latitudeofstandardparallel",
+                ],
+            )
+            .unwrap_or(0.0),
+            false_easting: fe,
+            false_northing: fn_,
+        },
         _ => {
             return Err(ParseError::Parse(format!(
                 "unsupported WKT projection: {}",
@@ -377,8 +373,7 @@ fn infer_datum(s: &str) -> Result<proj_core::Datum> {
     {
         return Ok(proj_core::datum::NAD27);
     }
-    if contains_ascii_case_insensitive(s, "ETRS89")
-        || contains_ascii_case_insensitive(s, "ETRS 89")
+    if contains_ascii_case_insensitive(s, "ETRS89") || contains_ascii_case_insensitive(s, "ETRS 89")
     {
         return Ok(proj_core::datum::ETRS89);
     }
@@ -427,11 +422,9 @@ fn parse_wkt_parameters(
         let start = search_start + rel;
         if let Some((name, inner, next)) = parse_wkt_element(s, start) {
             if name.eq_ignore_ascii_case("PARAMETER") {
-                if let Some((key, value)) = parse_parameter_element(
-                    inner,
-                    projected_linear_unit,
-                    base_angle_unit_to_degree,
-                ) {
+                if let Some((key, value)) =
+                    parse_parameter_element(inner, projected_linear_unit, base_angle_unit_to_degree)
+                {
                     params.insert(key, value);
                 }
                 search_start = next;
@@ -484,7 +477,10 @@ fn parse_parameter_element(
         ParameterUnitKind::Scale | ParameterUnitKind::Other => 1.0,
     };
 
-    Some((normalized_name, value * nested_factor.unwrap_or(default_factor)))
+    Some((
+        normalized_name,
+        value * nested_factor.unwrap_or(default_factor),
+    ))
 }
 
 fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
@@ -504,10 +500,9 @@ fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
         | "latitudeofstandardparallel"
         | "latitudeof1ststandardparallel"
         | "latitudeof2ndstandardparallel" => ParameterUnitKind::Angle,
-        "falseeasting"
-        | "falsenorthing"
-        | "eastingatfalseorigin"
-        | "northingatfalseorigin" => ParameterUnitKind::Length,
+        "falseeasting" | "falsenorthing" | "eastingatfalseorigin" | "northingatfalseorigin" => {
+            ParameterUnitKind::Length
+        }
         "scalefactor" | "scalefactoratnaturalorigin" | "scalefactoratprojectionorigin" => {
             ParameterUnitKind::Scale
         }

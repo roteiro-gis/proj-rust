@@ -137,9 +137,9 @@ fn get_f64(params: &HashMap<String, String>, key: &str) -> f64 {
 
 fn resolve_linear_unit_to_meter(params: &HashMap<String, String>) -> Result<f64> {
     if let Some(to_meter) = params.get("to_meter") {
-        return to_meter.parse::<f64>().map_err(|_| {
-            ParseError::Parse(format!("invalid +to_meter value: {to_meter}"))
-        });
+        return to_meter
+            .parse::<f64>()
+            .map_err(|_| ParseError::Parse(format!("invalid +to_meter value: {to_meter}")));
     }
 
     let factor = match params.get("units").map(|s| s.as_str()) {
