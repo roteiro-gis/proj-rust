@@ -11,6 +11,9 @@
 - add `Bounds` and sampled `transform_bounds()` APIs in `proj-core`, with matching `Proj` facade support in `proj-wkt`
 - fix WKT EPSG detection to respect top-level CRS identifiers instead of nested base CRS metadata, and add WKT2 `ID["EPSG", ...]` support
 - add legacy `+init=epsg:XXXX` parsing support for downstream `Proj`-style compatibility flows
+- reject custom WKT, PROJJSON, and PROJ definitions that require unsupported geographic axis-order, prime-meridian, or angular-unit semantics instead of silently degrading them
+- make Rayon-backed batch transforms adaptive by chunking large inputs and falling back to the sequential path when parallel overhead would dominate
+- add staged release-packaging verification for the `proj-core` then `proj-wkt` publish order, and run it in CI
 
 ## 0.1.0
 

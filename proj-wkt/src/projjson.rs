@@ -1,6 +1,10 @@
 use serde_json::Value;
 use std::collections::HashMap;
 
+use crate::semantics::{
+    approx_eq, normalize_key, validate_supported_geographic_semantics,
+    validate_supported_projected_semantics, AxisDirection, CoordinateSystemSpec,
+};
 use crate::{ParseError, Result};
 use proj_core::{CrsDef, Datum, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
 
@@ -21,6 +25,12 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
 
     match crs_type {
         "GeographicCRS" | "GeodeticCRS" => {
+            validate_supported_geographic_semantics(
+                "PROJJSON geographic CRS",
+                coordinate_system_angle_unit_to_degree(&value)?,
+                prime_meridian_degrees_from_json(&value),
+                &coordinate_system_from_json(&value),
+            )?;
             let datum = infer_datum(&value)?;
             Ok(CrsDef::Geographic(GeographicCrsDef::new(0, datum, "")))
         }
@@ -36,8 +46,26 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         .get("conversion")
         .ok_or_else(|| ParseError::Parse("PROJJSON projected CRS is missing conversion".into()))?;
     let datum = infer_datum(value)?;
-    let linear_unit = projected_linear_unit(value).unwrap_or_else(LinearUnit::metre);
-    let base_angle_unit_to_degree = base_geographic_angle_unit_to_degree(value).unwrap_or(1.0);
+    let linear_unit = projected_linear_unit(value)?.unwrap_or_else(LinearUnit::metre);
+    validate_supported_projected_semantics(
+        "PROJJSON projected CRS",
+        &coordinate_system_from_json(value),
+    )?;
+
+    let base_crs = value.get("base_crs");
+    let base_angle_unit_to_degree = base_crs
+        .map(coordinate_system_angle_unit_to_degree)
+        .transpose()?
+        .flatten()
+        .unwrap_or(1.0);
+    if let Some(base_crs) = base_crs {
+        validate_supported_geographic_semantics(
+            "PROJJSON projected base geographic CRS",
+            Some(base_angle_unit_to_degree),
+            prime_meridian_degrees_from_json(base_crs),
+            &coordinate_system_from_json(base_crs),
+        )?;
+    }
     let method_name = conversion
         .get("method")
         .and_then(|method| method.get("name"))
@@ -350,23 +378,125 @@ fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
     }
 }
 
-fn projected_linear_unit(value: &Value) -> Option<LinearUnit> {
-    value
+fn projected_linear_unit(value: &Value) -> Result<Option<LinearUnit>> {
+    let Some(axis) = value
         .get("coordinate_system")
         .and_then(|cs| cs.get("axis"))
         .and_then(Value::as_array)
-        .and_then(|axis| axis.first())
-        .and_then(axis_linear_unit)
+    else {
+        return Ok(None);
+    };
+
+    let mut linear_unit: Option<LinearUnit> = None;
+    for axis in axis {
+        let Some(axis_unit) = axis_linear_unit(axis) else {
+            continue;
+        };
+
+        if let Some(existing_linear_unit) = linear_unit {
+            if !approx_eq(
+                existing_linear_unit.meters_per_unit(),
+                axis_unit.meters_per_unit(),
+            ) {
+                return Err(ParseError::UnsupportedSemantics(
+                    "PROJJSON projected CRS uses inconsistent projected axis units".into(),
+                ));
+            }
+        } else {
+            linear_unit = Some(axis_unit);
+        }
+    }
+
+    Ok(linear_unit)
 }
 
-fn base_geographic_angle_unit_to_degree(value: &Value) -> Option<f64> {
-    value
-        .get("base_crs")
-        .and_then(|crs| crs.get("coordinate_system"))
+fn coordinate_system_angle_unit_to_degree(value: &Value) -> Result<Option<f64>> {
+    let Some(axis) = value
+        .get("coordinate_system")
         .and_then(|cs| cs.get("axis"))
         .and_then(Value::as_array)
-        .and_then(|axis| axis.first())
-        .and_then(axis_angle_unit_to_degree)
+    else {
+        return Ok(None);
+    };
+
+    let mut angle_unit_to_degree: Option<f64> = None;
+    for axis in axis {
+        let Some(axis_angle_unit_to_degree) = axis_angle_unit_to_degree(axis) else {
+            continue;
+        };
+
+        if let Some(existing_angle_unit_to_degree) = angle_unit_to_degree {
+            if !approx_eq(existing_angle_unit_to_degree, axis_angle_unit_to_degree) {
+                return Err(ParseError::UnsupportedSemantics(
+                    "PROJJSON geographic CRS uses inconsistent angular axis units".into(),
+                ));
+            }
+        } else {
+            angle_unit_to_degree = Some(axis_angle_unit_to_degree);
+        }
+    }
+
+    Ok(angle_unit_to_degree)
+}
+
+fn coordinate_system_from_json(value: &Value) -> CoordinateSystemSpec {
+    let subtype = value
+        .get("coordinate_system")
+        .and_then(|cs| cs.get("subtype"))
+        .and_then(Value::as_str)
+        .map(str::to_string);
+    let axes = value
+        .get("coordinate_system")
+        .and_then(|cs| cs.get("axis"))
+        .and_then(Value::as_array)
+        .map(|axes| axes.iter().map(axis_direction_from_json).collect())
+        .unwrap_or_default();
+    let dimension = value
+        .get("coordinate_system")
+        .and_then(|cs| cs.get("axis"))
+        .and_then(Value::as_array)
+        .map(Vec::len);
+
+    CoordinateSystemSpec {
+        subtype,
+        dimension,
+        axes,
+    }
+}
+
+fn axis_direction_from_json(axis: &Value) -> AxisDirection {
+    axis.get("direction")
+        .and_then(Value::as_str)
+        .map(AxisDirection::from_str)
+        .unwrap_or(AxisDirection::Other)
+}
+
+fn prime_meridian_degrees_from_json(value: &Value) -> Option<f64> {
+    let prime_meridian = value.get("prime_meridian")?;
+    let longitude = match prime_meridian.get("longitude")? {
+        Value::Number(number) => number.as_f64()?,
+        Value::String(string) => string.parse().ok()?,
+        _ => return None,
+    };
+
+    let factor = prime_meridian
+        .get("unit")
+        .and_then(angle_unit_to_degree_from_json)
+        .or_else(|| {
+            prime_meridian
+                .get("unit_conversion_factor")
+                .and_then(Value::as_f64)
+                .map(radians_to_degrees_factor)
+        })
+        .or_else(|| {
+            prime_meridian
+                .get("conversion_factor")
+                .and_then(Value::as_f64)
+                .map(radians_to_degrees_factor)
+        })
+        .unwrap_or(1.0);
+
+    Some(longitude * factor)
 }
 
 fn axis_linear_unit(axis: &Value) -> Option<LinearUnit> {
@@ -464,14 +594,6 @@ fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
         .find_map(|name| params.get(&normalize_key(name)).copied())
 }
 
-fn normalize_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
-}
-
 fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
     if needle.is_empty() {
         return true;
@@ -527,6 +649,56 @@ mod tests {
     }
 
     #[test]
+    fn rejects_projjson_geographic_with_non_degree_unit() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "Custom radians",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "World Geodetic System 1984"
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "radian" },
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "radian" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("angular units other than degrees"));
+    }
+
+    #[test]
+    fn rejects_projjson_geographic_with_reversed_axes() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "Custom reversed axes",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "World Geodetic System 1984"
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" },
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
+    }
+
+    #[test]
     fn rejects_projjson_without_supported_definition() {
         let err = parse_projjson(r#"{ "type": "ProjectedCRS", "name": "Custom" }"#).unwrap_err();
         assert!(err.to_string().contains("missing conversion"));
@@ -559,6 +731,103 @@ mod tests {
         .unwrap();
 
         assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn rejects_projected_projjson_with_non_greenwich_base_prime_meridian() {
+        let err = parse_projjson(
+            r#"{
+                "type": "ProjectedCRS",
+                "name": "Custom TM",
+                "base_crs": {
+                    "type": "GeographicCRS",
+                    "name": "Custom base",
+                    "datum": {
+                        "type": "GeodeticReferenceFrame",
+                        "name": "World Geodetic System 1984"
+                    },
+                    "prime_meridian": {
+                        "name": "Paris",
+                        "longitude": 2.33722917,
+                        "unit": "degree"
+                    },
+                    "coordinate_system": {
+                        "subtype": "ellipsoidal",
+                        "axis": [
+                            { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" },
+                            { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" }
+                        ]
+                    }
+                },
+                "conversion": {
+                    "method": { "name": "Transverse Mercator" },
+                    "parameters": [
+                        { "name": "Latitude of natural origin", "value": 0, "unit": "degree" },
+                        { "name": "Longitude of natural origin", "value": -75, "unit": "degree" },
+                        { "name": "Scale factor at natural origin", "value": 0.9996, "unit": "unity" },
+                        { "name": "False easting", "value": 500000, "unit": "metre" },
+                        { "name": "False northing", "value": 0, "unit": "metre" }
+                    ]
+                },
+                "coordinate_system": {
+                    "subtype": "Cartesian",
+                    "axis": [
+                        { "name": "Easting", "abbreviation": "E", "direction": "east", "unit": "metre" },
+                        { "name": "Northing", "abbreviation": "N", "direction": "north", "unit": "metre" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("non-Greenwich prime meridian"));
+    }
+
+    #[test]
+    fn rejects_projected_projjson_with_reversed_projected_axes() {
+        let err = parse_projjson(
+            r#"{
+                "type": "ProjectedCRS",
+                "name": "Custom TM",
+                "base_crs": {
+                    "type": "GeographicCRS",
+                    "name": "WGS 84",
+                    "datum": {
+                        "type": "GeodeticReferenceFrame",
+                        "name": "World Geodetic System 1984"
+                    },
+                    "coordinate_system": {
+                        "subtype": "ellipsoidal",
+                        "axis": [
+                            { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" },
+                            { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" }
+                        ]
+                    }
+                },
+                "conversion": {
+                    "method": { "name": "Transverse Mercator" },
+                    "parameters": [
+                        { "name": "Latitude of natural origin", "value": 0, "unit": "degree" },
+                        { "name": "Longitude of natural origin", "value": -75, "unit": "degree" },
+                        { "name": "Scale factor at natural origin", "value": 0.9996, "unit": "unity" },
+                        { "name": "False easting", "value": 500000, "unit": "metre" },
+                        { "name": "False northing", "value": 0, "unit": "metre" }
+                    ]
+                },
+                "coordinate_system": {
+                    "subtype": "Cartesian",
+                    "axis": [
+                        { "name": "Northing", "abbreviation": "N", "direction": "north", "unit": "metre" },
+                        { "name": "Easting", "abbreviation": "E", "direction": "east", "unit": "metre" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
     }
 
     #[test]

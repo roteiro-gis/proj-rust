@@ -5,6 +5,7 @@ use proj_core::datum;
 use proj_core::ellipsoid;
 use proj_core::Datum;
 
+use crate::semantics::normalize_key;
 use crate::{ParseError, Result};
 
 /// Parse a PROJ format string like `+proj=utm +zone=18 +datum=WGS84 +units=m`.
@@ -168,11 +169,13 @@ fn resolve_linear_unit(params: &HashMap<String, String>) -> Result<LinearUnit> {
 }
 
 fn parse_geographic(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_geographic_semantics(params)?;
     let d = resolve_datum(params)?;
     Ok(CrsDef::Geographic(GeographicCrsDef::new(0, d, "")))
 }
 
 fn parse_utm(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ UTM definition")?;
     let zone: u8 = params
         .get("zone")
         .and_then(|v| v.parse().ok())
@@ -206,6 +209,7 @@ fn parse_utm(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_tmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Transverse Mercator definition")?;
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -228,6 +232,7 @@ fn parse_tmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Mercator definition")?;
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -250,6 +255,7 @@ fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Polar Stereographic definition")?;
     let lat0 = get_f64(params, "lat_0");
     let lat_ts = if params.contains_key("lat_ts") {
         get_f64(params, "lat_ts")
@@ -287,6 +293,7 @@ fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Lambert Conformal Conic definition")?;
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -306,6 +313,7 @@ fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_aea(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Albers Equal Area definition")?;
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -325,6 +333,7 @@ fn parse_aea(params: &HashMap<String, String>) -> Result<CrsDef> {
 }
 
 fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
+    validate_supported_proj_common_semantics(params, "PROJ Equidistant Cylindrical definition")?;
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -339,6 +348,64 @@ fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
         linear_unit,
         "",
     )))
+}
+
+fn validate_supported_proj_geographic_semantics(params: &HashMap<String, String>) -> Result<()> {
+    validate_supported_proj_common_semantics(params, "PROJ geographic CRS definition")?;
+
+    if let Some(units) = params.get("units") {
+        let normalized_units = normalize_key(units);
+        if !matches!(normalized_units.as_str(), "deg" | "degree" | "degrees") {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "PROJ geographic CRS definition uses unsupported angular unit `{units}`"
+            )));
+        }
+    }
+
+    if params.contains_key("to_meter") {
+        return Err(ParseError::UnsupportedSemantics(
+            "PROJ geographic CRS definition uses unsupported angular unit conversion".into(),
+        ));
+    }
+
+    Ok(())
+}
+
+fn validate_supported_proj_common_semantics(
+    params: &HashMap<String, String>,
+    context: &str,
+) -> Result<()> {
+    if let Some(prime_meridian) = params.get("pm") {
+        let normalized_prime_meridian = normalize_key(prime_meridian);
+        let is_greenwich = normalized_prime_meridian.is_empty()
+            || normalized_prime_meridian == "greenwich"
+            || prime_meridian
+                .parse::<f64>()
+                .ok()
+                .is_some_and(|value| value.abs() < 1e-12);
+        if !is_greenwich {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "{context} uses unsupported prime meridian `{prime_meridian}`"
+            )));
+        }
+    }
+
+    if let Some(axis) = params.get("axis") {
+        let normalized_axis = normalize_key(axis);
+        if !matches!(normalized_axis.as_str(), "" | "enu" | "en") {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "{context} uses unsupported axis order `{axis}`"
+            )));
+        }
+    }
+
+    if params.contains_key("lon_wrap") {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "{context} uses unsupported longitude wrapping semantics"
+        )));
+    }
+
+    Ok(())
 }
 
 #[cfg(test)]
@@ -425,6 +492,18 @@ mod tests {
     fn reject_invalid_utm_zone() {
         let err = parse_proj_string("+proj=utm +zone=0 +datum=WGS84").unwrap_err();
         assert!(err.to_string().contains("UTM zone out of range"));
+    }
+
+    #[test]
+    fn reject_non_greenwich_prime_meridian() {
+        let err = parse_proj_string("+proj=longlat +datum=WGS84 +pm=paris").unwrap_err();
+        assert!(err.to_string().contains("unsupported prime meridian"));
+    }
+
+    #[test]
+    fn reject_non_default_axis_order() {
+        let err = parse_proj_string("+proj=longlat +datum=WGS84 +axis=neu").unwrap_err();
+        assert!(err.to_string().contains("unsupported axis order"));
     }
 
     #[test]

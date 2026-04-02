@@ -1,3 +1,7 @@
+use crate::semantics::{
+    normalize_key, validate_supported_geographic_semantics, validate_supported_projected_semantics,
+    AxisDirection, CoordinateSystemSpec,
+};
 use crate::{ParseError, Result};
 use proj_core::{CrsDef, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
 use std::collections::HashMap;
@@ -195,6 +199,19 @@ fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
 }
 
 fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
+    let root_inner = root_inner(s)
+        .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
+    let angle_unit_to_degree = extract_top_level_angle_unit_to_degree(root_inner);
+    let prime_meridian_degrees =
+        extract_prime_meridian_degrees(root_inner, angle_unit_to_degree.unwrap_or(1.0));
+    let coordinate_system = extract_coordinate_system(root_inner);
+    validate_supported_geographic_semantics(
+        "WKT geographic CRS",
+        angle_unit_to_degree,
+        prime_meridian_degrees,
+        &coordinate_system,
+    )?;
+
     // Extract datum name to determine which datum to use
     let datum = infer_datum(s)?;
 
@@ -202,6 +219,8 @@ fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
 }
 
 fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
+    let root_inner = root_inner(s)
+        .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     // WKT1 uses PROJECTION["name"], WKT2 uses METHOD["name"].
     let proj_name = extract_wkt_value_case_insensitive(s, "PROJECTION")
         .or_else(|| extract_wkt_value_case_insensitive(s, "METHOD"));
@@ -209,8 +228,26 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
         ParseError::Parse("WKT projected CRS is missing a projection method".into())
     })?;
 
-    let projected_linear_unit = extract_projected_linear_unit(s).unwrap_or_else(LinearUnit::metre);
-    let base_angle_unit_to_degree = extract_base_geographic_angle_unit_to_degree(s).unwrap_or(1.0);
+    let projected_linear_unit =
+        extract_projected_linear_unit(root_inner).unwrap_or_else(LinearUnit::metre);
+    validate_supported_projected_semantics(
+        "WKT projected CRS",
+        &extract_coordinate_system(root_inner),
+    )?;
+
+    let base_geographic_inner =
+        find_top_level_element_inner(root_inner, &["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"]);
+    let base_angle_unit_to_degree = base_geographic_inner
+        .and_then(extract_top_level_angle_unit_to_degree)
+        .unwrap_or(1.0);
+    if let Some(base_geographic_inner) = base_geographic_inner {
+        validate_supported_geographic_semantics(
+            "WKT projected base geographic CRS",
+            Some(base_angle_unit_to_degree),
+            extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
+            &extract_coordinate_system(base_geographic_inner),
+        )?;
+    }
     let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree);
 
     // Extract common parameters
@@ -547,8 +584,7 @@ fn root_inner(s: &str) -> Option<&str> {
     parse_wkt_element(s, 0).map(|(_, inner, _)| inner)
 }
 
-fn extract_projected_linear_unit(s: &str) -> Option<LinearUnit> {
-    let inner = root_inner(s)?;
+fn extract_projected_linear_unit(inner: &str) -> Option<LinearUnit> {
     let mut linear_unit = None;
     for_each_top_level_element(inner, |name, element_inner| {
         if name.eq_ignore_ascii_case("UNIT") || name.eq_ignore_ascii_case("LENGTHUNIT") {
@@ -559,25 +595,92 @@ fn extract_projected_linear_unit(s: &str) -> Option<LinearUnit> {
     linear_unit
 }
 
-fn extract_base_geographic_angle_unit_to_degree(s: &str) -> Option<f64> {
-    for name in ["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"] {
-        if let Some(start) = find_ascii_case_insensitive(s, name) {
-            if let Some((_, inner, _)) = parse_wkt_element(s, start) {
-                let mut factor = None;
-                for_each_top_level_element(inner, |unit_name, unit_inner| {
-                    if unit_name.eq_ignore_ascii_case("UNIT")
-                        || unit_name.eq_ignore_ascii_case("ANGLEUNIT")
-                    {
-                        factor = parse_unit_factor(unit_inner).map(radians_to_degrees_factor);
-                    }
-                });
-                if factor.is_some() {
-                    return factor;
-                }
-            }
+fn extract_top_level_angle_unit_to_degree(inner: &str) -> Option<f64> {
+    let mut factor = None;
+    for_each_top_level_element(inner, |unit_name, unit_inner| {
+        if unit_name.eq_ignore_ascii_case("UNIT") || unit_name.eq_ignore_ascii_case("ANGLEUNIT") {
+            factor = parse_unit_factor(unit_inner).map(radians_to_degrees_factor);
         }
-    }
-    None
+    });
+    factor
+}
+
+fn extract_prime_meridian_degrees(inner: &str, default_angle_unit_to_degree: f64) -> Option<f64> {
+    let mut prime_meridian = None;
+    for_each_top_level_element(inner, |name, element_inner| {
+        if !name.eq_ignore_ascii_case("PRIMEM") {
+            return;
+        }
+
+        let fields = split_top_level_fields(element_inner);
+        let Some(value) = fields
+            .get(1)
+            .and_then(|field| field.trim().parse::<f64>().ok())
+        else {
+            return;
+        };
+
+        let factor = fields
+            .iter()
+            .skip(2)
+            .find_map(|field| {
+                let field = field.trim();
+                let (unit_name, unit_inner, _) = parse_wkt_element(field, 0)?;
+                if unit_name.eq_ignore_ascii_case("UNIT")
+                    || unit_name.eq_ignore_ascii_case("ANGLEUNIT")
+                {
+                    parse_unit_factor(unit_inner).map(radians_to_degrees_factor)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(default_angle_unit_to_degree);
+
+        prime_meridian = Some(value * factor);
+    });
+    prime_meridian
+}
+
+fn extract_coordinate_system(inner: &str) -> CoordinateSystemSpec {
+    let mut coordinate_system = CoordinateSystemSpec::default();
+    for_each_top_level_element(inner, |name, element_inner| {
+        if name.eq_ignore_ascii_case("CS") {
+            let fields = split_top_level_fields(element_inner);
+            coordinate_system.subtype = fields
+                .first()
+                .map(|field| trim_wkt_token(field).to_string());
+            coordinate_system.dimension = fields.get(1).and_then(|field| field.trim().parse().ok());
+            return;
+        }
+
+        if name.eq_ignore_ascii_case("AXIS") {
+            coordinate_system
+                .axes
+                .push(parse_axis_direction(element_inner));
+        }
+    });
+    coordinate_system
+}
+
+fn parse_axis_direction(inner: &str) -> AxisDirection {
+    split_top_level_fields(inner)
+        .get(1)
+        .map(|field| AxisDirection::from_str(trim_wkt_token(field)))
+        .unwrap_or(AxisDirection::Other)
+}
+
+fn find_top_level_element_inner<'a>(inner: &'a str, names: &[&str]) -> Option<&'a str> {
+    let mut found = None;
+    for_each_top_level_element(inner, |name, element_inner| {
+        if found.is_none()
+            && names
+                .iter()
+                .any(|expected| name.eq_ignore_ascii_case(expected))
+        {
+            found = Some(element_inner);
+        }
+    });
+    found
 }
 
 fn for_each_top_level_element<'a, F>(inner: &'a str, mut f: F)
@@ -636,14 +739,6 @@ fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
         .find_map(|name| params.get(&normalize_key(name)).copied())
 }
 
-fn normalize_key(value: &str) -> String {
-    value
-        .chars()
-        .filter(|c| c.is_ascii_alphanumeric())
-        .flat_map(|c| c.to_lowercase())
-        .collect()
-}
-
 fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
     find_ascii_case_insensitive(haystack, needle).is_some()
 }
@@ -697,6 +792,26 @@ mod tests {
     }
 
     #[test]
+    fn reject_geographic_wkt_with_non_degree_unit() {
+        let err = parse_wkt(
+            r#"GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],UNIT["radian",1]]"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("angular units other than degrees"));
+    }
+
+    #[test]
+    fn reject_geographic_wkt_with_reversed_axes() {
+        let err = parse_wkt(
+            r#"GEOGCRS["Custom",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["latitude",north],AXIS["longitude",east],ANGLEUNIT["degree",0.0174532925199433]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
+    }
+
+    #[test]
     fn parse_wkt_projcs_no_authority() {
         let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
         let crs = parse_wkt(wkt).unwrap();
@@ -744,6 +859,26 @@ mod tests {
 
         assert!((fx * US_FOOT_TO_METER - mx).abs() < 0.02, "x mismatch");
         assert!((fy * US_FOOT_TO_METER - my).abs() < 0.02, "y mismatch");
+    }
+
+    #[test]
+    fn reject_projected_wkt_with_non_greenwich_base_prime_meridian() {
+        let err = parse_wkt(
+            r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Paris",2.33722917],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]"#,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("non-Greenwich prime meridian"));
+    }
+
+    #[test]
+    fn reject_projected_wkt_with_reversed_projected_axes() {
+        let err = parse_wkt(
+            r#"PROJCRS["Custom",BASEGEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]],CONVERSION["UTM zone 18N",METHOD["Transverse Mercator"],PARAMETER["Latitude of natural origin",0,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Longitude of natural origin",-75,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Scale factor at natural origin",0.9996,SCALEUNIT["unity",1]],PARAMETER["False easting",500000,LENGTHUNIT["metre",1]],PARAMETER["False northing",0,LENGTHUNIT["metre",1]]],CS[Cartesian,2],AXIS["northing",north],AXIS["easting",east],LENGTHUNIT["metre",1]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
     }
 
     #[test]

@@ -12,6 +12,12 @@
 //! - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` — extracts AUTHORITY tag when present,
 //!   otherwise parses projection parameters
 //!
+//! Custom CRS definitions are only accepted when their semantics fit the
+//! `proj_core::CrsDef` model: 2D longitude/latitude geographic coordinates in
+//! degrees with a Greenwich prime meridian, and projected coordinates with
+//! easting/northing axis order. Unsupported axis-order, prime-meridian, and
+//! geographic angular-unit semantics are rejected.
+//!
 //! # Example
 //!
 //! ```
@@ -26,6 +32,7 @@
 
 mod proj_string;
 mod projjson;
+mod semantics;
 mod wkt;
 
 use proj_core::{Bounds, Coord, Coord3D, CrsDef, Transform, Transformable, Transformable3D};
@@ -35,6 +42,8 @@ use proj_core::{Bounds, Coord, Coord3D, CrsDef, Transform, Transformable, Transf
 pub enum ParseError {
     #[error("failed to parse CRS string: {0}")]
     Parse(String),
+    #[error("unsupported CRS semantics: {0}")]
+    UnsupportedSemantics(String),
     #[error(transparent)]
     Core(#[from] proj_core::Error),
 }

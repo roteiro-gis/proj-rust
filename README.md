@@ -35,9 +35,9 @@ let (lon, lat) = inv.convert((x, y)).unwrap();
 let coord = geo_types::Coord { x: -74.006, y: 40.7128 };
 let projected: geo_types::Coord<f64> = t.convert(coord).unwrap();
 
-// Batch transforms (parallel with `rayon` feature)
+// Batch transforms
 let coords: Vec<(f64, f64)> = vec![(-74.006, 40.7128); 1000];
-let results = t.convert_batch_parallel(&coords).unwrap();
+let results = t.convert_batch(&coords).unwrap();
 
 // 3D transforms preserve the third ordinate unchanged
 let (x, y, h) = t.convert_3d((-74.006, 40.7128, 15.0)).unwrap();
@@ -63,6 +63,10 @@ With `proj-wkt`, the following CRS definition formats are supported:
 - common PROJ strings for the implemented projection families, including legacy `+init=epsg:XXXX`
 - WKT1 and the supported WKT2 projected/geographic CRS forms, including top-level EPSG `ID[...]`
 - basic PROJJSON geographic and projected CRS definitions for the implemented methods
+
+Custom WKT, PROJJSON, and PROJ string definitions are only accepted when they map cleanly onto this workspace's native CRS model:
+2D longitude/latitude geographic coordinates in degrees with a Greenwich prime meridian, and projected coordinates in native linear units with easting/northing axis order.
+Definitions that require unsupported axis-order, prime-meridian, or geographic angular-unit semantics are rejected instead of being silently degraded.
 
 ## Supported CRS
 
@@ -99,9 +103,12 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 cargo test                        # all tests
 cargo test -p proj-core --no-default-features  # core crate without rayon/geo-types
 ./scripts/run-reference-parity.sh
+./scripts/verify-release-packaging.sh
 cargo clippy --all-targets -- -D warnings
-cargo package -p proj-core --allow-dirty
 ```
+
+Prefer `convert_batch()` for small and medium batch sizes.
+`convert_batch_parallel()` uses Rayon for larger batches and falls back to the sequential path when that is likely to be faster.
 
 For reference comparisons and current benchmark results against bundled C PROJ,
 see [docs/benchmark-report.md](docs/benchmark-report.md).
@@ -113,7 +120,7 @@ Release this workspace as a `0.x` line with scoped claims: production-ready for 
 Publish order matters because `proj-wkt` depends on `proj-core` as a separately published crate:
 
 ```sh
-cargo package -p proj-core --allow-dirty
+./scripts/verify-release-packaging.sh
 cargo publish -p proj-core
 
 # wait for crates.io to index the new proj-core version
