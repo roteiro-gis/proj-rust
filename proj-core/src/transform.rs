@@ -7,6 +7,13 @@ use crate::helmert;
 use crate::projection::{make_projection, ProjectionImpl};
 use crate::registry;
 
+#[cfg(feature = "rayon")]
+const PARALLEL_MIN_ITEMS_PER_THREAD: usize = 2_048;
+#[cfg(feature = "rayon")]
+const PARALLEL_CHUNKS_PER_THREAD: usize = 4;
+#[cfg(feature = "rayon")]
+const PARALLEL_MIN_CHUNK_SIZE: usize = 1_024;
+
 /// A reusable coordinate transformation between two CRS.
 ///
 /// Create once with [`Transform::new`], then call [`convert`](Transform::convert)
@@ -368,27 +375,68 @@ impl Transform {
     }
 
     /// Batch transform with Rayon parallelism.
+    ///
+    /// For smaller batches, this falls back to the sequential path to avoid
+    /// parallel overhead dominating the total runtime.
     #[cfg(feature = "rayon")]
     pub fn convert_batch_parallel<T: Transformable + Send + Sync + Clone>(
         &self,
         coords: &[T],
     ) -> Result<Vec<T>> {
-        use rayon::prelude::*;
-        coords.par_iter().map(|c| self.convert(c.clone())).collect()
+        self.convert_batch_parallel_adaptive(coords, |this, chunk| this.convert_batch(chunk))
     }
 
-    /// Batch transform of 3D coordinates with Rayon parallelism.
+    /// Batch transform of 3D coordinates with adaptive Rayon parallelism.
     #[cfg(feature = "rayon")]
     pub fn convert_batch_parallel_3d<T: Transformable3D + Send + Sync + Clone>(
         &self,
         coords: &[T],
     ) -> Result<Vec<T>> {
-        use rayon::prelude::*;
-        coords
-            .par_iter()
-            .map(|c| self.convert_3d(c.clone()))
-            .collect()
+        self.convert_batch_parallel_adaptive(coords, |this, chunk| this.convert_batch_3d(chunk))
     }
+
+    #[cfg(feature = "rayon")]
+    fn convert_batch_parallel_adaptive<T, F>(&self, coords: &[T], convert: F) -> Result<Vec<T>>
+    where
+        T: Send + Sync + Clone,
+        F: Fn(&Self, &[T]) -> Result<Vec<T>> + Sync,
+    {
+        if !should_parallelize(coords.len()) {
+            return convert(self, coords);
+        }
+
+        use rayon::prelude::*;
+
+        let chunk_size = parallel_chunk_size(coords.len());
+        let chunk_results: Vec<Result<Vec<T>>> = coords
+            .par_chunks(chunk_size)
+            .map(|chunk| convert(self, chunk))
+            .collect();
+
+        let mut results = Vec::with_capacity(coords.len());
+        for chunk in chunk_results {
+            results.extend(chunk?);
+        }
+        Ok(results)
+    }
+}
+
+#[cfg(feature = "rayon")]
+fn should_parallelize(len: usize) -> bool {
+    if len == 0 {
+        return false;
+    }
+
+    let threads = rayon::current_num_threads().max(1);
+    len >= threads.saturating_mul(PARALLEL_MIN_ITEMS_PER_THREAD)
+}
+
+#[cfg(feature = "rayon")]
+fn parallel_chunk_size(len: usize) -> usize {
+    let threads = rayon::current_num_threads().max(1);
+    let target_chunks = threads.saturating_mul(PARALLEL_CHUNKS_PER_THREAD).max(1);
+    let chunk_size = len.div_ceil(target_chunks);
+    chunk_size.max(PARALLEL_MIN_CHUNK_SIZE)
 }
 
 fn same_crs_definition(from: &CrsDef, to: &CrsDef) -> bool {
@@ -895,6 +943,21 @@ mod tests {
 
     #[cfg(feature = "rayon")]
     #[test]
+    fn parallel_batch_transform_matches_sequential_on_large_input() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let len = rayon::current_num_threads() * PARALLEL_MIN_ITEMS_PER_THREAD;
+        let coords: Vec<(f64, f64)> = (0..len)
+            .map(|i| (-179.0 + i as f64 * 0.0001, -80.0 + i as f64 * 0.00005))
+            .collect();
+
+        let sequential = t.convert_batch(&coords).unwrap();
+        let parallel = t.convert_batch_parallel(&coords).unwrap();
+
+        assert_eq!(parallel, sequential);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
     fn parallel_batch_transform_3d() {
         let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
         let coords: Vec<(f64, f64, f64)> = (0..100)
@@ -903,5 +966,26 @@ mod tests {
 
         let results = t.convert_batch_parallel_3d(&coords).unwrap();
         assert_eq!(results.len(), 100);
+    }
+
+    #[cfg(feature = "rayon")]
+    #[test]
+    fn parallel_batch_transform_3d_matches_sequential_on_large_input() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let len = rayon::current_num_threads() * PARALLEL_MIN_ITEMS_PER_THREAD;
+        let coords: Vec<(f64, f64, f64)> = (0..len)
+            .map(|i| {
+                (
+                    -179.0 + i as f64 * 0.0001,
+                    -80.0 + i as f64 * 0.00005,
+                    i as f64,
+                )
+            })
+            .collect();
+
+        let sequential = t.convert_batch_3d(&coords).unwrap();
+        let parallel = t.convert_batch_parallel_3d(&coords).unwrap();
+
+        assert_eq!(parallel, sequential);
     }
 }
