@@ -73,21 +73,28 @@ pub(crate) fn rank_operation_candidates(
     let source_geo = source.base_geographic_crs_epsg();
     let target_geo = target.base_geographic_crs_epsg();
     for operation in registry::all_operations() {
-        for direction in [OperationStepDirection::Forward, OperationStepDirection::Reverse] {
+        for direction in [
+            OperationStepDirection::Forward,
+            OperationStepDirection::Reverse,
+        ] {
             let compatible = match direction {
-                OperationStepDirection::Forward => is_compatible(source_geo, target_geo, &operation),
-                OperationStepDirection::Reverse => is_compatible_reversed(source_geo, target_geo, &operation),
+                OperationStepDirection::Forward => {
+                    is_compatible(source_geo, target_geo, &operation)
+                }
+                OperationStepDirection::Reverse => {
+                    is_compatible_reversed(source_geo, target_geo, &operation)
+                }
             };
-            if !compatible || !policy_allows(source, target, options, resolved_aoi.as_ref(), &operation) {
+            if !compatible
+                || !policy_allows(source, target, options, resolved_aoi.as_ref(), &operation)
+            {
                 continue;
             }
 
             let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), &operation);
             let mut reasons = SmallVec::<[SelectionReason; 4]>::new();
-            let match_kind = if matches!(
-                direction,
-                OperationStepDirection::Forward
-            ) && operation.source_crs_epsg == source_geo
+            let match_kind = if matches!(direction, OperationStepDirection::Forward)
+                && operation.source_crs_epsg == source_geo
                 && operation.target_crs_epsg == target_geo
                 || matches!(direction, OperationStepDirection::Reverse)
                     && operation.source_crs_epsg == target_geo
@@ -226,8 +233,10 @@ fn policy_allows(
     match options.policy {
         SelectionPolicy::BestAvailable => true,
         SelectionPolicy::RequireGrids => !datum_shift_required || operation.uses_grids(),
-        SelectionPolicy::RequireExactAreaMatch => options.area_of_interest.is_none()
-            || matched_area_of_use(resolved_aoi, operation).is_some(),
+        SelectionPolicy::RequireExactAreaMatch => {
+            options.area_of_interest.is_none()
+                || matched_area_of_use(resolved_aoi, operation).is_some()
+        }
         SelectionPolicy::AllowApproximateHelmertFallback => true,
         SelectionPolicy::Operation(_) => true,
     }
@@ -266,23 +275,35 @@ fn matched_area_of_use(
     if area.point.is_none() && area.bounds.is_none() {
         return None;
     }
-    operation.areas_of_use.iter().find(|candidate| {
-        area.point
-            .map(|value| candidate.contains_point(value))
-            .unwrap_or(false)
-            || area
-                .bounds
-                .map(|value| candidate.contains_bounds(value))
+    operation
+        .areas_of_use
+        .iter()
+        .find(|candidate| {
+            area.point
+                .map(|value| candidate.contains_point(value))
                 .unwrap_or(false)
-    }).cloned()
+                || area
+                    .bounds
+                    .map(|value| candidate.contains_bounds(value))
+                    .unwrap_or(false)
+        })
+        .cloned()
 }
 
-fn compare_candidates(left: &RankedOperationCandidate, right: &RankedOperationCandidate) -> Ordering {
+fn compare_candidates(
+    left: &RankedOperationCandidate,
+    right: &RankedOperationCandidate,
+) -> Ordering {
     let left_exact = matches!(left.match_kind, OperationMatchKind::ExactSourceTarget);
     let right_exact = matches!(right.match_kind, OperationMatchKind::ExactSourceTarget);
     right_exact
         .cmp(&left_exact)
-        .then_with(|| right.matched_area_of_use.is_some().cmp(&left.matched_area_of_use.is_some()))
+        .then_with(|| {
+            right
+                .matched_area_of_use
+                .is_some()
+                .cmp(&left.matched_area_of_use.is_some())
+        })
         .then_with(|| {
             let left_accuracy = left
                 .operation
@@ -379,9 +400,7 @@ fn synthetic_helmert_fallback(source: &CrsDef, target: &CrsDef) -> Option<Coordi
     if requires_no_datum_operation(source, target) {
         return None;
     }
-    let params = source
-        .datum()
-        .approximate_helmert_to(target.datum())?;
+    let params = source.datum().approximate_helmert_to(target.datum())?;
     Some(CoordinateOperation {
         id: None,
         name: format!("Approximate {} to {}", source.epsg(), target.epsg()),

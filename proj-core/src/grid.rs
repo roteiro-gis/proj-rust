@@ -43,7 +43,10 @@ pub enum GridError {
 }
 
 pub trait GridProvider: Send + Sync {
-    fn definition(&self, grid: &GridDefinition) -> std::result::Result<Option<GridDefinition>, GridError>;
+    fn definition(
+        &self,
+        grid: &GridDefinition,
+    ) -> std::result::Result<Option<GridDefinition>, GridError>;
     fn load(&self, grid: &GridDefinition) -> std::result::Result<Option<GridHandle>, GridError>;
 }
 
@@ -58,7 +61,11 @@ impl GridHandle {
         &self.definition
     }
 
-    pub fn sample(&self, lon_radians: f64, lat_radians: f64) -> std::result::Result<GridSample, GridError> {
+    pub fn sample(
+        &self,
+        lon_radians: f64,
+        lat_radians: f64,
+    ) -> std::result::Result<GridSample, GridError> {
         match self.data.as_ref() {
             GridData::Ntv2(set) => set.sample(lon_radians, lat_radians),
         }
@@ -99,7 +106,13 @@ impl GridRuntime {
         &self,
         grid: &GridDefinition,
     ) -> std::result::Result<GridDefinition, GridError> {
-        if let Some(cached) = self.definition_cache.lock().expect("grid definition cache poisoned").get(&grid.id).cloned() {
+        if let Some(cached) = self
+            .definition_cache
+            .lock()
+            .expect("grid definition cache poisoned")
+            .get(&grid.id)
+            .cloned()
+        {
             return Ok(cached);
         }
 
@@ -116,8 +129,17 @@ impl GridRuntime {
         Err(GridError::Unavailable(grid.name.clone()))
     }
 
-    pub(crate) fn resolve_handle(&self, grid: &GridDefinition) -> std::result::Result<GridHandle, GridError> {
-        if let Some(cached) = self.handle_cache.lock().expect("grid handle cache poisoned").get(&grid.id).cloned() {
+    pub(crate) fn resolve_handle(
+        &self,
+        grid: &GridDefinition,
+    ) -> std::result::Result<GridHandle, GridError> {
+        if let Some(cached) = self
+            .handle_cache
+            .lock()
+            .expect("grid handle cache poisoned")
+            .get(&grid.id)
+            .cloned()
+        {
             return Ok(cached);
         }
 
@@ -140,7 +162,10 @@ impl GridRuntime {
 pub struct EmbeddedGridProvider;
 
 impl GridProvider for EmbeddedGridProvider {
-    fn definition(&self, grid: &GridDefinition) -> std::result::Result<Option<GridDefinition>, GridError> {
+    fn definition(
+        &self,
+        grid: &GridDefinition,
+    ) -> std::result::Result<Option<GridDefinition>, GridError> {
         if embedded_grid_bytes(&grid.resource_names).is_some() {
             return Ok(Some(grid.clone()));
         }
@@ -194,7 +219,10 @@ impl FilesystemGridProvider {
 }
 
 impl GridProvider for FilesystemGridProvider {
-    fn definition(&self, grid: &GridDefinition) -> std::result::Result<Option<GridDefinition>, GridError> {
+    fn definition(
+        &self,
+        grid: &GridDefinition,
+    ) -> std::result::Result<Option<GridDefinition>, GridError> {
         if self.locate(grid).is_some() {
             return Ok(Some(grid.clone()));
         }
@@ -206,7 +234,8 @@ impl GridProvider for FilesystemGridProvider {
             return Ok(None);
         };
 
-        let bytes = std::fs::read(&path).map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+        let bytes = std::fs::read(&path)
+            .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
         let data = match grid.format {
             GridFormat::Ntv2 => GridData::Ntv2(Ntv2GridSet::parse(&bytes)?),
             GridFormat::Unsupported => {
@@ -248,16 +277,22 @@ impl Ntv2GridSet {
             return Err(GridError::Parse("NTv2 file too small".into()));
         }
 
-        let endian = if u32::from_le_bytes(bytes[8..12].try_into().expect("slice length checked")) == 11 {
+        let endian = if u32::from_le_bytes(bytes[8..12].try_into().expect("slice length checked"))
+            == 11
+        {
             Endian::Little
         } else if u32::from_be_bytes(bytes[8..12].try_into().expect("slice length checked")) == 11 {
             Endian::Big
         } else {
-            return Err(GridError::Parse("invalid NTv2 header endianness marker".into()));
+            return Err(GridError::Parse(
+                "invalid NTv2 header endianness marker".into(),
+            ));
         };
 
         if &bytes[56..63] != b"SECONDS" {
-            return Err(GridError::Parse("only NTv2 GS_TYPE=SECONDS is supported".into()));
+            return Err(GridError::Parse(
+                "only NTv2 GS_TYPE=SECONDS is supported".into(),
+            ));
         }
 
         let num_subfiles = read_u32(bytes, 40, endian)? as usize;
@@ -285,7 +320,9 @@ impl Ntv2GridSet {
             let gs_count = read_u32(header, 168, endian)? as usize;
 
             if !(west < east && south < north && res_x > 0.0 && res_y > 0.0) {
-                return Err(GridError::Parse(format!("invalid NTv2 georeferencing for subgrid {name}")));
+                return Err(GridError::Parse(format!(
+                    "invalid NTv2 georeferencing for subgrid {name}"
+                )));
             }
 
             let width = (((east - west) / res_x).abs() + 0.5).floor() as usize + 1;
@@ -303,7 +340,9 @@ impl Ntv2GridSet {
                 .ok_or_else(|| GridError::Parse("NTv2 data size overflow".into()))?;
             let data = bytes
                 .get(offset + HEADER_LEN..offset + HEADER_LEN + data_len)
-                .ok_or_else(|| GridError::Parse(format!("truncated NTv2 data for subgrid {name}")))?;
+                .ok_or_else(|| {
+                    GridError::Parse(format!("truncated NTv2 data for subgrid {name}"))
+                })?;
 
             let mut lat_shift = vec![0.0f64; gs_count];
             let mut lon_shift = vec![0.0f64; gs_count];
@@ -312,7 +351,8 @@ impl Ntv2GridSet {
                     let source_x = width - 1 - x;
                     let record_offset = (y * width + source_x) * 16;
                     let lat = read_f32(data, record_offset, endian)? as f64 * PI / 180.0 / 3600.0;
-                    let lon = -(read_f32(data, record_offset + 4, endian)? as f64) * PI / 180.0 / 3600.0;
+                    let lon =
+                        -(read_f32(data, record_offset + 4, endian)? as f64) * PI / 180.0 / 3600.0;
                     let dest = y * width + x;
                     lat_shift[dest] = lat;
                     lon_shift[dest] = lon;
@@ -321,11 +361,13 @@ impl Ntv2GridSet {
 
             let index = grids.len();
             name_to_index.insert(name.clone(), index);
-            parent_links.push(if parent.eq_ignore_ascii_case("none") || parent.is_empty() {
-                None
-            } else {
-                Some(parent)
-            });
+            parent_links.push(
+                if parent.eq_ignore_ascii_case("none") || parent.is_empty() {
+                    None
+                } else {
+                    Some(parent)
+                },
+            );
             grids.push(Ntv2Grid {
                 name,
                 extent: GridExtent {
@@ -363,7 +405,11 @@ impl Ntv2GridSet {
         Ok(Self { grids, roots })
     }
 
-    fn sample(&self, lon_radians: f64, lat_radians: f64) -> std::result::Result<GridSample, GridError> {
+    fn sample(
+        &self,
+        lon_radians: f64,
+        lat_radians: f64,
+    ) -> std::result::Result<GridSample, GridError> {
         let (grid_idx, local_lon, local_lat) = self.grid_at(lon_radians, lat_radians)?;
         let (lon_shift, lat_shift) = interpolate(&self.grids[grid_idx], local_lon, local_lat)?;
         Ok(GridSample {
@@ -381,13 +427,20 @@ impl Ntv2GridSet {
         match direction {
             GridShiftDirection::Forward => {
                 let shift = self.sample(lon_radians, lat_radians)?;
-                Ok((lon_radians + shift.lon_shift_radians, lat_radians + shift.lat_shift_radians))
+                Ok((
+                    lon_radians + shift.lon_shift_radians,
+                    lat_radians + shift.lat_shift_radians,
+                ))
             }
             GridShiftDirection::Reverse => self.apply_inverse(lon_radians, lat_radians),
         }
     }
 
-    fn apply_inverse(&self, lon_radians: f64, lat_radians: f64) -> std::result::Result<(f64, f64), GridError> {
+    fn apply_inverse(
+        &self,
+        lon_radians: f64,
+        lat_radians: f64,
+    ) -> std::result::Result<(f64, f64), GridError> {
         const MAX_ITERATIONS: usize = 10;
         const TOLERANCE: f64 = 1e-12;
 
@@ -410,7 +463,11 @@ impl Ntv2GridSet {
         Ok((estimate_lon, estimate_lat))
     }
 
-    fn grid_at(&self, lon_radians: f64, lat_radians: f64) -> std::result::Result<(usize, f64, f64), GridError> {
+    fn grid_at(
+        &self,
+        lon_radians: f64,
+        lat_radians: f64,
+    ) -> std::result::Result<(usize, f64, f64), GridError> {
         for &root in &self.roots {
             if self.grids[root].extent.contains(lon_radians, lat_radians) {
                 let idx = self.deepest_child(root, lon_radians, lat_radians);
@@ -466,7 +523,11 @@ impl GridExtent {
     }
 }
 
-fn interpolate(grid: &Ntv2Grid, local_lon: f64, local_lat: f64) -> std::result::Result<(f64, f64), GridError> {
+fn interpolate(
+    grid: &Ntv2Grid,
+    local_lon: f64,
+    local_lat: f64,
+) -> std::result::Result<(f64, f64), GridError> {
     let lam = local_lon / grid.extent.res_x;
     let phi = local_lat / grid.extent.res_y;
     let mut x = lam.floor() as isize;
@@ -537,7 +598,10 @@ enum Endian {
 }
 
 fn parse_label(bytes: &[u8]) -> String {
-    let end = bytes.iter().position(|byte| *byte == 0).unwrap_or(bytes.len());
+    let end = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
     String::from_utf8_lossy(&bytes[..end]).trim().to_string()
 }
 
@@ -588,9 +652,16 @@ mod tests {
         };
         let handle = provider.load(&definition).unwrap().expect("embedded grid");
         let (lon, lat) = handle
-            .apply((-80.5041667f64).to_radians(), 44.5458333f64.to_radians(), GridShiftDirection::Forward)
+            .apply(
+                (-80.5041667f64).to_radians(),
+                44.5458333f64.to_radians(),
+                GridShiftDirection::Forward,
+            )
             .unwrap();
-        assert!((lon.to_degrees() - (-80.50401615833)).abs() < 1e-6, "lon={lon}");
+        assert!(
+            (lon.to_degrees() - (-80.50401615833)).abs() < 1e-6,
+            "lon={lon}"
+        );
         assert!((lat.to_degrees() - 44.5458827236).abs() < 3e-6, "lat={lat}");
     }
 }

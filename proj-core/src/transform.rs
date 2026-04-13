@@ -42,8 +42,12 @@ struct CompiledOperationPipeline {
 }
 
 enum CompiledStep {
-    ProjectionForward { projection: Projection },
-    ProjectionInverse { projection: Projection },
+    ProjectionForward {
+        projection: Projection,
+    },
+    ProjectionInverse {
+        projection: Projection,
+    },
     Helmert {
         params: HelmertParams,
         inverse: bool,
@@ -52,8 +56,12 @@ enum CompiledStep {
         handle: GridHandle,
         direction: GridShiftDirection,
     },
-    GeodeticToGeocentric { ellipsoid: Ellipsoid },
-    GeocentricToGeodetic { ellipsoid: Ellipsoid },
+    GeodeticToGeocentric {
+        ellipsoid: Ellipsoid,
+    },
+    GeocentricToGeodetic {
+        ellipsoid: Ellipsoid,
+    },
 }
 
 impl Transform {
@@ -132,7 +140,13 @@ impl Transform {
         let mut skipped_operations = Vec::new();
         let mut missing_required_grid = None;
         for candidate in candidates {
-            match compile_pipeline(from, to, &candidate.operation, candidate.direction, &grid_runtime) {
+            match compile_pipeline(
+                from,
+                to,
+                &candidate.operation,
+                candidate.direction,
+                &grid_runtime,
+            ) {
                 Ok(pipeline) => {
                     let metadata = selected_metadata(
                         &candidate.operation,
@@ -448,11 +462,13 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
             Ok(Coord3D::new(lon, lat, coord.z))
         }
         CompiledStep::GeodeticToGeocentric { ellipsoid } => {
-            let (x, y, z) = geocentric::geodetic_to_geocentric(ellipsoid, coord.x, coord.y, coord.z);
+            let (x, y, z) =
+                geocentric::geodetic_to_geocentric(ellipsoid, coord.x, coord.y, coord.z);
             Ok(Coord3D::new(x, y, z))
         }
         CompiledStep::GeocentricToGeodetic { ellipsoid } => {
-            let (lon, lat, h) = geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z);
+            let (lon, lat, h) =
+                geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z);
             Ok(Coord3D::new(lon, lat, h))
         }
     }
@@ -537,8 +553,12 @@ fn compile_operation(
             },
             step_direction,
         ) => {
-            let grid = registry::lookup_grid_definition(grid_id.0)
-                .ok_or_else(|| Error::Grid(crate::grid::GridError::NotFound(format!("grid id {}", grid_id.0))))?;
+            let grid = registry::lookup_grid_definition(grid_id.0).ok_or_else(|| {
+                Error::Grid(crate::grid::GridError::NotFound(format!(
+                    "grid id {}",
+                    grid_id.0
+                )))
+            })?;
             if grid.format == crate::grid::GridFormat::Unsupported {
                 return Err(Error::Grid(crate::grid::GridError::UnsupportedFormat(
                     grid.name,
@@ -553,15 +573,17 @@ fn compile_operation(
         }
         (OperationMethod::Concatenated { steps: child_steps }, OperationStepDirection::Forward) => {
             for step in child_steps {
-                let child = registry::lookup_operation(step.operation_id)
-                    .ok_or_else(|| Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0)))?;
+                let child = registry::lookup_operation(step.operation_id).ok_or_else(|| {
+                    Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0))
+                })?;
                 compile_operation(&child, step.direction, None, grid_runtime, steps)?;
             }
         }
         (OperationMethod::Concatenated { steps: child_steps }, OperationStepDirection::Reverse) => {
             for step in child_steps.iter().rev() {
-                let child = registry::lookup_operation(step.operation_id)
-                    .ok_or_else(|| Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0)))?;
+                let child = registry::lookup_operation(step.operation_id).ok_or_else(|| {
+                    Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0))
+                })?;
                 compile_operation(&child, step.direction.inverse(), None, grid_runtime, steps)?;
             }
         }
@@ -579,17 +601,23 @@ fn resolve_operation_geographic_pair(
     direction: OperationStepDirection,
     requested_pair: Option<(&CrsDef, &CrsDef)>,
 ) -> Result<(CrsDef, CrsDef)> {
-    if let (Some(source_code), Some(target_code)) = (operation.source_crs_epsg, operation.target_crs_epsg) {
+    if let (Some(source_code), Some(target_code)) =
+        (operation.source_crs_epsg, operation.target_crs_epsg)
+    {
         let source = registry::lookup_epsg(match direction {
             OperationStepDirection::Forward => source_code,
             OperationStepDirection::Reverse => target_code,
         })
-        .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
+        .ok_or_else(|| {
+            Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name))
+        })?;
         let target = registry::lookup_epsg(match direction {
             OperationStepDirection::Forward => target_code,
             OperationStepDirection::Reverse => source_code,
         })
-        .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
+        .ok_or_else(|| {
+            Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name))
+        })?;
         return Ok((source, target));
     }
 
@@ -833,8 +861,14 @@ mod tests {
             .unwrap();
         let inv = fwd.inverse().unwrap();
 
-        assert_eq!(fwd.selected_operation().id, Some(CoordinateOperationId(1693)));
-        assert_eq!(inv.selected_operation().id, Some(CoordinateOperationId(1693)));
+        assert_eq!(
+            fwd.selected_operation().id,
+            Some(CoordinateOperationId(1693))
+        );
+        assert_eq!(
+            inv.selected_operation().id,
+            Some(CoordinateOperationId(1693))
+        );
     }
 
     #[test]
@@ -848,11 +882,15 @@ mod tests {
         assert_eq!(inv.selected_operation().source_crs_epsg, Some(4326));
         assert_eq!(inv.selected_operation().target_crs_epsg, Some(4267));
         assert_eq!(
-            inv.selection_diagnostics().selected_operation.source_crs_epsg,
+            inv.selection_diagnostics()
+                .selected_operation
+                .source_crs_epsg,
             Some(4326)
         );
         assert_eq!(
-            inv.selection_diagnostics().selected_operation.target_crs_epsg,
+            inv.selection_diagnostics()
+                .selected_operation
+                .target_crs_epsg,
             Some(4267)
         );
     }
@@ -932,8 +970,12 @@ mod tests {
             Ok(_) => panic!("unknown custom datums should not build a transform"),
             Err(err) => err,
         };
-        assert!(err.to_string().contains("no compatible operation found")
-            || err.to_string().contains("legacy Helmert fallback unavailable"));
+        assert!(
+            err.to_string().contains("no compatible operation found")
+                || err
+                    .to_string()
+                    .contains("legacy Helmert fallback unavailable")
+        );
     }
 
     #[test]

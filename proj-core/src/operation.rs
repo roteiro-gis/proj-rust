@@ -25,7 +25,10 @@ pub struct AreaOfUse {
 
 impl AreaOfUse {
     pub fn contains_point(&self, point: Coord) -> bool {
-        point.x >= self.west && point.x <= self.east && point.y >= self.south && point.y <= self.north
+        point.x >= self.west
+            && point.x <= self.east
+            && point.y >= self.south
+            && point.y <= self.north
     }
 
     pub fn contains_bounds(&self, bounds: Bounds) -> bool {
@@ -238,7 +241,10 @@ impl CoordinateOperation {
         let mut metadata = self.metadata();
         if matches!(direction, OperationStepDirection::Reverse) {
             std::mem::swap(&mut metadata.source_crs_epsg, &mut metadata.target_crs_epsg);
-            std::mem::swap(&mut metadata.source_datum_epsg, &mut metadata.target_datum_epsg);
+            std::mem::swap(
+                &mut metadata.source_datum_epsg,
+                &mut metadata.target_datum_epsg,
+            );
         }
         metadata
     }

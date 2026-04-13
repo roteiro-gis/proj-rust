@@ -6,8 +6,7 @@ use crate::ellipsoid::Ellipsoid;
 use crate::grid::{GridDefinition, GridFormat};
 use crate::operation::{
     AreaOfUse, CoordinateOperation, CoordinateOperationId, GridId, GridInterpolation,
-    GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep,
-    OperationStepDirection,
+    GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep, OperationStepDirection,
 };
 use smallvec::SmallVec;
 use std::collections::BTreeMap;
@@ -78,7 +77,11 @@ fn db() -> &'static RegistryDb {
 fn parse_db() -> RegistryDb {
     assert!(EPSG_DATA.len() >= HEADER_SIZE, "EPSG registry too small");
     assert_eq!(read_u32(EPSG_DATA, 0), MAGIC, "invalid EPSG registry magic");
-    assert_eq!(read_u16(EPSG_DATA, 4), VERSION, "unsupported EPSG registry version");
+    assert_eq!(
+        read_u16(EPSG_DATA, 4),
+        VERSION,
+        "unsupported EPSG registry version"
+    );
 
     let num_ellipsoids = read_u32(EPSG_DATA, 8) as usize;
     let num_datums = read_u32(EPSG_DATA, 12) as usize;
@@ -125,7 +128,13 @@ fn parse_db() -> RegistryDb {
             }),
             other => panic!("unsupported datum shift kind: {other}"),
         };
-        datums.insert(code, Datum { ellipsoid, to_wgs84 });
+        datums.insert(
+            code,
+            Datum {
+                ellipsoid,
+                to_wgs84,
+            },
+        );
         offset += DATUM_RECORD_SIZE;
     }
 
@@ -446,14 +455,16 @@ pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
 pub(crate) fn lookup_projected(code: u32) -> Option<CrsDef> {
     let record = db().projected_crs.get(&code)?;
     let datum = db().datums.get(&record.datum_code)?;
-    Some(CrsDef::Projected(ProjectedCrsDef::new_with_base_geographic_crs(
-        code,
-        record.base_geographic_crs_epsg,
-        *datum,
-        record.method,
-        record.linear_unit,
-        "",
-    )))
+    Some(CrsDef::Projected(
+        ProjectedCrsDef::new_with_base_geographic_crs(
+            code,
+            record.base_geographic_crs_epsg,
+            *datum,
+            record.method,
+            record.linear_unit,
+            "",
+        ),
+    ))
 }
 
 pub(crate) fn lookup(code: u32) -> Option<CrsDef> {
@@ -461,11 +472,14 @@ pub(crate) fn lookup(code: u32) -> Option<CrsDef> {
 }
 
 pub(crate) fn lookup_datum_code_for_crs(code: u32) -> Option<u32> {
-    db()
-        .geographic_crs
+    db().geographic_crs
         .get(&code)
         .map(|record| record.datum_code)
-        .or_else(|| db().projected_crs.get(&code).map(|record| record.datum_code))
+        .or_else(|| {
+            db().projected_crs
+                .get(&code)
+                .map(|record| record.datum_code)
+        })
 }
 
 pub(crate) fn lookup_operation(code: u32) -> Option<CoordinateOperation> {
@@ -511,7 +525,10 @@ mod tests {
     #[test]
     fn lookup_operation_1313() {
         let operation = lookup_operation(1313).expect("operation 1313");
-        assert!(matches!(operation.method, OperationMethod::GridShift { .. }));
+        assert!(matches!(
+            operation.method,
+            OperationMethod::GridShift { .. }
+        ));
         assert!(!operation.areas_of_use.is_empty());
     }
 
@@ -532,7 +549,10 @@ mod tests {
     #[test]
     fn concatenated_grid_operation_reports_grid_usage() {
         let operation = lookup_operation(8243).expect("operation 8243");
-        assert!(matches!(operation.method, OperationMethod::Concatenated { .. }));
+        assert!(matches!(
+            operation.method,
+            OperationMethod::Concatenated { .. }
+        ));
         assert!(operation.uses_grids());
         assert!(operation.metadata().uses_grids);
     }
