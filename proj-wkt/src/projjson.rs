@@ -287,6 +287,13 @@ struct StructuredEllipsoid {
     inverse_flattening: f64,
 }
 
+type DatumCandidate = (
+    &'static [&'static str],
+    &'static [&'static str],
+    Datum,
+    Option<u32>,
+);
+
 fn parse_structured_ellipsoid_from_json(value: &Value) -> Option<StructuredEllipsoid> {
     let ellipsoid = value.get("ellipsoid")?;
     Some(StructuredEllipsoid {
@@ -304,7 +311,7 @@ fn parse_structured_ellipsoid_from_json(value: &Value) -> Option<StructuredEllip
 
 fn resolve_structured_datum(datum_name: &str, ellipsoid: &StructuredEllipsoid) -> Option<Datum> {
     for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in datum_candidates() {
-        if datum_aliases.iter().any(|alias| *alias == datum_name)
+        if datum_aliases.contains(&datum_name)
             && ellipsoid_matches(ellipsoid, datum, ellipsoid_aliases, ellipsoid_epsg)
         {
             return Some(datum);
@@ -317,20 +324,10 @@ fn resolve_structured_datum(datum_name: &str, ellipsoid: &StructuredEllipsoid) -
 fn resolve_named_datum(datum_name: &str) -> Option<Datum> {
     datum_candidates()
         .iter()
-        .find_map(|(aliases, _, datum, _)| {
-            aliases
-                .iter()
-                .any(|alias| *alias == datum_name)
-                .then_some(*datum)
-        })
+        .find_map(|(aliases, _, datum, _)| aliases.contains(&datum_name).then_some(*datum))
 }
 
-fn datum_candidates() -> [(
-    &'static [&'static str],
-    &'static [&'static str],
-    Datum,
-    Option<u32>,
-); 8] {
+fn datum_candidates() -> [DatumCandidate; 8] {
     [
         (
             &[

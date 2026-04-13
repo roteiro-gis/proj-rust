@@ -517,7 +517,7 @@ fn resolve_structured_datum(
     ];
 
     for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in candidates {
-        if datum_aliases.iter().any(|alias| *alias == datum_name)
+        if datum_aliases.contains(&datum_name)
             && ellipsoid_matches(ellipsoid, datum, ellipsoid_aliases, ellipsoid_epsg)
         {
             return Some(datum);
