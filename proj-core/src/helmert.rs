@@ -61,7 +61,7 @@ mod tests {
 
     #[test]
     fn roundtrip_forward_inverse() {
-        let params = &datum::OSGB36.to_wgs84.unwrap();
+        let params = datum::OSGB36.helmert_to_wgs84().unwrap();
         let x = 3_980_000.0;
         let y = -100_000.0;
         let z = 4_960_000.0;
@@ -77,7 +77,7 @@ mod tests {
     #[test]
     fn nad27_to_wgs84_known_point() {
         // Test the full pipeline: geodetic on NAD27 -> geocentric -> Helmert -> geodetic on WGS84
-        let nad27_params = &datum::NAD27.to_wgs84.unwrap();
+        let nad27_params = datum::NAD27.helmert_to_wgs84().unwrap();
 
         // A point roughly at 45°N, 90°W on NAD27
         let lon = (-90.0_f64).to_radians();

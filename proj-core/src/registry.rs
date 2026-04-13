@@ -1,4 +1,5 @@
 use crate::crs::CrsDef;
+use crate::datum::Datum;
 use crate::epsg_db;
 use crate::error::{Error, Result};
 
@@ -12,19 +13,23 @@ pub fn lookup_epsg(code: u32) -> Option<CrsDef> {
     epsg_db::lookup(code)
 }
 
+/// Look up a datum definition by EPSG code.
+pub fn lookup_datum_epsg(code: u32) -> Option<Datum> {
+    epsg_db::lookup_datum(code)
+}
+
 /// Parse an authority:code string (e.g., "EPSG:4326") and look up the CRS definition.
 ///
 /// Currently only supports the "EPSG" authority.
 pub fn lookup_authority_code(code: &str) -> Result<CrsDef> {
-    let parts: Vec<&str> = code.split(':').collect();
-    if parts.len() != 2 {
+    let Some((authority, code_str)) = code.split_once(':') else {
         return Err(Error::UnknownCrs(format!(
             "invalid authority:code format: {code}"
         )));
-    }
+    };
 
-    let authority = parts[0].trim();
-    let code_str = parts[1].trim();
+    let authority = authority.trim();
+    let code_str = code_str.trim();
 
     if !authority.eq_ignore_ascii_case("EPSG") {
         return Err(Error::UnknownCrs(format!(

@@ -36,7 +36,7 @@ fn walkdir(dir: &std::path::Path, name: &str) -> Vec<PathBuf> {
 // Binary format constants (must match epsg_db.rs)
 const MAGIC: u32 = 0x45505347;
 const ELLIPSOID_RECORD_SIZE: usize = 20;
-const DATUM_RECORD_SIZE: usize = 64;
+const DATUM_RECORD_SIZE: usize = 72;
 const GEO_CRS_RECORD_SIZE: usize = 8;
 const PROJ_CRS_RECORD_SIZE: usize = 80;
 
@@ -47,6 +47,10 @@ const METHOD_LCC: u8 = 4;
 const METHOD_ALBERS: u8 = 5;
 const METHOD_POLAR_STEREO: u8 = 6;
 const METHOD_EQUIDISTANT_CYL: u8 = 7;
+
+const DATUM_SHIFT_UNKNOWN: u8 = 0;
+const DATUM_SHIFT_IDENTITY: u8 = 1;
+const DATUM_SHIFT_HELMERT: u8 = 2;
 
 // EPSG parameter codes
 const LAT_ORIGIN: i64 = 8801;
@@ -183,8 +187,16 @@ fn main() {
     }
 
     // --- Datums ---
+    #[derive(Clone, Copy)]
+    enum DatumShiftKind {
+        Unknown,
+        Identity,
+        Helmert,
+    }
+
     struct DatumInfo {
         ellipsoid_code: u32,
+        shift_kind: DatumShiftKind,
         helmert: [f64; 7],
     }
     let mut datums: BTreeMap<u32, DatumInfo> = BTreeMap::new();
@@ -201,9 +213,20 @@ fn main() {
                 code,
                 DatumInfo {
                     ellipsoid_code: ec,
+                    shift_kind: DatumShiftKind::Unknown,
                     helmert: [0.0; 7],
                 },
             );
+        }
+    }
+
+    if let Ok(wgs84_datum_code) = conn.query_row(
+        "SELECT datum_code FROM geodetic_crs WHERE auth_name='EPSG' AND code=4326",
+        [],
+        |r| r.get::<_, u32>(0),
+    ) {
+        if let Some(datum) = datums.get_mut(&wgs84_datum_code) {
+            datum.shift_kind = DatumShiftKind::Identity;
         }
     }
 
@@ -278,6 +301,11 @@ fn main() {
                         || (has_rotation == prev_has_rotation && accuracy < prev_acc);
 
                     if is_better {
+                        d.shift_kind = if helmert.iter().all(|value| *value == 0.0) {
+                            DatumShiftKind::Identity
+                        } else {
+                            DatumShiftKind::Helmert
+                        };
                         d.helmert = helmert;
                         datum_accuracy.insert(datum_code, accuracy);
                     }
@@ -441,7 +469,7 @@ fn main() {
 
     // Header (16 bytes)
     buf.extend_from_slice(&MAGIC.to_le_bytes());
-    buf.extend_from_slice(&2u16.to_le_bytes()); // version
+    buf.extend_from_slice(&3u16.to_le_bytes()); // version
     buf.extend_from_slice(&(used_ellipsoids.len() as u16).to_le_bytes());
     buf.extend_from_slice(&(used_datums.len() as u16).to_le_bytes());
     buf.extend_from_slice(&(geo_crs.len() as u16).to_le_bytes());
@@ -461,8 +489,13 @@ fn main() {
         let mut rec = [0u8; DATUM_RECORD_SIZE];
         rec[0..4].copy_from_slice(&code.to_le_bytes());
         rec[4..8].copy_from_slice(&datum.ellipsoid_code.to_le_bytes());
+        rec[8] = match datum.shift_kind {
+            DatumShiftKind::Unknown => DATUM_SHIFT_UNKNOWN,
+            DatumShiftKind::Identity => DATUM_SHIFT_IDENTITY,
+            DatumShiftKind::Helmert => DATUM_SHIFT_HELMERT,
+        };
         for (i, &val) in datum.helmert.iter().enumerate() {
-            let offset = 8 + i * 8;
+            let offset = 16 + i * 8;
             rec[offset..offset + 8].copy_from_slice(&val.to_le_bytes());
         }
         buf.extend_from_slice(&rec);
