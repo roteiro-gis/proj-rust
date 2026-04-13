@@ -38,7 +38,7 @@ impl Datum {
             (DatumToWgs84::Helmert(a), DatumToWgs84::Helmert(b)) => {
                 same_ellipsoid && a.approx_eq(b)
             }
-            (DatumToWgs84::Unknown, DatumToWgs84::Unknown) => same_ellipsoid,
+            (DatumToWgs84::Unknown, DatumToWgs84::Unknown) => false,
             _ => false,
         }
     }
@@ -208,6 +208,20 @@ mod tests {
     fn different_datums() {
         assert!(!WGS84.same_datum(&NAD27));
         assert!(!NAD27.same_datum(&OSGB36));
+    }
+
+    #[test]
+    fn unknown_datums_are_not_collapsed_by_ellipsoid() {
+        let a = Datum {
+            ellipsoid: ellipsoid::WGS84,
+            to_wgs84: DatumToWgs84::Unknown,
+        };
+        let b = Datum {
+            ellipsoid: ellipsoid::WGS84,
+            to_wgs84: DatumToWgs84::Unknown,
+        };
+
+        assert!(!a.same_datum(&b));
     }
 
     #[test]

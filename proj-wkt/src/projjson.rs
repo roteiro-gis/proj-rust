@@ -15,9 +15,15 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
 
     if let Some(epsg) = top_level_epsg {
         if is_semantically_neutral_authority_wrapper(&value) {
-            return proj_core::lookup_epsg(epsg).ok_or_else(|| {
+            let registry = proj_core::lookup_epsg(epsg).ok_or_else(|| {
                 ParseError::Parse(format!("unsupported EPSG code in PROJJSON: {epsg}"))
-            });
+            })?;
+            let declared_type = value
+                .get("type")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ParseError::Parse("PROJJSON object is missing a CRS type".into()))?;
+            validate_wrapper_type_matches_registry(declared_type, &registry)?;
+            return Ok(registry);
         }
     }
 
@@ -239,7 +245,24 @@ fn is_semantically_neutral_authority_wrapper(value: &Value) -> bool {
         return false;
     };
     map.keys()
-        .all(|key| matches!(key.as_str(), "$schema" | "type" | "name" | "id"))
+        .all(|key| matches!(key.as_str(), "$schema" | "type" | "id"))
+}
+
+fn validate_wrapper_type_matches_registry(declared_type: &str, registry: &CrsDef) -> Result<()> {
+    let type_matches = match declared_type {
+        "GeographicCRS" | "GeodeticCRS" => registry.is_geographic(),
+        "ProjectedCRS" => registry.is_projected(),
+        _ => false,
+    };
+
+    if type_matches {
+        Ok(())
+    } else {
+        Err(ParseError::UnsupportedSemantics(format!(
+            "PROJJSON authority wrapper type `{declared_type}` does not match EPSG:{}",
+            registry.epsg()
+        )))
+    }
 }
 
 fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
@@ -272,11 +295,14 @@ fn infer_datum_from_json_crs(value: &Value) -> Result<Datum> {
         .ok_or_else(|| ParseError::Parse("PROJJSON datum is missing a name".into()))?;
     let ellipsoid = parse_structured_ellipsoid_from_json(datum_value);
 
-    ellipsoid
-        .as_ref()
-        .and_then(|ellipsoid| resolve_structured_datum(&datum_name, ellipsoid))
-        .or_else(|| resolve_named_datum(&datum_name))
-        .ok_or_else(|| ParseError::Parse("unsupported PROJJSON datum or CRS definition".into()))
+    match ellipsoid.as_ref() {
+        Some(ellipsoid) => resolve_structured_datum(&datum_name, ellipsoid).ok_or_else(|| {
+            ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
+        }),
+        None => resolve_named_datum(&datum_name).ok_or_else(|| {
+            ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
+        }),
+    }
 }
 
 #[derive(Debug)]
@@ -753,7 +779,6 @@ mod tests {
         let crs = parse_projjson(
             r#"{
                 "type": "ProjectedCRS",
-                "name": "WGS 84 / Pseudo-Mercator",
                 "id": { "authority": "EPSG", "code": 3857 }
             }"#,
         )
@@ -935,6 +960,64 @@ mod tests {
         assert!(err
             .to_string()
             .contains("unsupported PROJJSON datum or CRS definition"));
+    }
+
+    #[test]
+    fn rejects_projjson_known_datum_name_with_mismatched_ellipsoid() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "Broken WGS 84",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "World Geodetic System 1984",
+                    "ellipsoid": {
+                        "name": "WGS 84",
+                        "semi_major_axis": 6378136,
+                        "inverse_flattening": 298.257223563
+                    }
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" },
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported PROJJSON datum or CRS definition"));
+    }
+
+    #[test]
+    fn rejects_projjson_authority_wrapper_with_contradictory_type() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "id": { "authority": "EPSG", "code": 3857 }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("does not match EPSG:3857"));
+    }
+
+    #[test]
+    fn rejects_projjson_authority_wrapper_with_contradictory_name() {
+        let err = parse_projjson(
+            r#"{
+                "type": "ProjectedCRS",
+                "name": "Not Web Mercator",
+                "id": { "authority": "EPSG", "code": 3857 }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing conversion"));
     }
 
     #[test]

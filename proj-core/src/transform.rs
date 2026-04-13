@@ -691,6 +691,36 @@ mod tests {
     }
 
     #[test]
+    fn unknown_custom_datums_do_not_collapse_to_identity() {
+        let unknown = datum::Datum {
+            ellipsoid: datum::WGS84.ellipsoid,
+            to_wgs84: DatumToWgs84::Unknown,
+        };
+        let from = CrsDef::Projected(ProjectedCrsDef::new(
+            0,
+            unknown,
+            ProjectionMethod::WebMercator,
+            LinearUnit::metre(),
+            "Unknown A",
+        ));
+        let to = CrsDef::Projected(ProjectedCrsDef::new(
+            0,
+            unknown,
+            ProjectionMethod::WebMercator,
+            LinearUnit::metre(),
+            "Unknown B",
+        ));
+
+        let err = match Transform::from_crs_defs(&from, &to) {
+            Ok(_) => panic!("unknown custom datums should not build an identity transform"),
+            Err(err) => err,
+        };
+        assert!(err
+            .to_string()
+            .contains("has no known datum shift to WGS84"));
+    }
+
+    #[test]
     fn inverse_exposes_swapped_crs() {
         let fwd = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
         let inv = fwd.inverse().unwrap();
