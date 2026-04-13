@@ -11,11 +11,14 @@ use proj_core::{CrsDef, Datum, GeographicCrsDef, LinearUnit, ProjectedCrsDef, Pr
 pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
     let value: Value =
         serde_json::from_str(s).map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
+    let top_level_epsg = top_level_epsg_id(&value);
 
-    if let Some(epsg) = top_level_epsg_id(&value) {
-        return proj_core::lookup_epsg(epsg).ok_or_else(|| {
-            ParseError::Parse(format!("unsupported EPSG code in PROJJSON: {epsg}"))
-        });
+    if let Some(epsg) = top_level_epsg {
+        if is_semantically_neutral_authority_wrapper(&value) {
+            return proj_core::lookup_epsg(epsg).ok_or_else(|| {
+                ParseError::Parse(format!("unsupported EPSG code in PROJJSON: {epsg}"))
+            });
+        }
     }
 
     let crs_type = value
@@ -23,7 +26,7 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
         .and_then(Value::as_str)
         .ok_or_else(|| ParseError::Parse("PROJJSON object is missing a CRS type".into()))?;
 
-    match crs_type {
+    let parsed = match crs_type {
         "GeographicCRS" | "GeodeticCRS" => {
             validate_supported_geographic_semantics(
                 "PROJJSON geographic CRS",
@@ -31,41 +34,46 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
                 prime_meridian_degrees_from_json(&value),
                 &coordinate_system_from_json(&value),
             )?;
-            let datum = infer_datum(&value)?;
-            Ok(CrsDef::Geographic(GeographicCrsDef::new(0, datum, "")))
+            let datum = infer_datum_from_json_crs(&value)?;
+            CrsDef::Geographic(GeographicCrsDef::new(0, datum, ""))
         }
-        "ProjectedCRS" => parse_projected_projjson(&value),
-        other => Err(ParseError::Parse(format!(
-            "unsupported PROJJSON CRS without an EPSG id: {other}"
-        ))),
+        "ProjectedCRS" => parse_projected_projjson(&value)?,
+        other => {
+            return Err(ParseError::Parse(format!(
+                "unsupported PROJJSON CRS without an EPSG id: {other}"
+            )));
+        }
+    };
+
+    if let Some(epsg) = top_level_epsg {
+        return canonicalize_authoritative_crs(parsed, epsg, "PROJJSON");
     }
+
+    Ok(parsed)
 }
 
 fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
     let conversion = value
         .get("conversion")
         .ok_or_else(|| ParseError::Parse("PROJJSON projected CRS is missing conversion".into()))?;
-    let datum = infer_datum(value)?;
+    let base_crs = value
+        .get("base_crs")
+        .ok_or_else(|| ParseError::Parse("PROJJSON projected CRS is missing base_crs".into()))?;
+    let datum = infer_datum_from_json_crs(base_crs)?;
     let linear_unit = projected_linear_unit(value)?.unwrap_or_else(LinearUnit::metre);
     validate_supported_projected_semantics(
         "PROJJSON projected CRS",
         &coordinate_system_from_json(value),
     )?;
 
-    let base_crs = value.get("base_crs");
-    let base_angle_unit_to_degree = base_crs
-        .map(coordinate_system_angle_unit_to_degree)
-        .transpose()?
-        .flatten()
-        .unwrap_or(1.0);
-    if let Some(base_crs) = base_crs {
-        validate_supported_geographic_semantics(
-            "PROJJSON projected base geographic CRS",
-            Some(base_angle_unit_to_degree),
-            prime_meridian_degrees_from_json(base_crs),
-            &coordinate_system_from_json(base_crs),
-        )?;
-    }
+    let base_angle_unit_to_degree =
+        coordinate_system_angle_unit_to_degree(base_crs)?.unwrap_or(1.0);
+    validate_supported_geographic_semantics(
+        "PROJJSON projected base geographic CRS",
+        Some(base_angle_unit_to_degree),
+        prime_meridian_degrees_from_json(base_crs),
+        &coordinate_system_from_json(base_crs),
+    )?;
     let method_name = conversion
         .get("method")
         .and_then(|method| method.get("name"))
@@ -226,50 +234,190 @@ fn top_level_epsg_id(value: &Value) -> Option<u32> {
     }
 }
 
-fn infer_datum(value: &Value) -> Result<Datum> {
-    if any_name_contains(value, &["WORLD GEODETIC SYSTEM 1984", "WGS 84", "WGS84"]) {
-        return Ok(proj_core::datum::WGS84);
-    }
-    if any_name_contains(value, &["NORTH AMERICAN DATUM 1983", "NAD83"]) {
-        return Ok(proj_core::datum::NAD83);
-    }
-    if any_name_contains(value, &["NORTH AMERICAN DATUM 1927", "NAD27"]) {
-        return Ok(proj_core::datum::NAD27);
-    }
-    if any_name_contains(value, &["ETRS89", "ETRS 89"]) {
-        return Ok(proj_core::datum::ETRS89);
-    }
-    if any_name_contains(value, &["OSGB", "ORDNANCE SURVEY GREAT BRITAIN 1936"]) {
-        return Ok(proj_core::datum::OSGB36);
-    }
-    if any_name_contains(value, &["ED50", "EUROPEAN DATUM 1950"]) {
-        return Ok(proj_core::datum::ED50);
-    }
-    if any_name_contains(value, &["PULKOVO"]) {
-        return Ok(proj_core::datum::PULKOVO1942);
-    }
-    if any_name_contains(value, &["TOKYO"]) {
-        return Ok(proj_core::datum::TOKYO);
-    }
-
-    Err(ParseError::Parse(
-        "unsupported PROJJSON datum or CRS definition".into(),
-    ))
+fn is_semantically_neutral_authority_wrapper(value: &Value) -> bool {
+    let Some(map) = value.as_object() else {
+        return false;
+    };
+    map.keys()
+        .all(|key| matches!(key.as_str(), "$schema" | "type" | "name" | "id"))
 }
 
-fn any_name_contains(value: &Value, needles: &[&str]) -> bool {
-    match value {
-        Value::Object(map) => map.iter().any(|(key, val)| {
-            (key == "name"
-                && val.as_str().is_some_and(|s| {
-                    needles
-                        .iter()
-                        .any(|needle| contains_ascii_case_insensitive(s, needle))
-                }))
-                || any_name_contains(val, needles)
-        }),
-        Value::Array(values) => values.iter().any(|val| any_name_contains(val, needles)),
-        _ => false,
+fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
+    let registry = proj_core::lookup_epsg(epsg)
+        .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
+    if parsed.semantically_equivalent(&registry) {
+        Ok(registry)
+    } else {
+        Err(ParseError::UnsupportedSemantics(format!(
+            "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
+        )))
+    }
+}
+
+fn infer_datum_from_json_crs(value: &Value) -> Result<Datum> {
+    let datum_value = value
+        .get("datum")
+        .or_else(|| value.get("datum_ensemble"))
+        .ok_or_else(|| ParseError::Parse("PROJJSON CRS is missing a datum definition".into()))?;
+
+    if let Some(epsg) = epsg_id_from_object(datum_value.get("id")) {
+        return proj_core::lookup_datum_epsg(epsg)
+            .ok_or_else(|| ParseError::Parse(format!("unsupported PROJJSON datum EPSG:{epsg}")));
+    }
+
+    let datum_name = datum_value
+        .get("name")
+        .and_then(Value::as_str)
+        .map(normalize_key)
+        .ok_or_else(|| ParseError::Parse("PROJJSON datum is missing a name".into()))?;
+    let ellipsoid = parse_structured_ellipsoid_from_json(datum_value);
+
+    ellipsoid
+        .as_ref()
+        .and_then(|ellipsoid| resolve_structured_datum(&datum_name, ellipsoid))
+        .or_else(|| resolve_named_datum(&datum_name))
+        .ok_or_else(|| ParseError::Parse("unsupported PROJJSON datum or CRS definition".into()))
+}
+
+#[derive(Debug)]
+struct StructuredEllipsoid {
+    epsg: Option<u32>,
+    name: String,
+    semi_major_axis: f64,
+    inverse_flattening: f64,
+}
+
+type DatumCandidate = (
+    &'static [&'static str],
+    &'static [&'static str],
+    Datum,
+    Option<u32>,
+);
+
+fn parse_structured_ellipsoid_from_json(value: &Value) -> Option<StructuredEllipsoid> {
+    let ellipsoid = value.get("ellipsoid")?;
+    Some(StructuredEllipsoid {
+        epsg: epsg_id_from_object(ellipsoid.get("id")),
+        name: ellipsoid
+            .get("name")
+            .and_then(Value::as_str)
+            .map(normalize_key)?,
+        semi_major_axis: ellipsoid.get("semi_major_axis").and_then(Value::as_f64)?,
+        inverse_flattening: ellipsoid
+            .get("inverse_flattening")
+            .and_then(Value::as_f64)?,
+    })
+}
+
+fn resolve_structured_datum(datum_name: &str, ellipsoid: &StructuredEllipsoid) -> Option<Datum> {
+    for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in datum_candidates() {
+        if datum_aliases.contains(&datum_name)
+            && ellipsoid_matches(ellipsoid, datum, ellipsoid_aliases, ellipsoid_epsg)
+        {
+            return Some(datum);
+        }
+    }
+
+    None
+}
+
+fn resolve_named_datum(datum_name: &str) -> Option<Datum> {
+    datum_candidates()
+        .iter()
+        .find_map(|(aliases, _, datum, _)| aliases.contains(&datum_name).then_some(*datum))
+}
+
+fn datum_candidates() -> [DatumCandidate; 8] {
+    [
+        (
+            &[
+                "wgs84",
+                "wgs1984",
+                "worldgeodeticsystem1984",
+                "worldgeodeticsystem1984ensemble",
+            ][..],
+            &["wgs84"][..],
+            proj_core::datum::WGS84,
+            Some(7030),
+        ),
+        (
+            &["northamericandatum1983", "nad83"][..],
+            &["grs1980", "grs80"][..],
+            proj_core::datum::NAD83,
+            Some(7019),
+        ),
+        (
+            &["northamericandatum1927", "nad27"][..],
+            &["clarke1866", "clrk66"][..],
+            proj_core::datum::NAD27,
+            Some(7008),
+        ),
+        (
+            &[
+                "europeanterrestrialreferencesystem1989ensemble",
+                "europeanterrestrialreferencesystem1989",
+                "etrs89",
+            ][..],
+            &["grs1980", "grs80"][..],
+            proj_core::datum::ETRS89,
+            Some(7019),
+        ),
+        (
+            &["ordnancesurveyofgreatbritain1936", "osgb36"][..],
+            &["airy1830", "airy"][..],
+            proj_core::datum::OSGB36,
+            Some(7001),
+        ),
+        (
+            &["europeandatum1950", "ed50"][..],
+            &["international1924", "intl1924", "intl"][..],
+            proj_core::datum::ED50,
+            Some(7022),
+        ),
+        (
+            &["pulkovo1942", "pulkovo1942(58)"][..],
+            &["krassowsky1940", "krassowsky", "krass"][..],
+            proj_core::datum::PULKOVO1942,
+            Some(7024),
+        ),
+        (
+            &["tokyo", "tokyodatum"][..],
+            &["bessel1841", "bessel"][..],
+            proj_core::datum::TOKYO,
+            Some(7004),
+        ),
+    ]
+}
+
+fn ellipsoid_matches(
+    actual: &StructuredEllipsoid,
+    datum: Datum,
+    aliases: &[&str],
+    epsg: Option<u32>,
+) -> bool {
+    let expected_rf = if datum.ellipsoid.f == 0.0 {
+        0.0
+    } else {
+        1.0 / datum.ellipsoid.f
+    };
+
+    epsg.is_some_and(|expected| actual.epsg == Some(expected))
+        || (aliases.iter().any(|alias| *alias == actual.name)
+            && (actual.semi_major_axis - datum.ellipsoid.a).abs() < 1e-9
+            && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
+}
+
+fn epsg_id_from_object(value: Option<&Value>) -> Option<u32> {
+    let id = value?;
+    let authority = id.get("authority")?.as_str()?;
+    if !authority.eq_ignore_ascii_case("EPSG") {
+        return None;
+    }
+
+    match id.get("code")? {
+        Value::Number(n) => n.as_u64().and_then(|n| u32::try_from(n).ok()),
+        Value::String(s) => s.parse().ok(),
+        _ => None,
     }
 }
 
@@ -594,16 +742,6 @@ fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
         .find_map(|name| params.get(&normalize_key(name)).copied())
 }
 
-fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
-    if needle.is_empty() {
-        return true;
-    }
-
-    haystack
-        .char_indices()
-        .any(|(idx, _)| matches!(haystack.get(idx..idx + needle.len()), Some(slice) if slice.eq_ignore_ascii_case(needle)))
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,6 +761,70 @@ mod tests {
 
         assert!(crs.is_projected());
         assert_eq!(crs.epsg(), 3857);
+    }
+
+    #[test]
+    fn rejects_projjson_with_top_level_epsg_mismatch() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "WGS 84",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "World Geodetic System 1984",
+                    "ellipsoid": {
+                        "name": "WGS 84",
+                        "semi_major_axis": 6378137,
+                        "inverse_flattening": 298.257223563
+                    }
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" },
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" }
+                    ]
+                },
+                "id": { "authority": "EPSG", "code": 4269 }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("does not match the embedded EPSG semantics"));
+    }
+
+    #[test]
+    fn rejects_projjson_with_top_level_epsg_and_reversed_axes() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "WGS 84",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "World Geodetic System 1984",
+                    "ellipsoid": {
+                        "name": "WGS 84",
+                        "semi_major_axis": 6378137,
+                        "inverse_flattening": 298.257223563
+                    }
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" },
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" }
+                    ]
+                },
+                "id": { "authority": "EPSG", "code": 4326 }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
     }
 
     #[test]
@@ -702,6 +904,37 @@ mod tests {
     fn rejects_projjson_without_supported_definition() {
         let err = parse_projjson(r#"{ "type": "ProjectedCRS", "name": "Custom" }"#).unwrap_err();
         assert!(err.to_string().contains("missing conversion"));
+    }
+
+    #[test]
+    fn rejects_projjson_custom_datum_even_when_other_names_match() {
+        let err = parse_projjson(
+            r#"{
+                "type": "GeographicCRS",
+                "name": "WGS 84 styled custom",
+                "datum": {
+                    "type": "GeodeticReferenceFrame",
+                    "name": "Custom Datum",
+                    "ellipsoid": {
+                        "name": "WGS 84",
+                        "semi_major_axis": 6378137,
+                        "inverse_flattening": 298.257223563
+                    }
+                },
+                "coordinate_system": {
+                    "subtype": "ellipsoidal",
+                    "axis": [
+                        { "name": "Longitude", "abbreviation": "Lon", "direction": "east", "unit": "degree" },
+                        { "name": "Latitude", "abbreviation": "Lat", "direction": "north", "unit": "degree" }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("unsupported PROJJSON datum or CRS definition"));
     }
 
     #[test]

@@ -118,6 +118,19 @@ impl CrsDef {
     pub fn is_projected(&self) -> bool {
         matches!(self, CrsDef::Projected(_))
     }
+
+    /// Returns true when two CRS definitions map to the same internal semantics.
+    pub fn semantically_equivalent(&self, other: &Self) -> bool {
+        match (self, other) {
+            (CrsDef::Geographic(a), CrsDef::Geographic(b)) => a.datum().same_datum(b.datum()),
+            (CrsDef::Projected(a), CrsDef::Projected(b)) => {
+                a.datum().same_datum(b.datum())
+                    && approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
+                    && projection_methods_equivalent(&a.method(), &b.method())
+            }
+            _ => false,
+        }
+    }
 }
 
 /// Definition of a geographic CRS (longitude, latitude in degrees).
@@ -292,6 +305,152 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+}
+
+fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> bool {
+    match (a, b) {
+        (ProjectionMethod::WebMercator, ProjectionMethod::WebMercator) => true,
+        (
+            ProjectionMethod::TransverseMercator {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::TransverseMercator {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat0, *b_lat0)
+                && approx_eq(*a_k0, *b_k0)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        (
+            ProjectionMethod::PolarStereographic {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::PolarStereographic {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat_ts, *b_lat_ts)
+                && approx_eq(*a_k0, *b_k0)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        (
+            ProjectionMethod::LambertConformalConic {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                lat1: a_lat1,
+                lat2: a_lat2,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::LambertConformalConic {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                lat1: b_lat1,
+                lat2: b_lat2,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat0, *b_lat0)
+                && approx_eq(*a_lat1, *b_lat1)
+                && approx_eq(*a_lat2, *b_lat2)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        (
+            ProjectionMethod::AlbersEqualArea {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                lat1: a_lat1,
+                lat2: a_lat2,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::AlbersEqualArea {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                lat1: b_lat1,
+                lat2: b_lat2,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat0, *b_lat0)
+                && approx_eq(*a_lat1, *b_lat1)
+                && approx_eq(*a_lat2, *b_lat2)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        (
+            ProjectionMethod::Mercator {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::Mercator {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat_ts, *b_lat_ts)
+                && approx_eq(*a_k0, *b_k0)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        (
+            ProjectionMethod::EquidistantCylindrical {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::EquidistantCylindrical {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            approx_eq(*a_lon0, *b_lon0)
+                && approx_eq(*a_lat_ts, *b_lat_ts)
+                && approx_eq(*a_false_easting, *b_false_easting)
+                && approx_eq(*a_false_northing, *b_false_northing)
+        }
+        _ => false,
+    }
+}
+
+fn approx_eq(a: f64, b: f64) -> bool {
+    (a - b).abs() < 1e-12
 }
 
 #[cfg(test)]

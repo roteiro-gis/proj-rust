@@ -39,8 +39,8 @@ pub mod transform;
 
 pub use coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
 pub use crs::{CrsDef, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
-pub use datum::{Datum, HelmertParams};
+pub use datum::{Datum, DatumToWgs84, HelmertParams};
 pub use ellipsoid::Ellipsoid;
 pub use error::{Error, Result};
-pub use registry::{lookup_authority_code, lookup_epsg};
+pub use registry::{lookup_authority_code, lookup_datum_epsg, lookup_epsg};
 pub use transform::Transform;

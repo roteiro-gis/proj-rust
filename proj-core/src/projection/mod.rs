@@ -24,41 +24,80 @@ pub(crate) trait ProjectionImpl: Send + Sync {
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)>;
 }
 
+pub(crate) enum Projection {
+    WebMercator(web_mercator::WebMercator),
+    TransverseMercator(transverse_mercator::TransverseMercator),
+    PolarStereographic(polar_stereographic::PolarStereographic),
+    LambertConformalConic(lambert_conformal_conic::LambertConformalConic),
+    AlbersEqualArea(albers_equal_area::AlbersEqualArea),
+    Mercator(mercator::Mercator),
+    EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
+}
+
+impl Projection {
+    pub(crate) fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
+        match self {
+            Projection::WebMercator(proj) => proj.forward(lon, lat),
+            Projection::TransverseMercator(proj) => proj.forward(lon, lat),
+            Projection::PolarStereographic(proj) => proj.forward(lon, lat),
+            Projection::LambertConformalConic(proj) => proj.forward(lon, lat),
+            Projection::AlbersEqualArea(proj) => proj.forward(lon, lat),
+            Projection::Mercator(proj) => proj.forward(lon, lat),
+            Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
+        }
+    }
+
+    pub(crate) fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
+        match self {
+            Projection::WebMercator(proj) => proj.inverse(x, y),
+            Projection::TransverseMercator(proj) => proj.inverse(x, y),
+            Projection::PolarStereographic(proj) => proj.inverse(x, y),
+            Projection::LambertConformalConic(proj) => proj.inverse(x, y),
+            Projection::AlbersEqualArea(proj) => proj.inverse(x, y),
+            Projection::Mercator(proj) => proj.inverse(x, y),
+            Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
+        }
+    }
+}
+
 /// Construct the appropriate projection implementation from a method definition and datum.
-pub(crate) fn make_projection(
-    method: &ProjectionMethod,
-    datum: &Datum,
-) -> Result<Box<dyn ProjectionImpl>> {
+pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Result<Projection> {
     match method {
-        ProjectionMethod::WebMercator => Ok(Box::new(web_mercator::WebMercator::new()?)),
+        ProjectionMethod::WebMercator => {
+            Ok(Projection::WebMercator(web_mercator::WebMercator::new()?))
+        }
         ProjectionMethod::TransverseMercator {
             lon0,
             lat0,
             k0,
             false_easting,
             false_northing,
-        } => Ok(Box::new(transverse_mercator::TransverseMercator::new(
-            datum.ellipsoid,
-            lon0.to_radians(),
-            lat0.to_radians(),
-            *k0,
-            *false_easting,
-            *false_northing,
-        )?)),
+        } => Ok(Projection::TransverseMercator(
+            transverse_mercator::TransverseMercator::new(
+                datum.ellipsoid,
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *k0,
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::PolarStereographic {
             lon0,
             lat_ts,
             k0,
             false_easting,
             false_northing,
-        } => Ok(Box::new(polar_stereographic::PolarStereographic::new(
-            datum.ellipsoid,
-            lon0.to_radians(),
-            lat_ts.to_radians(),
-            *k0,
-            *false_easting,
-            *false_northing,
-        )?)),
+        } => Ok(Projection::PolarStereographic(
+            polar_stereographic::PolarStereographic::new(
+                datum.ellipsoid,
+                lon0.to_radians(),
+                lat_ts.to_radians(),
+                *k0,
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::LambertConformalConic {
             lon0,
             lat0,
@@ -66,7 +105,7 @@ pub(crate) fn make_projection(
             lat2,
             false_easting,
             false_northing,
-        } => Ok(Box::new(
+        } => Ok(Projection::LambertConformalConic(
             lambert_conformal_conic::LambertConformalConic::new(
                 datum.ellipsoid,
                 lon0.to_radians(),
@@ -84,22 +123,24 @@ pub(crate) fn make_projection(
             lat2,
             false_easting,
             false_northing,
-        } => Ok(Box::new(albers_equal_area::AlbersEqualArea::new(
-            datum.ellipsoid,
-            lon0.to_radians(),
-            lat0.to_radians(),
-            lat1.to_radians(),
-            lat2.to_radians(),
-            *false_easting,
-            *false_northing,
-        )?)),
+        } => Ok(Projection::AlbersEqualArea(
+            albers_equal_area::AlbersEqualArea::new(
+                datum.ellipsoid,
+                lon0.to_radians(),
+                lat0.to_radians(),
+                lat1.to_radians(),
+                lat2.to_radians(),
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::Mercator {
             lon0,
             lat_ts,
             k0,
             false_easting,
             false_northing,
-        } => Ok(Box::new(mercator::Mercator::new(
+        } => Ok(Projection::Mercator(mercator::Mercator::new(
             datum.ellipsoid,
             lon0.to_radians(),
             lat_ts.to_radians(),
@@ -112,7 +153,7 @@ pub(crate) fn make_projection(
             lat_ts,
             false_easting,
             false_northing,
-        } => Ok(Box::new(
+        } => Ok(Projection::EquidistantCylindrical(
             equidistant_cylindrical::EquidistantCylindrical::new(
                 datum.ellipsoid,
                 lon0.to_radians(),

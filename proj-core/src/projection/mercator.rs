@@ -10,9 +10,9 @@ use crate::projection::{
 /// Distinct from Web Mercator (EPSG:3857), which uses spherical formulas.
 /// This uses the full ellipsoidal equations. EPSG example: 3395 (WGS 84 / World Mercator).
 pub(crate) struct Mercator {
-    ellipsoid: Ellipsoid,
+    a_k0: f64,
+    e: f64,
     lon0: f64,
-    k0: f64,
     false_easting: f64,
     false_northing: f64,
 }
@@ -47,9 +47,9 @@ impl Mercator {
         };
 
         Ok(Self {
-            ellipsoid,
+            a_k0: ellipsoid.a * k0,
+            e: ellipsoid.e(),
             lon0,
-            k0,
             false_easting,
             false_northing,
         })
@@ -64,17 +64,14 @@ impl super::ProjectionImpl for Mercator {
                 "Mercator projection is undefined at the poles".into(),
             ));
         }
-        let a = self.ellipsoid.a;
-        let e = self.ellipsoid.e();
-
         let sin_lat = lat.sin();
-        let e_sin = e * sin_lat;
+        let e_sin = self.e * sin_lat;
 
-        let x = self.false_easting + a * self.k0 * (lon - self.lon0);
+        let x = self.false_easting + self.a_k0 * (lon - self.lon0);
         let y = self.false_northing
-            + a * self.k0
+            + self.a_k0
                 * ((std::f64::consts::FRAC_PI_4 + lat / 2.0).tan()
-                    * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0))
+                    * ((1.0 - e_sin) / (1.0 + e_sin)).powf(self.e / 2.0))
                 .ln();
 
         ensure_finite_xy("Mercator", x, y)
@@ -82,18 +79,15 @@ impl super::ProjectionImpl for Mercator {
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
-        let a = self.ellipsoid.a;
-        let e = self.ellipsoid.e();
-
-        let lon = self.lon0 + (x - self.false_easting) / (a * self.k0);
-        let t = (-(y - self.false_northing) / (a * self.k0)).exp();
+        let lon = self.lon0 + (x - self.false_easting) / self.a_k0;
+        let t = (-(y - self.false_northing) / self.a_k0).exp();
 
         // Iterative latitude from isometric latitude
         let mut lat = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
         for _ in 0..15 {
-            let e_sin = e * lat.sin();
+            let e_sin = self.e * lat.sin();
             let new_lat = std::f64::consts::FRAC_PI_2
-                - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan();
+                - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(self.e / 2.0)).atan();
             if (new_lat - lat).abs() < 1e-14 {
                 lat = new_lat;
                 break;

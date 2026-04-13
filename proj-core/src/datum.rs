@@ -5,30 +5,54 @@ use crate::ellipsoid::{self, Ellipsoid};
 pub struct Datum {
     /// The reference ellipsoid.
     pub ellipsoid: Ellipsoid,
-    /// 7-parameter Helmert transformation from this datum to WGS84.
-    /// `None` means this datum is WGS84 (or is functionally identical, e.g. NAD83).
-    pub to_wgs84: Option<HelmertParams>,
+    /// Explicit relationship from this datum to WGS84.
+    pub to_wgs84: DatumToWgs84,
 }
 
 impl Datum {
     /// Returns true if this datum is WGS84 or functionally identical (no Helmert shift needed).
     pub fn is_wgs84_compatible(&self) -> bool {
-        self.to_wgs84.is_none()
+        matches!(self.to_wgs84, DatumToWgs84::Identity)
+    }
+
+    /// Returns true if this datum has a known path to WGS84.
+    pub fn has_known_wgs84_transform(&self) -> bool {
+        !matches!(self.to_wgs84, DatumToWgs84::Unknown)
+    }
+
+    /// Return the Helmert parameters for this datum's path to WGS84, when available.
+    pub fn helmert_to_wgs84(&self) -> Option<&HelmertParams> {
+        match &self.to_wgs84 {
+            DatumToWgs84::Helmert(params) => Some(params),
+            DatumToWgs84::Identity | DatumToWgs84::Unknown => None,
+        }
     }
 
     /// Returns true if two datums are the same (same ellipsoid, same Helmert parameters).
     pub fn same_datum(&self, other: &Datum) -> bool {
-        // If both are WGS84-compatible with the same ellipsoid, they're the same.
-        // If both have Helmert params, compare them.
         let same_ellipsoid = (self.ellipsoid.a - other.ellipsoid.a).abs() < 1e-6
             && (self.ellipsoid.f - other.ellipsoid.f).abs() < 1e-12;
 
         match (&self.to_wgs84, &other.to_wgs84) {
-            (None, None) => same_ellipsoid,
-            (Some(a), Some(b)) => same_ellipsoid && a.approx_eq(b),
+            (DatumToWgs84::Identity, DatumToWgs84::Identity) => same_ellipsoid,
+            (DatumToWgs84::Helmert(a), DatumToWgs84::Helmert(b)) => {
+                same_ellipsoid && a.approx_eq(b)
+            }
+            (DatumToWgs84::Unknown, DatumToWgs84::Unknown) => same_ellipsoid,
             _ => false,
         }
     }
+}
+
+/// Explicit WGS84 relationship for a datum.
+#[derive(Debug, Clone, Copy)]
+pub enum DatumToWgs84 {
+    /// The datum can be treated as WGS84-compatible in the current model.
+    Identity,
+    /// The datum requires the provided Helmert transform to reach WGS84.
+    Helmert(HelmertParams),
+    /// The datum's path to WGS84 is not known.
+    Unknown,
 }
 
 /// 7-parameter Helmert (Bursa-Wolf) transformation parameters.
@@ -102,33 +126,33 @@ impl HelmertParams {
 /// WGS 84 datum.
 pub const WGS84: Datum = Datum {
     ellipsoid: ellipsoid::WGS84,
-    to_wgs84: None,
+    to_wgs84: DatumToWgs84::Identity,
 };
 
 /// NAD83 datum (functionally identical to WGS84 for sub-meter work).
 pub const NAD83: Datum = Datum {
     ellipsoid: ellipsoid::GRS80,
-    to_wgs84: None,
+    to_wgs84: DatumToWgs84::Identity,
 };
 
 /// NAD27 datum (Clarke 1866 ellipsoid).
 /// Helmert parameters from EPSG dataset (approximate continental US average).
 pub const NAD27: Datum = Datum {
     ellipsoid: ellipsoid::CLARKE1866,
-    to_wgs84: Some(HelmertParams::translation(-8.0, 160.0, 176.0)),
+    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-8.0, 160.0, 176.0)),
 };
 
 /// ETRS89 datum (European Terrestrial Reference System 1989).
 /// Functionally identical to WGS84 for most purposes.
 pub const ETRS89: Datum = Datum {
     ellipsoid: ellipsoid::GRS80,
-    to_wgs84: None,
+    to_wgs84: DatumToWgs84::Identity,
 };
 
 /// OSGB36 datum (Ordnance Survey Great Britain 1936).
 pub const OSGB36: Datum = Datum {
     ellipsoid: ellipsoid::AIRY1830,
-    to_wgs84: Some(HelmertParams {
+    to_wgs84: DatumToWgs84::Helmert(HelmertParams {
         dx: 446.448,
         dy: -125.157,
         dz: 542.060,
@@ -142,19 +166,19 @@ pub const OSGB36: Datum = Datum {
 /// Pulkovo 1942 datum (used in Russia and former Soviet states).
 pub const PULKOVO1942: Datum = Datum {
     ellipsoid: ellipsoid::KRASSOWSKY,
-    to_wgs84: Some(HelmertParams::translation(23.92, -141.27, -80.9)),
+    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(23.92, -141.27, -80.9)),
 };
 
 /// ED50 datum (European Datum 1950).
 pub const ED50: Datum = Datum {
     ellipsoid: ellipsoid::INTL1924,
-    to_wgs84: Some(HelmertParams::translation(-87.0, -98.0, -121.0)),
+    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-87.0, -98.0, -121.0)),
 };
 
 /// Tokyo datum (used in Japan).
 pub const TOKYO: Datum = Datum {
     ellipsoid: ellipsoid::BESSEL1841,
-    to_wgs84: Some(HelmertParams::translation(-146.414, 507.337, 680.507)),
+    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-146.414, 507.337, 680.507)),
 };
 
 #[cfg(test)]

@@ -10,7 +10,8 @@ use crate::projection::{
 /// Used by many national and regional grids including US State Plane zones,
 /// European grids (France Lambert, etc.).
 pub(crate) struct LambertConformalConic {
-    ellipsoid: Ellipsoid,
+    a: f64,
+    e: f64,
     lon0: f64,
     n: f64,
     f_const: f64,
@@ -58,7 +59,8 @@ impl LambertConformalConic {
         let rho0 = ellipsoid.a * f_const * t0.powf(n);
 
         Ok(Self {
-            ellipsoid,
+            a: ellipsoid.a,
+            e,
             lon0,
             n,
             f_const,
@@ -97,10 +99,8 @@ fn lat_from_t_lcc(t: f64, e: f64) -> f64 {
 impl super::ProjectionImpl for LambertConformalConic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
-        let a = self.ellipsoid.a;
-        let e = self.ellipsoid.e();
-        let t = t_func(lat, e);
-        let rho = a * self.f_const * t.powf(self.n);
+        let t = t_func(lat, self.e);
+        let rho = self.a * self.f_const * t.powf(self.n);
         let theta = self.n * (lon - self.lon0);
 
         let x = self.false_easting + rho * theta.sin();
@@ -111,17 +111,14 @@ impl super::ProjectionImpl for LambertConformalConic {
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
-        let a = self.ellipsoid.a;
-        let e = self.ellipsoid.e();
-
         let dx = x - self.false_easting;
         let dy = self.rho0 - (y - self.false_northing);
 
         let rho = (dx * dx + dy * dy).sqrt() * self.n.signum();
         let theta = dx.atan2(dy);
 
-        let t = (rho / (a * self.f_const)).powf(1.0 / self.n);
-        let lat = lat_from_t_lcc(t, e);
+        let t = (rho / (self.a * self.f_const)).powf(1.0 / self.n);
+        let lat = lat_from_t_lcc(t, self.e);
         let lon = self.lon0 + theta / self.n;
 
         ensure_finite_lon_lat("Lambert Conformal Conic", lon, lat)

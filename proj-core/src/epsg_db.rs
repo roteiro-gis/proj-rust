@@ -10,7 +10,7 @@
 //! ```text
 //! Header (16 bytes):
 //!   [0..4]   u32  magic = 0x45505347 ("EPSG")
-//!   [4..6]   u16  version = 2
+//!   [4..6]   u16  version = 3
 //!   [6..8]   u16  num_ellipsoids
 //!   [8..10]  u16  num_datums
 //!   [10..12] u16  num_geographic_crs
@@ -23,17 +23,18 @@
 //!     [12..20] f64  inverse_flattening (0.0 = sphere)
 //!
 //! Datum table (sorted by EPSG code):
-//!   Each record = 64 bytes:
+//!   Each record = 72 bytes:
 //!     [0..4]   u32  epsg_code
 //!     [4..8]   u32  ellipsoid_epsg_code
-//!     [8..16]  f64  dx (Helmert translation, meters)
-//!     [16..24] f64  dy
-//!     [24..32] f64  dz
-//!     [32..40] f64  rx (rotation, arc-seconds)
-//!     [40..48] f64  ry
-//!     [48..56] f64  rz
-//!     [56..64] f64  ds (scale, ppm)
-//!     (all zeros = no Helmert / WGS84-compatible)
+//!     [8..9]   u8   datum shift kind (0 = unknown, 1 = identity to WGS84, 2 = Helmert)
+//!     [9..16]  [u8; 7] reserved/padding
+//!     [16..24] f64  dx (Helmert translation, meters)
+//!     [24..32] f64  dy
+//!     [32..40] f64  dz
+//!     [40..48] f64  rx (rotation, arc-seconds)
+//!     [48..56] f64  ry
+//!     [56..64] f64  rz
+//!     [64..72] f64  ds (scale, ppm)
 //!
 //! Geographic CRS table (sorted by EPSG code):
 //!   Each record = 8 bytes:
@@ -57,8 +58,9 @@
 //! ```
 
 use crate::crs::*;
-use crate::datum::{Datum, HelmertParams};
+use crate::datum::{Datum, DatumToWgs84, HelmertParams};
 use crate::ellipsoid::Ellipsoid;
+use std::sync::OnceLock;
 
 /// Embedded EPSG database binary.
 static EPSG_DATA: &[u8] = include_bytes!("../data/epsg.bin");
@@ -66,9 +68,14 @@ static EPSG_DATA: &[u8] = include_bytes!("../data/epsg.bin");
 const MAGIC: u32 = 0x45505347; // "EPSG"
 const HEADER_SIZE: usize = 16;
 const ELLIPSOID_RECORD_SIZE: usize = 20;
-const DATUM_RECORD_SIZE: usize = 64;
+const DATUM_RECORD_SIZE: usize = 72;
 const GEO_CRS_RECORD_SIZE: usize = 8;
 const PROJ_CRS_RECORD_SIZE: usize = 80;
+const DB_VERSION: u16 = 3;
+
+const DATUM_SHIFT_UNKNOWN: u8 = 0;
+const DATUM_SHIFT_IDENTITY: u8 = 1;
+const DATUM_SHIFT_HELMERT: u8 = 2;
 
 // Method IDs (must match generator)
 pub(crate) const METHOD_WEB_MERCATOR: u8 = 1;
@@ -116,32 +123,40 @@ struct DbLayout {
     proj_crs_offset: usize,
 }
 
-fn layout() -> DbLayout {
-    let data = EPSG_DATA;
-    assert!(data.len() >= HEADER_SIZE, "EPSG database too small");
-    assert_eq!(read_u32(data, 0), MAGIC, "invalid EPSG database magic");
-    assert_eq!(read_u16(data, 4), 2, "unsupported EPSG database version");
+fn layout() -> &'static DbLayout {
+    static DB_LAYOUT: OnceLock<DbLayout> = OnceLock::new();
 
-    let num_ellipsoids = read_u16(data, 6) as usize;
-    let num_datums = read_u16(data, 8) as usize;
-    let num_geo_crs = read_u16(data, 10) as usize;
-    let num_proj_crs = read_u32(data, 12) as usize;
+    DB_LAYOUT.get_or_init(|| {
+        let data = EPSG_DATA;
+        assert!(data.len() >= HEADER_SIZE, "EPSG database too small");
+        assert_eq!(read_u32(data, 0), MAGIC, "invalid EPSG database magic");
+        assert_eq!(
+            read_u16(data, 4),
+            DB_VERSION,
+            "unsupported EPSG database version"
+        );
 
-    let ellipsoid_offset = HEADER_SIZE;
-    let datum_offset = ellipsoid_offset + num_ellipsoids * ELLIPSOID_RECORD_SIZE;
-    let geo_crs_offset = datum_offset + num_datums * DATUM_RECORD_SIZE;
-    let proj_crs_offset = geo_crs_offset + num_geo_crs * GEO_CRS_RECORD_SIZE;
+        let num_ellipsoids = read_u16(data, 6) as usize;
+        let num_datums = read_u16(data, 8) as usize;
+        let num_geo_crs = read_u16(data, 10) as usize;
+        let num_proj_crs = read_u32(data, 12) as usize;
 
-    DbLayout {
-        num_ellipsoids,
-        num_datums,
-        num_geo_crs,
-        num_proj_crs,
-        ellipsoid_offset,
-        datum_offset,
-        geo_crs_offset,
-        proj_crs_offset,
-    }
+        let ellipsoid_offset = HEADER_SIZE;
+        let datum_offset = ellipsoid_offset + num_ellipsoids * ELLIPSOID_RECORD_SIZE;
+        let geo_crs_offset = datum_offset + num_datums * DATUM_RECORD_SIZE;
+        let proj_crs_offset = geo_crs_offset + num_geo_crs * GEO_CRS_RECORD_SIZE;
+
+        DbLayout {
+            num_ellipsoids,
+            num_datums,
+            num_geo_crs,
+            num_proj_crs,
+            ellipsoid_offset,
+            datum_offset,
+            geo_crs_offset,
+            proj_crs_offset,
+        }
+    })
 }
 
 /// Binary search a sorted table of fixed-size records by the u32 EPSG code at offset 0.
@@ -186,7 +201,7 @@ fn lookup_ellipsoid(db: &DbLayout, epsg: u32) -> Option<Ellipsoid> {
     }
 }
 
-fn lookup_datum(db: &DbLayout, epsg: u32) -> Option<Datum> {
+fn lookup_datum_record(db: &DbLayout, epsg: u32) -> Option<Datum> {
     let offset = binary_search_table(
         EPSG_DATA,
         db.datum_offset,
@@ -196,36 +211,29 @@ fn lookup_datum(db: &DbLayout, epsg: u32) -> Option<Datum> {
     )?;
     let ellipsoid_code = read_u32(EPSG_DATA, offset + 4);
     let ellipsoid = lookup_ellipsoid(db, ellipsoid_code)?;
-
-    let dx = read_f64(EPSG_DATA, offset + 8);
-    let dy = read_f64(EPSG_DATA, offset + 16);
-    let dz = read_f64(EPSG_DATA, offset + 24);
-    let rx = read_f64(EPSG_DATA, offset + 32);
-    let ry = read_f64(EPSG_DATA, offset + 40);
-    let rz = read_f64(EPSG_DATA, offset + 48);
-    let ds = read_f64(EPSG_DATA, offset + 56);
-
-    let has_helmert =
-        dx != 0.0 || dy != 0.0 || dz != 0.0 || rx != 0.0 || ry != 0.0 || rz != 0.0 || ds != 0.0;
-
-    let to_wgs84 = if has_helmert {
-        Some(HelmertParams {
-            dx,
-            dy,
-            dz,
-            rx,
-            ry,
-            rz,
-            ds,
-        })
-    } else {
-        None
+    let to_wgs84 = match EPSG_DATA[offset + 8] {
+        DATUM_SHIFT_UNKNOWN => DatumToWgs84::Unknown,
+        DATUM_SHIFT_IDENTITY => DatumToWgs84::Identity,
+        DATUM_SHIFT_HELMERT => DatumToWgs84::Helmert(HelmertParams {
+            dx: read_f64(EPSG_DATA, offset + 16),
+            dy: read_f64(EPSG_DATA, offset + 24),
+            dz: read_f64(EPSG_DATA, offset + 32),
+            rx: read_f64(EPSG_DATA, offset + 40),
+            ry: read_f64(EPSG_DATA, offset + 48),
+            rz: read_f64(EPSG_DATA, offset + 56),
+            ds: read_f64(EPSG_DATA, offset + 64),
+        }),
+        other => panic!("unsupported datum shift kind in EPSG database: {other}"),
     };
 
     Some(Datum {
         ellipsoid,
         to_wgs84,
     })
+}
+
+pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
+    lookup_datum_record(layout(), code)
 }
 
 /// Look up a geographic CRS by EPSG code from the embedded database.
@@ -239,7 +247,7 @@ pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
         code,
     )?;
     let datum_code = read_u32(EPSG_DATA, offset + 4);
-    let datum = lookup_datum(&db, datum_code)?;
+    let datum = lookup_datum_record(db, datum_code)?;
     Some(CrsDef::Geographic(GeographicCrsDef::new(code, datum, "")))
 }
 
@@ -254,7 +262,7 @@ pub(crate) fn lookup_projected(code: u32) -> Option<CrsDef> {
         code,
     )?;
     let datum_code = read_u32(EPSG_DATA, offset + 4);
-    let datum = lookup_datum(&db, datum_code)?;
+    let datum = lookup_datum_record(db, datum_code)?;
     let method_id = EPSG_DATA[offset + 8];
 
     let linear_unit_to_meter = read_f64(EPSG_DATA, offset + 16);

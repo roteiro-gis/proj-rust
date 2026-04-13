@@ -11,14 +11,14 @@ use crate::projection::{
 /// Uses the spherical Mercator formulas with WGS84's semi-major axis,
 /// matching the EPSG:3857 / "Pseudo-Mercator" definition.
 pub(crate) struct WebMercator {
-    ellipsoid: Ellipsoid,
+    a: f64,
 }
 
 impl WebMercator {
     pub(crate) fn new() -> Result<Self> {
         // EPSG:3857 uses sphere with radius = WGS84 semi-major axis.
         Ok(Self {
-            ellipsoid: Ellipsoid::sphere(ellipsoid::WGS84.a),
+            a: Ellipsoid::sphere(ellipsoid::WGS84.a).a,
         })
     }
 }
@@ -36,18 +36,16 @@ impl super::ProjectionImpl for WebMercator {
             )));
         }
 
-        let a = self.ellipsoid.a;
-        let x = a * lon;
-        let y = a * (FRAC_PI_4 + lat / 2.0).tan().ln();
+        let x = self.a * lon;
+        let y = self.a * (FRAC_PI_4 + lat / 2.0).tan().ln();
 
         ensure_finite_xy("Web Mercator", x, y)
     }
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
-        let a = self.ellipsoid.a;
-        let lon = x / a;
-        let lat = FRAC_PI_2 - 2.0 * (-y / a).exp().atan();
+        let lon = x / self.a;
+        let lat = FRAC_PI_2 - 2.0 * (-y / self.a).exp().atan();
 
         ensure_finite_lon_lat("Web Mercator", lon, lat)
     }

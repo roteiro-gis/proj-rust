@@ -14,16 +14,14 @@ use std::collections::HashMap;
 /// 2. Otherwise, extract projection parameters from the WKT structure
 pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     let s = s.trim();
+    let top_level_epsg = extract_top_level_epsg(s);
+    let parsed = parse_wkt_structure(s)?;
 
-    // Try to extract a top-level CRS identifier first — most reliable approach.
-    if let Some(epsg) = extract_top_level_epsg(s) {
-        if let Some(crs) = proj_core::lookup_epsg(epsg) {
-            return Ok(crs);
-        }
+    if let Some(epsg) = top_level_epsg {
+        return canonicalize_authoritative_crs(parsed, epsg, "WKT");
     }
 
-    // Try to extract projection info from WKT structure
-    parse_wkt_structure(s)
+    Ok(parsed)
 }
 
 /// Extract a top-level EPSG code from AUTHORITY[...] or ID[...].
@@ -212,8 +210,7 @@ fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
         &coordinate_system,
     )?;
 
-    // Extract datum name to determine which datum to use
-    let datum = infer_datum(s)?;
+    let datum = infer_datum_from_geographic_inner(root_inner)?;
 
     Ok(CrsDef::Geographic(GeographicCrsDef::new(0, datum, "")))
 }
@@ -236,18 +233,18 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     )?;
 
     let base_geographic_inner =
-        find_top_level_element_inner(root_inner, &["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"]);
-    let base_angle_unit_to_degree = base_geographic_inner
-        .and_then(extract_top_level_angle_unit_to_degree)
-        .unwrap_or(1.0);
-    if let Some(base_geographic_inner) = base_geographic_inner {
-        validate_supported_geographic_semantics(
-            "WKT projected base geographic CRS",
-            Some(base_angle_unit_to_degree),
-            extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
-            &extract_coordinate_system(base_geographic_inner),
-        )?;
-    }
+        find_top_level_element_inner(root_inner, &["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"])
+            .ok_or_else(|| {
+                ParseError::Parse("WKT projected CRS is missing a base geographic CRS".into())
+            })?;
+    let base_angle_unit_to_degree =
+        extract_top_level_angle_unit_to_degree(base_geographic_inner).unwrap_or(1.0);
+    validate_supported_geographic_semantics(
+        "WKT projected base geographic CRS",
+        Some(base_angle_unit_to_degree),
+        extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
+        &extract_coordinate_system(base_geographic_inner),
+    )?;
     let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree);
 
     // Extract common parameters
@@ -283,8 +280,7 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let fe = first_param(&params, &["falseeasting"]).unwrap_or(0.0);
     let fn_ = first_param(&params, &["falsenorthing"]).unwrap_or(0.0);
 
-    // Determine datum from GEOGCS section
-    let datum = infer_datum(s)?;
+    let datum = infer_datum_from_geographic_inner(base_geographic_inner)?;
 
     let method = match normalized_method.as_str() {
         "transversemercator" => ProjectionMethod::TransverseMercator {
@@ -391,50 +387,162 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     )))
 }
 
-fn infer_datum(s: &str) -> Result<proj_core::Datum> {
-    if contains_ascii_case_insensitive(s, "WGS 84")
-        || contains_ascii_case_insensitive(s, "WGS84")
-        || contains_ascii_case_insensitive(s, "WGS_1984")
-    {
-        return Ok(proj_core::datum::WGS84);
-    }
-    if contains_ascii_case_insensitive(s, "NAD83")
-        || contains_ascii_case_insensitive(s, "NAD 83")
-        || contains_ascii_case_insensitive(s, "NORTH_AMERICAN_1983")
-    {
-        return Ok(proj_core::datum::NAD83);
-    }
-    if contains_ascii_case_insensitive(s, "NAD27")
-        || contains_ascii_case_insensitive(s, "NAD 27")
-        || contains_ascii_case_insensitive(s, "NORTH_AMERICAN_1927")
-    {
-        return Ok(proj_core::datum::NAD27);
-    }
-    if contains_ascii_case_insensitive(s, "ETRS89") || contains_ascii_case_insensitive(s, "ETRS 89")
-    {
-        return Ok(proj_core::datum::ETRS89);
-    }
-    if contains_ascii_case_insensitive(s, "OSGB")
-        || contains_ascii_case_insensitive(s, "AIRY")
-        || contains_ascii_case_insensitive(s, "ORDNANCE_SURVEY_GREAT_BRITAIN_1936")
-    {
-        return Ok(proj_core::datum::OSGB36);
-    }
-    if contains_ascii_case_insensitive(s, "ED50")
-        || contains_ascii_case_insensitive(s, "EUROPEAN_DATUM_1950")
-    {
-        return Ok(proj_core::datum::ED50);
-    }
-    if contains_ascii_case_insensitive(s, "PULKOVO") {
-        return Ok(proj_core::datum::PULKOVO1942);
-    }
-    if contains_ascii_case_insensitive(s, "TOKYO") {
-        return Ok(proj_core::datum::TOKYO);
+fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
+    let datum_inner = find_top_level_element_inner(
+        inner,
+        &["DATUM", "GEODETICDATUM", "DATUMENSEMBLE", "ENSEMBLE"],
+    )
+    .ok_or_else(|| ParseError::Parse("WKT geographic CRS is missing a datum definition".into()))?;
+
+    if let Some(epsg) = extract_top_level_epsg_from_inner(datum_inner) {
+        return proj_core::lookup_datum_epsg(epsg)
+            .ok_or_else(|| ParseError::Parse(format!("unsupported WKT datum EPSG:{epsg}")));
     }
 
-    Err(ParseError::Parse(
-        "unsupported or unrecognized WKT datum".into(),
-    ))
+    let fields = split_top_level_fields(datum_inner);
+    let datum_name = fields
+        .first()
+        .map(|field| normalize_key(trim_wkt_token(field)))
+        .ok_or_else(|| ParseError::Parse("WKT datum is missing a name".into()))?;
+    let ellipsoid = parse_structured_ellipsoid(datum_inner)
+        .ok_or_else(|| ParseError::Parse("WKT datum is missing a supported ellipsoid".into()))?;
+
+    resolve_structured_datum(&datum_name, &ellipsoid)
+        .ok_or_else(|| ParseError::Parse("unsupported or unrecognized WKT datum".into()))
+}
+
+fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
+    let registry = proj_core::lookup_epsg(epsg)
+        .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
+    if parsed.semantically_equivalent(&registry) {
+        Ok(registry)
+    } else {
+        Err(ParseError::UnsupportedSemantics(format!(
+            "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
+        )))
+    }
+}
+
+#[derive(Debug)]
+struct StructuredEllipsoid {
+    epsg: Option<u32>,
+    name: String,
+    semi_major_axis: f64,
+    inverse_flattening: f64,
+}
+
+fn parse_structured_ellipsoid(inner: &str) -> Option<StructuredEllipsoid> {
+    let ellipsoid_inner = find_top_level_element_inner(inner, &["SPHEROID", "ELLIPSOID"])?;
+    let fields = split_top_level_fields(ellipsoid_inner);
+    let name = normalize_key(trim_wkt_token(fields.first()?));
+    let semi_major_axis = fields.get(1)?.trim().parse().ok()?;
+    let inverse_flattening = fields.get(2)?.trim().parse().ok()?;
+    Some(StructuredEllipsoid {
+        epsg: extract_top_level_epsg_from_inner(ellipsoid_inner),
+        name,
+        semi_major_axis,
+        inverse_flattening,
+    })
+}
+
+fn extract_top_level_epsg_from_inner(inner: &str) -> Option<u32> {
+    let mut found = None;
+    for_each_top_level_element(inner, |name, element_inner| {
+        if found.is_none()
+            && (name.eq_ignore_ascii_case("AUTHORITY") || name.eq_ignore_ascii_case("ID"))
+        {
+            found = parse_epsg_element(element_inner);
+        }
+    });
+    found
+}
+
+fn resolve_structured_datum(
+    datum_name: &str,
+    ellipsoid: &StructuredEllipsoid,
+) -> Option<proj_core::Datum> {
+    let candidates = [
+        (
+            &["wgs84", "wgs1984", "worldgeodeticsystem1984"][..],
+            &["wgs84"][..],
+            proj_core::datum::WGS84,
+            Some(7030),
+        ),
+        (
+            &["northamericandatum1983", "nad83"][..],
+            &["grs1980", "grs80"][..],
+            proj_core::datum::NAD83,
+            Some(7019),
+        ),
+        (
+            &["northamericandatum1927", "nad27"][..],
+            &["clarke1866", "clrk66"][..],
+            proj_core::datum::NAD27,
+            Some(7008),
+        ),
+        (
+            &[
+                "europeanterrestrialreferencesystem1989ensemble",
+                "europeanterrestrialreferencesystem1989",
+                "etrs89",
+            ][..],
+            &["grs1980", "grs80"][..],
+            proj_core::datum::ETRS89,
+            Some(7019),
+        ),
+        (
+            &["ordnancesurveyofgreatbritain1936", "osgb36"][..],
+            &["airy1830", "airy"][..],
+            proj_core::datum::OSGB36,
+            Some(7001),
+        ),
+        (
+            &["europeandatum1950", "ed50"][..],
+            &["international1924", "intl1924", "intl"][..],
+            proj_core::datum::ED50,
+            Some(7022),
+        ),
+        (
+            &["pulkovo1942", "pulkovo1942(58)"][..],
+            &["krassowsky1940", "krassowsky", "krass"][..],
+            proj_core::datum::PULKOVO1942,
+            Some(7024),
+        ),
+        (
+            &["tokyo", "tokyodatum"][..],
+            &["bessel1841", "bessel"][..],
+            proj_core::datum::TOKYO,
+            Some(7004),
+        ),
+    ];
+
+    for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in candidates {
+        if datum_aliases.contains(&datum_name)
+            && ellipsoid_matches(ellipsoid, datum, ellipsoid_aliases, ellipsoid_epsg)
+        {
+            return Some(datum);
+        }
+    }
+
+    None
+}
+
+fn ellipsoid_matches(
+    actual: &StructuredEllipsoid,
+    datum: proj_core::Datum,
+    aliases: &[&str],
+    epsg: Option<u32>,
+) -> bool {
+    let expected_rf = if datum.ellipsoid.f == 0.0 {
+        0.0
+    } else {
+        1.0 / datum.ellipsoid.f
+    };
+
+    epsg.is_some_and(|expected| actual.epsg == Some(expected))
+        || (aliases.iter().any(|alias| *alias == actual.name)
+            && (actual.semi_major_axis - datum.ellipsoid.a).abs() < 1e-9
+            && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
 }
 
 /// Extract a quoted value like PROJECTION["Transverse_Mercator"].
@@ -739,10 +847,6 @@ fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
         .find_map(|name| params.get(&normalize_key(name)).copied())
 }
 
-fn contains_ascii_case_insensitive(haystack: &str, needle: &str) -> bool {
-    find_ascii_case_insensitive(haystack, needle).is_some()
-}
-
 fn find_ascii_case_insensitive(haystack: &str, needle: &str) -> Option<usize> {
     if needle.is_empty() {
         return Some(0);
@@ -887,5 +991,38 @@ mod tests {
         let crs = parse_wkt(wkt).unwrap();
         assert!(crs.is_geographic());
         assert_eq!(crs.epsg(), 4326);
+    }
+
+    #[test]
+    fn reject_wkt_with_top_level_epsg_mismatch() {
+        let err = parse_wkt(
+            r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",4269]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("does not match the embedded EPSG semantics"));
+    }
+
+    #[test]
+    fn reject_wkt_with_top_level_epsg_and_reversed_axes() {
+        let err = parse_wkt(
+            r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["latitude",north],AXIS["longitude",east],ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",4326]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
+    }
+
+    #[test]
+    fn reject_custom_airy_datum_without_structured_match() {
+        let err = parse_wkt(
+            r#"GEOGCRS["Custom Airy",DATUM["Custom Airy Datum",ELLIPSOID["Airy 1830",6377563.396,299.3249646]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported or unrecognized WKT datum"));
     }
 }

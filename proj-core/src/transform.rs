@@ -1,14 +1,16 @@
 use crate::coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
-use crate::crs::{CrsDef, ProjectionMethod};
-use crate::datum::Datum;
+use crate::crs::CrsDef;
+use crate::datum::{Datum, DatumToWgs84};
 use crate::error::{Error, Result};
 use crate::geocentric;
 use crate::helmert;
-use crate::projection::{make_projection, ProjectionImpl};
+use crate::projection::{make_projection, Projection};
 use crate::registry;
 
 #[cfg(feature = "rayon")]
-const PARALLEL_MIN_ITEMS_PER_THREAD: usize = 2_048;
+const PARALLEL_MIN_TOTAL_ITEMS: usize = 16_384;
+#[cfg(feature = "rayon")]
+const PARALLEL_MIN_ITEMS_PER_THREAD: usize = 4_096;
 #[cfg(feature = "rayon")]
 const PARALLEL_CHUNKS_PER_THREAD: usize = 4;
 #[cfg(feature = "rayon")]
@@ -42,20 +44,20 @@ enum TransformPipeline {
     /// Source and target are the same CRS — no-op.
     Identity,
     /// Same datum, geographic source → projected target.
-    SameDatumForward { forward: Box<dyn ProjectionImpl> },
+    SameDatumForward { forward: Projection },
     /// Same datum, projected source → geographic target.
-    SameDatumInverse { inverse: Box<dyn ProjectionImpl> },
+    SameDatumInverse { inverse: Projection },
     /// Same datum, projected source → projected target.
     SameDatumBoth {
-        inverse: Box<dyn ProjectionImpl>,
-        forward: Box<dyn ProjectionImpl>,
+        inverse: Projection,
+        forward: Projection,
     },
     /// Different datums — full pipeline with geocentric conversion and Helmert shift.
     DatumShift {
-        inverse: Option<Box<dyn ProjectionImpl>>,
+        inverse: Option<Projection>,
         source_datum: Datum,
         target_datum: Datum,
-        forward: Option<Box<dyn ProjectionImpl>>,
+        forward: Option<Projection>,
     },
 }
 
@@ -84,7 +86,7 @@ impl Transform {
     /// Use this for custom CRS not in the built-in registry.
     pub fn from_crs_defs(from: &CrsDef, to: &CrsDef) -> Result<Self> {
         // Identity check for known EPSG codes and semantically identical custom CRS definitions.
-        if (from.epsg() != 0 && from.epsg() == to.epsg()) || same_crs_definition(from, to) {
+        if (from.epsg() != 0 && from.epsg() == to.epsg()) || from.semantically_equivalent(to) {
             return Ok(Self {
                 source: *from,
                 target: *to,
@@ -118,13 +120,13 @@ impl Transform {
             }
         } else {
             // Both datums must have a path to WGS84
-            if !source_datum.is_wgs84_compatible() && source_datum.to_wgs84.is_none() {
+            if matches!(source_datum.to_wgs84, DatumToWgs84::Unknown) {
                 return Err(Error::UnsupportedProjection(format!(
                     "source CRS EPSG:{} has no known datum shift to WGS84",
                     from.epsg()
                 )));
             }
-            if !target_datum.is_wgs84_compatible() && target_datum.to_wgs84.is_none() {
+            if matches!(target_datum.to_wgs84, DatumToWgs84::Unknown) {
                 return Err(Error::UnsupportedProjection(format!(
                     "target CRS EPSG:{} has no known datum shift to WGS84",
                     to.epsg()
@@ -314,17 +316,17 @@ impl Transform {
                 );
 
                 // Step 3: Helmert: source datum → WGS84
-                let (x2, y2, z2) = if let Some(params) = &source_datum.to_wgs84 {
+                let (x2, y2, z2) = if let Some(params) = source_datum.helmert_to_wgs84() {
                     helmert::helmert_forward(params, x, y, z)
                 } else {
-                    (x, y, z) // already WGS84
+                    (x, y, z) // already WGS84-compatible
                 };
 
                 // Step 4: Helmert: WGS84 → target datum (inverse)
-                let (x3, y3, z3) = if let Some(params) = &target_datum.to_wgs84 {
+                let (x3, y3, z3) = if let Some(params) = target_datum.helmert_to_wgs84() {
                     helmert::helmert_inverse(params, x2, y2, z2)
                 } else {
-                    (x2, y2, z2) // target is WGS84
+                    (x2, y2, z2) // target is WGS84-compatible
                 };
 
                 // Step 5: Geocentric → geodetic (target ellipsoid)
@@ -428,7 +430,7 @@ fn should_parallelize(len: usize) -> bool {
     }
 
     let threads = rayon::current_num_threads().max(1);
-    len >= threads.saturating_mul(PARALLEL_MIN_ITEMS_PER_THREAD)
+    len >= PARALLEL_MIN_TOTAL_ITEMS.max(threads.saturating_mul(PARALLEL_MIN_ITEMS_PER_THREAD))
 }
 
 #[cfg(feature = "rayon")]
@@ -437,164 +439,6 @@ fn parallel_chunk_size(len: usize) -> usize {
     let target_chunks = threads.saturating_mul(PARALLEL_CHUNKS_PER_THREAD).max(1);
     let chunk_size = len.div_ceil(target_chunks);
     chunk_size.max(PARALLEL_MIN_CHUNK_SIZE)
-}
-
-fn same_crs_definition(from: &CrsDef, to: &CrsDef) -> bool {
-    match (from, to) {
-        (CrsDef::Geographic(a), CrsDef::Geographic(b)) => a.datum().same_datum(b.datum()),
-        (CrsDef::Projected(a), CrsDef::Projected(b)) => {
-            a.datum().same_datum(b.datum())
-                && approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
-                && projection_methods_equivalent(&a.method(), &b.method())
-        }
-        _ => false,
-    }
-}
-
-fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> bool {
-    match (a, b) {
-        (ProjectionMethod::WebMercator, ProjectionMethod::WebMercator) => true,
-        (
-            ProjectionMethod::TransverseMercator {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::TransverseMercator {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::PolarStereographic {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::PolarStereographic {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertConformalConic {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertConformalConic {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_lat1, *b_lat1)
-                && approx_eq(*a_lat2, *b_lat2)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::AlbersEqualArea {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::AlbersEqualArea {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_lat1, *b_lat1)
-                && approx_eq(*a_lat2, *b_lat2)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::Mercator {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::Mercator {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        _ => false,
-    }
-}
-
-fn approx_eq(a: f64, b: f64) -> bool {
-    (a - b).abs() < 1e-12
 }
 
 #[cfg(test)]

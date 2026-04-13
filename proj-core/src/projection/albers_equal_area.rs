@@ -10,7 +10,8 @@ use crate::projection::{
 /// Used for statistical mapping, USGS, and large-area equal-area maps.
 /// EPSG examples: 5070 (CONUS Albers), 3005 (BC Albers).
 pub(crate) struct AlbersEqualArea {
-    ellipsoid: Ellipsoid,
+    a: f64,
+    e2: f64,
     lon0: f64,
     n: f64,
     c: f64,
@@ -58,7 +59,8 @@ impl AlbersEqualArea {
         let rho0 = ellipsoid.a * (c - n * q0).abs().sqrt() / n;
 
         Ok(Self {
-            ellipsoid,
+            a: ellipsoid.a,
+            e2,
             lon0,
             n,
             c,
@@ -105,10 +107,8 @@ fn lat_from_q(q: f64, e2: f64) -> f64 {
 impl super::ProjectionImpl for AlbersEqualArea {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
-        let a = self.ellipsoid.a;
-        let e2 = self.ellipsoid.e2();
-        let q = q_func(lat, e2);
-        let rho = a * (self.c - self.n * q).abs().sqrt() / self.n;
+        let q = q_func(lat, self.e2);
+        let rho = self.a * (self.c - self.n * q).abs().sqrt() / self.n;
         let theta = self.n * (lon - self.lon0);
 
         let x = self.false_easting + rho * theta.sin();
@@ -119,16 +119,13 @@ impl super::ProjectionImpl for AlbersEqualArea {
 
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
-        let a = self.ellipsoid.a;
-        let e2 = self.ellipsoid.e2();
-
         let dx = x - self.false_easting;
         let dy = self.rho0 - (y - self.false_northing);
         let rho = (dx * dx + dy * dy).sqrt();
         let theta = dx.atan2(dy);
 
-        let q = (self.c - rho * rho * self.n * self.n / (a * a)) / self.n;
-        let lat = lat_from_q(q, e2);
+        let q = (self.c - rho * rho * self.n * self.n / (self.a * self.a)) / self.n;
+        let lat = lat_from_q(q, self.e2);
         let lon = self.lon0 + theta / self.n;
 
         ensure_finite_lon_lat("Albers Equal Area", lon, lat)

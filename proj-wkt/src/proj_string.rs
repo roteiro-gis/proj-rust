@@ -4,6 +4,7 @@ use proj_core::crs::*;
 use proj_core::datum;
 use proj_core::ellipsoid;
 use proj_core::Datum;
+use proj_core::DatumToWgs84;
 
 use crate::semantics::normalize_key;
 use crate::{ParseError, Result};
@@ -107,18 +108,26 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
         };
         return Ok(proj_core::Datum {
             ellipsoid: ellps,
-            to_wgs84: parse_towgs84(params),
+            to_wgs84: parse_towgs84(params).unwrap_or_else(|| {
+                if (ellps.a - ellipsoid::WGS84.a).abs() < 1e-9
+                    && (ellps.f - ellipsoid::WGS84.f).abs() < 1e-15
+                {
+                    DatumToWgs84::Identity
+                } else {
+                    DatumToWgs84::Unknown
+                }
+            }),
         });
     }
 
     Ok(datum::WGS84)
 }
 
-fn parse_towgs84(params: &HashMap<String, String>) -> Option<proj_core::HelmertParams> {
+fn parse_towgs84(params: &HashMap<String, String>) -> Option<DatumToWgs84> {
     let s = params.get("towgs84")?;
     let vals: Vec<f64> = s.split(',').filter_map(|v| v.trim().parse().ok()).collect();
     if vals.len() >= 3 {
-        Some(proj_core::HelmertParams {
+        let helmert = proj_core::HelmertParams {
             dx: vals[0],
             dy: vals[1],
             dz: vals[2],
@@ -126,6 +135,11 @@ fn parse_towgs84(params: &HashMap<String, String>) -> Option<proj_core::HelmertP
             ry: *vals.get(4).unwrap_or(&0.0),
             rz: *vals.get(5).unwrap_or(&0.0),
             ds: *vals.get(6).unwrap_or(&0.0),
+        };
+        Some(if vals.iter().all(|value| *value == 0.0) {
+            DatumToWgs84::Identity
+        } else {
+            DatumToWgs84::Helmert(helmert)
         })
     } else {
         None
@@ -447,7 +461,7 @@ mod tests {
         ).unwrap();
         assert!(crs.is_projected());
         if let CrsDef::Projected(p) = &crs {
-            assert!(p.datum().to_wgs84.is_some());
+            assert!(matches!(p.datum().to_wgs84, DatumToWgs84::Helmert(_)));
         }
     }
 

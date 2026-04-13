@@ -73,10 +73,8 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
 
     // URN format: urn:ogc:def:crs:EPSG::4326
     if upper.starts_with("URN:OGC:DEF:CRS:") {
-        let parts: Vec<&str> = s.split(':').collect();
         // Format: urn:ogc:def:crs:AUTHORITY::CODE or urn:ogc:def:crs:AUTHORITY:VERSION:CODE
-        if parts.len() >= 7 {
-            let code_str = parts.last().unwrap_or(&"");
+        if let Some((_, code_str)) = s.rsplit_once(':') {
             if let Ok(code) = code_str.parse::<u32>() {
                 return proj_core::lookup_epsg(code)
                     .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in URN: {code}")));
