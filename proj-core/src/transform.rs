@@ -1,6 +1,6 @@
 use crate::coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
 use crate::crs::CrsDef;
-use crate::datum::{Datum, HelmertParams};
+use crate::datum::HelmertParams;
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::geocentric;
@@ -109,7 +109,7 @@ impl Transform {
         options: SelectionOptions,
     ) -> Result<Self> {
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
-        let candidates = selector::rank_operation_candidates(from, to, &options);
+        let candidates = selector::rank_operation_candidates(from, to, &options)?;
         if candidates.is_empty() {
             return Err(match options.policy {
                 SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
@@ -134,8 +134,11 @@ impl Transform {
         for candidate in candidates {
             match compile_pipeline(from, to, &candidate.operation, candidate.direction, &grid_runtime) {
                 Ok(pipeline) => {
-                    let mut metadata = candidate.operation.metadata();
-                    metadata.area_of_use = matched_area_of_use(&options, &candidate.operation);
+                    let metadata = selected_metadata(
+                        &candidate.operation,
+                        candidate.direction,
+                        candidate.matched_area_of_use.clone(),
+                    );
                     let diagnostics = OperationSelectionDiagnostics {
                         selected_operation: metadata.clone(),
                         selected_match_kind: candidate.match_kind,
@@ -160,7 +163,11 @@ impl Transform {
                         missing_required_grid = Some(error.to_string());
                     }
                     skipped_operations.push(SkippedOperation {
-                        metadata: candidate.operation.metadata(),
+                        metadata: selected_metadata(
+                            &candidate.operation,
+                            candidate.direction,
+                            candidate.matched_area_of_use.clone(),
+                        ),
                         reason: match error {
                             crate::grid::GridError::UnsupportedFormat(_) => {
                                 SkippedOperationReason::UnsupportedGridFormat
@@ -172,7 +179,11 @@ impl Transform {
                 }
                 Err(error) => {
                     skipped_operations.push(SkippedOperation {
-                        metadata: candidate.operation.metadata(),
+                        metadata: selected_metadata(
+                            &candidate.operation,
+                            candidate.direction,
+                            candidate.matched_area_of_use.clone(),
+                        ),
                         reason: SkippedOperationReason::LessPreferred,
                         detail: error.to_string(),
                     });
@@ -238,14 +249,27 @@ impl Transform {
             selected_direction,
             &grid_runtime,
         )?;
+        let selected_operation = selected_metadata(
+            &self.selected_operation_definition,
+            selected_direction,
+            self.selected_operation.area_of_use.clone(),
+        );
+        let diagnostics = OperationSelectionDiagnostics {
+            selected_operation: selected_operation.clone(),
+            selected_match_kind: self.diagnostics.selected_match_kind,
+            selected_reasons: self.diagnostics.selected_reasons.clone(),
+            skipped_operations: Vec::new(),
+            approximate: self.diagnostics.approximate,
+            missing_required_grid: self.diagnostics.missing_required_grid.clone(),
+        };
         Ok(Self {
             source: self.target,
             target: self.source,
             selected_operation_definition: self.selected_operation_definition.clone(),
             selected_direction,
-            selected_operation: self.selected_operation.clone(),
-            diagnostics: self.diagnostics.clone(),
-            selection_options: self.selection_options.clone(),
+            selected_operation,
+            diagnostics,
+            selection_options: self.selection_options.inverse(),
             pipeline,
         })
     }
@@ -391,25 +415,14 @@ impl Transform {
     }
 }
 
-fn matched_area_of_use(
-    options: &SelectionOptions,
+fn selected_metadata(
     operation: &CoordinateOperation,
-) -> Option<crate::operation::AreaOfUse> {
-    operation
-        .areas_of_use
-        .iter()
-        .find(|area| {
-            options
-                .point_of_interest
-                .map(|point| area.contains_point(point))
-                .unwrap_or(false)
-                || options
-                    .area_of_interest
-                    .map(|bounds| area.contains_bounds(bounds))
-                    .unwrap_or(false)
-        })
-        .cloned()
-        .or_else(|| operation.areas_of_use.first().cloned())
+    direction: OperationStepDirection,
+    matched_area_of_use: Option<crate::operation::AreaOfUse>,
+) -> CoordinateOperationMetadata {
+    let mut metadata = operation.metadata_for_direction(direction);
+    metadata.area_of_use = matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
+    metadata
 }
 
 fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
@@ -462,10 +475,14 @@ fn compile_pipeline(
 
     if operation.id.is_none() && matches!(operation.method, OperationMethod::Identity) {
         // Synthetic identity between semantically equivalent CRS.
-    } else if operation.approximate && operation.id.is_none() {
-        compile_legacy_datum_fallback(source.datum(), target.datum(), &mut steps)?;
     } else {
-        compile_operation(operation, direction, grid_runtime, &mut steps)?;
+        compile_operation(
+            operation,
+            direction,
+            Some((source, target)),
+            grid_runtime,
+            &mut steps,
+        )?;
     }
 
     if let CrsDef::Projected(projected) = target {
@@ -477,51 +494,15 @@ fn compile_pipeline(
     Ok(CompiledOperationPipeline { steps })
 }
 
-fn compile_legacy_datum_fallback(
-    source_datum: &Datum,
-    target_datum: &Datum,
-    steps: &mut SmallVec<[CompiledStep; 8]>,
-) -> Result<()> {
-    if source_datum.same_datum(target_datum)
-        || (source_datum.is_wgs84_compatible() && target_datum.is_wgs84_compatible())
-    {
-        return Ok(());
-    }
-    if !source_datum.has_known_wgs84_transform() || !target_datum.has_known_wgs84_transform() {
-        return Err(Error::OperationSelection(
-            "legacy Helmert fallback unavailable because source or target datum has no advisory WGS84 path"
-                .into(),
-        ));
-    }
-
-    steps.push(CompiledStep::GeodeticToGeocentric {
-        ellipsoid: source_datum.ellipsoid,
-    });
-    if let Some(params) = source_datum.helmert_to_wgs84() {
-        steps.push(CompiledStep::Helmert {
-            params: *params,
-            inverse: false,
-        });
-    }
-    if let Some(params) = target_datum.helmert_to_wgs84() {
-        steps.push(CompiledStep::Helmert {
-            params: *params,
-            inverse: true,
-        });
-    }
-    steps.push(CompiledStep::GeocentricToGeodetic {
-        ellipsoid: target_datum.ellipsoid,
-    });
-    Ok(())
-}
-
 fn compile_operation(
     operation: &CoordinateOperation,
     direction: OperationStepDirection,
+    requested_pair: Option<(&CrsDef, &CrsDef)>,
     grid_runtime: &GridRuntime,
     steps: &mut SmallVec<[CompiledStep; 8]>,
 ) -> Result<()> {
-    let (source_geo, target_geo) = resolve_operation_geographic_pair(operation, direction)?;
+    let (source_geo, target_geo) =
+        resolve_operation_geographic_pair(operation, direction, requested_pair)?;
     match (&operation.method, direction) {
         (OperationMethod::Identity, _) => {}
         (OperationMethod::Helmert { params }, OperationStepDirection::Forward) => {
@@ -574,14 +555,14 @@ fn compile_operation(
             for step in child_steps {
                 let child = registry::lookup_operation(step.operation_id)
                     .ok_or_else(|| Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0)))?;
-                compile_operation(&child, step.direction, grid_runtime, steps)?;
+                compile_operation(&child, step.direction, None, grid_runtime, steps)?;
             }
         }
         (OperationMethod::Concatenated { steps: child_steps }, OperationStepDirection::Reverse) => {
             for step in child_steps.iter().rev() {
                 let child = registry::lookup_operation(step.operation_id)
                     .ok_or_else(|| Error::UnknownOperation(format!("unknown operation id {}", step.operation_id.0)))?;
-                compile_operation(&child, step.direction.inverse(), grid_runtime, steps)?;
+                compile_operation(&child, step.direction.inverse(), None, grid_runtime, steps)?;
             }
         }
         (OperationMethod::Projection { .. }, _) | (OperationMethod::AxisUnitNormalize, _) => {
@@ -596,24 +577,33 @@ fn compile_operation(
 fn resolve_operation_geographic_pair(
     operation: &CoordinateOperation,
     direction: OperationStepDirection,
+    requested_pair: Option<(&CrsDef, &CrsDef)>,
 ) -> Result<(CrsDef, CrsDef)> {
-    let source_code = operation.source_crs_epsg.ok_or_else(|| {
-        Error::OperationSelection(format!("operation {} is missing source CRS metadata", operation.name))
-    })?;
-    let target_code = operation.target_crs_epsg.ok_or_else(|| {
-        Error::OperationSelection(format!("operation {} is missing target CRS metadata", operation.name))
-    })?;
-    let source = registry::lookup_epsg(match direction {
-        OperationStepDirection::Forward => source_code,
-        OperationStepDirection::Reverse => target_code,
-    })
-    .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
-    let target = registry::lookup_epsg(match direction {
-        OperationStepDirection::Forward => target_code,
-        OperationStepDirection::Reverse => source_code,
-    })
-    .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
-    Ok((source, target))
+    if let (Some(source_code), Some(target_code)) = (operation.source_crs_epsg, operation.target_crs_epsg) {
+        let source = registry::lookup_epsg(match direction {
+            OperationStepDirection::Forward => source_code,
+            OperationStepDirection::Reverse => target_code,
+        })
+        .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
+        let target = registry::lookup_epsg(match direction {
+            OperationStepDirection::Forward => target_code,
+            OperationStepDirection::Reverse => source_code,
+        })
+        .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code in operation {}", operation.name)))?;
+        return Ok((source, target));
+    }
+
+    if let Some((source, target)) = requested_pair {
+        return Ok(match direction {
+            OperationStepDirection::Forward => (*source, *target),
+            OperationStepDirection::Reverse => (*target, *source),
+        });
+    }
+
+    Err(Error::OperationSelection(format!(
+        "operation {} is missing source/target CRS metadata",
+        operation.name
+    )))
 }
 
 #[cfg(feature = "rayon")]
@@ -637,8 +627,9 @@ fn parallel_chunk_size(len: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::crs::{CrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
+    use crate::crs::{CrsDef, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
     use crate::datum::{self, DatumToWgs84};
+    use crate::operation::AreaOfInterest;
 
     const US_FOOT_TO_METER: f64 = 0.3048006096012192;
 
@@ -792,13 +783,37 @@ mod tests {
             "EPSG:4267",
             "EPSG:4269",
             SelectionOptions {
-                point_of_interest: Some(Coord::new(-80.5041667, 44.5458333)),
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
                 ..SelectionOptions::default()
             },
         )
         .unwrap();
         assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
         assert!(!t.selection_diagnostics().approximate);
+    }
+
+    #[test]
+    fn source_crs_area_of_interest_is_normalized_before_selection() {
+        let to_projected = Transform::new("EPSG:4267", "EPSG:26717").unwrap();
+        let projected = to_projected.convert((-80.5041667, 44.5458333)).unwrap();
+
+        let t = Transform::with_selection_options(
+            "EPSG:26717",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::source_crs_point(Coord::new(
+                    projected.0,
+                    projected.1,
+                ))),
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
     }
 
     #[test]
@@ -820,6 +835,26 @@ mod tests {
 
         assert_eq!(fwd.selected_operation().id, Some(CoordinateOperationId(1693)));
         assert_eq!(inv.selected_operation().id, Some(CoordinateOperationId(1693)));
+    }
+
+    #[test]
+    fn inverse_reorients_selected_metadata_and_diagnostics() {
+        let fwd = Transform::from_operation(CoordinateOperationId(1693), "EPSG:4267", "EPSG:4326")
+            .unwrap();
+        let inv = fwd.inverse().unwrap();
+
+        assert_eq!(inv.source_crs().epsg(), 4326);
+        assert_eq!(inv.target_crs().epsg(), 4267);
+        assert_eq!(inv.selected_operation().source_crs_epsg, Some(4326));
+        assert_eq!(inv.selected_operation().target_crs_epsg, Some(4267));
+        assert_eq!(
+            inv.selection_diagnostics().selected_operation.source_crs_epsg,
+            Some(4326)
+        );
+        assert_eq!(
+            inv.selection_diagnostics().selected_operation.target_crs_epsg,
+            Some(4267)
+        );
     }
 
     #[test]
@@ -899,6 +934,20 @@ mod tests {
         };
         assert!(err.to_string().contains("no compatible operation found")
             || err.to_string().contains("legacy Helmert fallback unavailable"));
+    }
+
+    #[test]
+    fn approximate_fallback_is_modeled_as_helmert_operation() {
+        let from = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD27, "Custom NAD27"));
+        let to = CrsDef::Geographic(GeographicCrsDef::new(0, datum::OSGB36, "Custom OSGB36"));
+
+        let t = Transform::from_crs_defs(&from, &to).unwrap();
+
+        assert!(t.selected_operation().approximate);
+        assert!(matches!(
+            t.selected_operation_definition.method,
+            OperationMethod::Helmert { .. }
+        ));
     }
 
     #[test]

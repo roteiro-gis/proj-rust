@@ -1,9 +1,11 @@
 use crate::coord::{Bounds, Coord};
 use crate::crs::CrsDef;
+use crate::error::Result;
 use crate::operation::{
-    CoordinateOperation, OperationMatchKind, OperationMethod, OperationStepDirection,
-    SelectionOptions, SelectionPolicy, SelectionReason,
+    AreaOfInterest, AreaOfUse, CoordinateOperation, OperationMatchKind, OperationMethod,
+    OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason,
 };
+use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
 use smallvec::SmallVec;
 use std::cmp::Ordering;
@@ -12,6 +14,7 @@ pub(crate) struct RankedOperationCandidate {
     pub(crate) operation: CoordinateOperation,
     pub(crate) direction: OperationStepDirection,
     pub(crate) match_kind: OperationMatchKind,
+    pub(crate) matched_area_of_use: Option<AreaOfUse>,
     pub(crate) reasons: SmallVec<[SelectionReason; 4]>,
 }
 
@@ -19,21 +22,24 @@ pub(crate) fn rank_operation_candidates(
     source: &CrsDef,
     target: &CrsDef,
     options: &SelectionOptions,
-) -> Vec<RankedOperationCandidate> {
+) -> Result<Vec<RankedOperationCandidate>> {
+    let resolved_aoi = resolve_area_of_interest(source, target, options)?;
     if let SelectionPolicy::Operation(id) = options.policy {
         let Some(operation) = registry::lookup_operation(id) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
         let Some(direction) = compatible_direction(source, target, &operation) else {
-            return Vec::new();
+            return Ok(Vec::new());
         };
-        let reasons = explicit_selection_reasons(options, &operation);
-        return vec![RankedOperationCandidate {
+        let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), &operation);
+        let reasons = explicit_selection_reasons(matched_area_of_use.is_some(), &operation);
+        return Ok(vec![RankedOperationCandidate {
             operation,
             direction,
             match_kind: OperationMatchKind::Explicit,
+            matched_area_of_use,
             reasons,
-        }];
+        }]);
     }
 
     let mut candidates = Vec::new();
@@ -56,6 +62,7 @@ pub(crate) fn rank_operation_candidates(
             },
             direction: OperationStepDirection::Forward,
             match_kind: OperationMatchKind::ExactSourceTarget,
+            matched_area_of_use: None,
             reasons: SmallVec::from_slice(&[
                 SelectionReason::ExactSourceTarget,
                 SelectionReason::PreferredOperation,
@@ -71,10 +78,11 @@ pub(crate) fn rank_operation_candidates(
                 OperationStepDirection::Forward => is_compatible(source_geo, target_geo, &operation),
                 OperationStepDirection::Reverse => is_compatible_reversed(source_geo, target_geo, &operation),
             };
-            if !compatible || !policy_allows(source, target, options, &operation) {
+            if !compatible || !policy_allows(source, target, options, resolved_aoi.as_ref(), &operation) {
                 continue;
             }
 
+            let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), &operation);
             let mut reasons = SmallVec::<[SelectionReason; 4]>::new();
             let match_kind = if matches!(
                 direction,
@@ -90,7 +98,7 @@ pub(crate) fn rank_operation_candidates(
             } else {
                 OperationMatchKind::DatumCompatible
             };
-            if area_matches(options.point_of_interest, options.area_of_interest, &operation) {
+            if matched_area_of_use.is_some() {
                 reasons.push(SelectionReason::AreaOfUseMatch);
             }
             if !operation.deprecated {
@@ -103,6 +111,7 @@ pub(crate) fn rank_operation_candidates(
                 operation: operation.clone(),
                 direction,
                 match_kind,
+                matched_area_of_use,
                 reasons,
             });
         }
@@ -117,13 +126,14 @@ pub(crate) fn rank_operation_candidates(
                 operation,
                 direction: OperationStepDirection::Forward,
                 match_kind: OperationMatchKind::ApproximateFallback,
+                matched_area_of_use: None,
                 reasons: SmallVec::from_slice(&[SelectionReason::ApproximateFallback]),
             });
         }
     }
 
-    candidates.sort_by(|left, right| compare_candidates(options, left, right));
-    candidates
+    candidates.sort_by(compare_candidates);
+    Ok(candidates)
 }
 
 fn compatible_direction(
@@ -143,11 +153,11 @@ fn compatible_direction(
 }
 
 fn explicit_selection_reasons(
-    options: &SelectionOptions,
+    area_matches: bool,
     operation: &CoordinateOperation,
 ) -> SmallVec<[SelectionReason; 4]> {
     let mut reasons = SmallVec::from_slice(&[SelectionReason::ExplicitOperation]);
-    if area_matches(options.point_of_interest, options.area_of_interest, operation) {
+    if area_matches {
         reasons.push(SelectionReason::AreaOfUseMatch);
     }
     if !operation.deprecated {
@@ -209,48 +219,70 @@ fn policy_allows(
     source: &CrsDef,
     target: &CrsDef,
     options: &SelectionOptions,
+    resolved_aoi: Option<&ResolvedAreaOfInterest>,
     operation: &CoordinateOperation,
 ) -> bool {
     let datum_shift_required = !requires_no_datum_operation(source, target);
     match options.policy {
         SelectionPolicy::BestAvailable => true,
         SelectionPolicy::RequireGrids => !datum_shift_required || operation.uses_grids(),
-        SelectionPolicy::RequireExactAreaMatch => {
-            if options.point_of_interest.is_none() && options.area_of_interest.is_none() {
-                true
-            } else {
-                area_matches(options.point_of_interest, options.area_of_interest, operation)
-            }
-        }
+        SelectionPolicy::RequireExactAreaMatch => options.area_of_interest.is_none()
+            || matched_area_of_use(resolved_aoi, operation).is_some(),
         SelectionPolicy::AllowApproximateHelmertFallback => true,
         SelectionPolicy::Operation(_) => true,
     }
 }
 
-fn area_matches(point: Option<Coord>, bounds: Option<Bounds>, operation: &CoordinateOperation) -> bool {
-    if point.is_none() && bounds.is_none() {
-        return false;
-    }
-    operation.areas_of_use.iter().any(|area| {
-        point.map(|value| area.contains_point(value)).unwrap_or(false)
-            || bounds.map(|value| area.contains_bounds(value)).unwrap_or(false)
-    })
+#[derive(Debug, Clone, Copy)]
+pub(crate) struct ResolvedAreaOfInterest {
+    pub(crate) point: Option<Coord>,
+    pub(crate) bounds: Option<Bounds>,
 }
 
-fn compare_candidates(
+pub(crate) fn resolve_area_of_interest(
+    source: &CrsDef,
+    target: &CrsDef,
     options: &SelectionOptions,
-    left: &RankedOperationCandidate,
-    right: &RankedOperationCandidate,
-) -> Ordering {
+) -> Result<Option<ResolvedAreaOfInterest>> {
+    let Some(area) = options.area_of_interest else {
+        return Ok(None);
+    };
+    let point = match area.point {
+        Some(point) => Some(resolve_area_point(area, point, source, target)?),
+        None => None,
+    };
+    let bounds = match area.bounds {
+        Some(bounds) => Some(resolve_area_bounds(area, bounds, source, target)?),
+        None => None,
+    };
+    Ok(Some(ResolvedAreaOfInterest { point, bounds }))
+}
+
+fn matched_area_of_use(
+    area: Option<&ResolvedAreaOfInterest>,
+    operation: &CoordinateOperation,
+) -> Option<AreaOfUse> {
+    let area = area?;
+    if area.point.is_none() && area.bounds.is_none() {
+        return None;
+    }
+    operation.areas_of_use.iter().find(|candidate| {
+        area.point
+            .map(|value| candidate.contains_point(value))
+            .unwrap_or(false)
+            || area
+                .bounds
+                .map(|value| candidate.contains_bounds(value))
+                .unwrap_or(false)
+    }).cloned()
+}
+
+fn compare_candidates(left: &RankedOperationCandidate, right: &RankedOperationCandidate) -> Ordering {
     let left_exact = matches!(left.match_kind, OperationMatchKind::ExactSourceTarget);
     let right_exact = matches!(right.match_kind, OperationMatchKind::ExactSourceTarget);
     right_exact
         .cmp(&left_exact)
-        .then_with(|| {
-            let left_area = area_matches(options.point_of_interest, options.area_of_interest, &left.operation);
-            let right_area = area_matches(options.point_of_interest, options.area_of_interest, &right.operation);
-            right_area.cmp(&left_area)
-        })
+        .then_with(|| right.matched_area_of_use.is_some().cmp(&left.matched_area_of_use.is_some()))
         .then_with(|| {
             let left_accuracy = left
                 .operation
@@ -270,13 +302,86 @@ fn compare_candidates(
         .then_with(|| right.operation.preferred.cmp(&left.operation.preferred))
 }
 
+fn resolve_area_point(
+    area: AreaOfInterest,
+    point: Coord,
+    source: &CrsDef,
+    target: &CrsDef,
+) -> Result<Coord> {
+    match area.crs {
+        crate::operation::AreaOfInterestCrs::GeographicDegrees => {
+            validate_lon_lat(point.x.to_radians(), point.y.to_radians())?;
+            Ok(point)
+        }
+        crate::operation::AreaOfInterestCrs::SourceCrs => geographic_from_crs_point(source, point),
+        crate::operation::AreaOfInterestCrs::TargetCrs => geographic_from_crs_point(target, point),
+    }
+}
+
+fn resolve_area_bounds(
+    area: AreaOfInterest,
+    bounds: Bounds,
+    source: &CrsDef,
+    target: &CrsDef,
+) -> Result<Bounds> {
+    let crs = match area.crs {
+        crate::operation::AreaOfInterestCrs::GeographicDegrees => return Ok(bounds),
+        crate::operation::AreaOfInterestCrs::SourceCrs => source,
+        crate::operation::AreaOfInterestCrs::TargetCrs => target,
+    };
+
+    if matches!(crs, CrsDef::Geographic(_)) {
+        return Ok(bounds);
+    }
+
+    let segments = 8usize;
+    let mut transformed: Option<Bounds> = None;
+    for i in 0..=segments {
+        let t = i as f64 / segments as f64;
+        let x = bounds.min_x + bounds.width() * t;
+        let y = bounds.min_y + bounds.height() * t;
+        for sample in [
+            Coord::new(x, bounds.min_y),
+            Coord::new(x, bounds.max_y),
+            Coord::new(bounds.min_x, y),
+            Coord::new(bounds.max_x, y),
+        ] {
+            let point = geographic_from_crs_point(crs, sample)?;
+            if let Some(accum) = &mut transformed {
+                accum.expand_to_include(point);
+            } else {
+                transformed = Some(Bounds::new(point.x, point.y, point.x, point.y));
+            }
+        }
+    }
+    Ok(transformed.unwrap_or(bounds))
+}
+
+fn geographic_from_crs_point(crs: &CrsDef, point: Coord) -> Result<Coord> {
+    match crs {
+        CrsDef::Geographic(_) => {
+            validate_lon_lat(point.x.to_radians(), point.y.to_radians())?;
+            Ok(point)
+        }
+        CrsDef::Projected(projected) => {
+            validate_projected(point.x, point.y)?;
+            let projection = make_projection(&projected.method(), projected.datum())?;
+            let (lon, lat) = projection.inverse(
+                projected.linear_unit().to_meters(point.x),
+                projected.linear_unit().to_meters(point.y),
+            )?;
+            Ok(Coord::new(lon.to_degrees(), lat.to_degrees()))
+        }
+    }
+}
+
 fn synthetic_helmert_fallback(source: &CrsDef, target: &CrsDef) -> Option<CoordinateOperation> {
     if requires_no_datum_operation(source, target) {
         return None;
     }
-    if !source.datum().has_known_wgs84_transform() || !target.datum().has_known_wgs84_transform() {
-        return None;
-    }
+    let params = source
+        .datum()
+        .approximate_helmert_to(target.datum())?;
     Some(CoordinateOperation {
         id: None,
         name: format!("Approximate {} to {}", source.epsg(), target.epsg()),
@@ -289,6 +394,6 @@ fn synthetic_helmert_fallback(source: &CrsDef, target: &CrsDef) -> Option<Coordi
         deprecated: false,
         preferred: false,
         approximate: true,
-        method: OperationMethod::Identity,
+        method: OperationMethod::Helmert { params },
     })
 }

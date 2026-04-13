@@ -58,6 +58,88 @@ impl OperationStepDirection {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AreaOfInterestCrs {
+    GeographicDegrees,
+    SourceCrs,
+    TargetCrs,
+}
+
+impl AreaOfInterestCrs {
+    pub fn inverse(self) -> Self {
+        match self {
+            Self::GeographicDegrees => Self::GeographicDegrees,
+            Self::SourceCrs => Self::TargetCrs,
+            Self::TargetCrs => Self::SourceCrs,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct AreaOfInterest {
+    pub crs: AreaOfInterestCrs,
+    pub point: Option<Coord>,
+    pub bounds: Option<Bounds>,
+}
+
+impl AreaOfInterest {
+    pub fn geographic_point(point: Coord) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::GeographicDegrees,
+            point: Some(point),
+            bounds: None,
+        }
+    }
+
+    pub fn geographic_bounds(bounds: Bounds) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::GeographicDegrees,
+            point: None,
+            bounds: Some(bounds),
+        }
+    }
+
+    pub fn source_crs_point(point: Coord) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::SourceCrs,
+            point: Some(point),
+            bounds: None,
+        }
+    }
+
+    pub fn source_crs_bounds(bounds: Bounds) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::SourceCrs,
+            point: None,
+            bounds: Some(bounds),
+        }
+    }
+
+    pub fn target_crs_point(point: Coord) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::TargetCrs,
+            point: Some(point),
+            bounds: None,
+        }
+    }
+
+    pub fn target_crs_bounds(bounds: Bounds) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::TargetCrs,
+            point: None,
+            bounds: Some(bounds),
+        }
+    }
+
+    pub fn inverse(self) -> Self {
+        Self {
+            crs: self.crs.inverse(),
+            point: self.point,
+            bounds: self.bounds,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum GridInterpolation {
     Bilinear,
 }
@@ -149,6 +231,18 @@ impl CoordinateOperation {
         }
     }
 
+    pub fn metadata_for_direction(
+        &self,
+        direction: OperationStepDirection,
+    ) -> CoordinateOperationMetadata {
+        let mut metadata = self.metadata();
+        if matches!(direction, OperationStepDirection::Reverse) {
+            std::mem::swap(&mut metadata.source_crs_epsg, &mut metadata.target_crs_epsg);
+            std::mem::swap(&mut metadata.source_datum_epsg, &mut metadata.target_datum_epsg);
+        }
+        metadata
+    }
+
     pub fn uses_grids(&self) -> bool {
         let mut visited = HashSet::new();
         self.uses_grids_with_visited(&mut visited)
@@ -199,8 +293,7 @@ pub enum SelectionPolicy {
 
 #[derive(Clone)]
 pub struct SelectionOptions {
-    pub point_of_interest: Option<Coord>,
-    pub area_of_interest: Option<Bounds>,
+    pub area_of_interest: Option<AreaOfInterest>,
     pub policy: SelectionPolicy,
     pub grid_provider: Option<Arc<dyn crate::grid::GridProvider>>,
 }
@@ -208,10 +301,19 @@ pub struct SelectionOptions {
 impl Default for SelectionOptions {
     fn default() -> Self {
         Self {
-            point_of_interest: None,
             area_of_interest: None,
             policy: SelectionPolicy::BestAvailable,
             grid_provider: None,
+        }
+    }
+}
+
+impl SelectionOptions {
+    pub fn inverse(&self) -> Self {
+        Self {
+            area_of_interest: self.area_of_interest.map(AreaOfInterest::inverse),
+            policy: self.policy.clone(),
+            grid_provider: self.grid_provider.clone(),
         }
     }
 }

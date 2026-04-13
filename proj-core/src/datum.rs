@@ -28,6 +28,23 @@ impl Datum {
         }
     }
 
+    pub fn approximate_helmert_to(&self, target: &Datum) -> Option<HelmertParams> {
+        if !self.has_known_wgs84_transform() || !target.has_known_wgs84_transform() {
+            return None;
+        }
+
+        let source_to_wgs84 = self
+            .helmert_to_wgs84()
+            .copied()
+            .unwrap_or_else(|| HelmertParams::translation(0.0, 0.0, 0.0));
+        let wgs84_to_target = target
+            .helmert_to_wgs84()
+            .map(HelmertParams::inverse)
+            .unwrap_or_else(|| HelmertParams::translation(0.0, 0.0, 0.0));
+
+        Some(source_to_wgs84.compose_approx(&wgs84_to_target))
+    }
+
     /// Returns true if two datums are the same (same ellipsoid, same Helmert parameters).
     pub fn same_datum(&self, other: &Datum) -> bool {
         let same_ellipsoid = (self.ellipsoid.a - other.ellipsoid.a).abs() < 1e-6
@@ -105,6 +122,18 @@ impl HelmertParams {
             ry: -self.ry,
             rz: -self.rz,
             ds: -self.ds,
+        }
+    }
+
+    pub fn compose_approx(&self, next: &Self) -> Self {
+        Self {
+            dx: self.dx + next.dx,
+            dy: self.dy + next.dy,
+            dz: self.dz + next.dz,
+            rx: self.rx + next.rx,
+            ry: self.ry + next.ry,
+            rz: self.rz + next.rz,
+            ds: self.ds + next.ds,
         }
     }
 

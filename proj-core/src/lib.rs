@@ -50,10 +50,11 @@ pub use grid::{
 };
 pub use error::{Error, Result};
 pub use operation::{
-    AreaOfUse, CoordinateOperation, CoordinateOperationId, CoordinateOperationMetadata, GridId,
-    GridInterpolation, GridShiftDirection, OperationAccuracy, OperationMatchKind, OperationMethod,
-    OperationSelectionDiagnostics, OperationStep, OperationStepDirection, SelectionOptions,
-    SelectionPolicy, SelectionReason, SkippedOperation, SkippedOperationReason,
+    AreaOfInterest, AreaOfInterestCrs, AreaOfUse, CoordinateOperation, CoordinateOperationId,
+    CoordinateOperationMetadata, GridId, GridInterpolation, GridShiftDirection, OperationAccuracy,
+    OperationMatchKind, OperationMethod, OperationSelectionDiagnostics, OperationStep,
+    OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason, SkippedOperation,
+    SkippedOperationReason,
 };
 pub use registry::{lookup_authority_code, lookup_datum_epsg, lookup_epsg, lookup_operation, operations_between};
 pub use transform::Transform;
