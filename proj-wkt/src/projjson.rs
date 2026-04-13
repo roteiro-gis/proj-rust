@@ -245,7 +245,7 @@ fn is_semantically_neutral_authority_wrapper(value: &Value) -> bool {
         return false;
     };
     map.keys()
-        .all(|key| matches!(key.as_str(), "$schema" | "type" | "id"))
+        .all(|key| matches!(key.as_str(), "$schema" | "type" | "name" | "id"))
 }
 
 fn validate_wrapper_type_matches_registry(declared_type: &str, registry: &CrsDef) -> Result<()> {
@@ -779,6 +779,7 @@ mod tests {
         let crs = parse_projjson(
             r#"{
                 "type": "ProjectedCRS",
+                "name": "WGS 84 / Pseudo-Mercator",
                 "id": { "authority": "EPSG", "code": 3857 }
             }"#,
         )
@@ -1007,17 +1008,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_projjson_authority_wrapper_with_contradictory_name() {
-        let err = parse_projjson(
+    fn name_only_authority_wrapper_still_canonicalizes() {
+        let crs = parse_projjson(
             r#"{
                 "type": "ProjectedCRS",
                 "name": "Not Web Mercator",
                 "id": { "authority": "EPSG", "code": 3857 }
             }"#,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err.to_string().contains("missing conversion"));
+        assert!(crs.is_projected());
+        assert_eq!(crs.epsg(), 3857);
     }
 
     #[test]
