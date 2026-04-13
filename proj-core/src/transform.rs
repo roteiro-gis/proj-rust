@@ -29,8 +29,11 @@ const PARALLEL_MIN_CHUNK_SIZE: usize = 1_024;
 pub struct Transform {
     source: CrsDef,
     target: CrsDef,
+    selected_operation_definition: CoordinateOperation,
+    selected_direction: OperationStepDirection,
     selected_operation: CoordinateOperationMetadata,
     diagnostics: OperationSelectionDiagnostics,
+    selection_options: SelectionOptions,
     pipeline: CompiledOperationPipeline,
 }
 
@@ -109,9 +112,15 @@ impl Transform {
         let candidates = selector::rank_operation_candidates(from, to, &options);
         if candidates.is_empty() {
             return Err(match options.policy {
-                SelectionPolicy::Operation(id) => {
-                    Error::UnknownOperation(format!("unknown operation id {}", id.0))
-                }
+                SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
+                    Some(_) => Error::OperationSelection(format!(
+                        "operation id {} is not compatible with source EPSG:{} target EPSG:{}",
+                        id.0,
+                        from.epsg(),
+                        to.epsg()
+                    )),
+                    None => Error::UnknownOperation(format!("unknown operation id {}", id.0)),
+                },
                 _ => Error::OperationSelection(format!(
                     "no compatible operation found for source EPSG:{} target EPSG:{}",
                     from.epsg(),
@@ -138,8 +147,11 @@ impl Transform {
                     return Ok(Self {
                         source: *from,
                         target: *to,
+                        selected_operation_definition: candidate.operation,
+                        selected_direction: candidate.direction,
                         selected_operation: metadata,
                         diagnostics,
+                        selection_options: options,
                         pipeline,
                     });
                 }
@@ -217,7 +229,25 @@ impl Transform {
 
     /// Build the inverse transform by swapping the source and target CRS.
     pub fn inverse(&self) -> Result<Self> {
-        Self::from_crs_defs(&self.target, &self.source)
+        let grid_runtime = GridRuntime::new(self.selection_options.grid_provider.clone());
+        let selected_direction = self.selected_direction.inverse();
+        let pipeline = compile_pipeline(
+            &self.target,
+            &self.source,
+            &self.selected_operation_definition,
+            selected_direction,
+            &grid_runtime,
+        )?;
+        Ok(Self {
+            source: self.target,
+            target: self.source,
+            selected_operation_definition: self.selected_operation_definition.clone(),
+            selected_direction,
+            selected_operation: self.selected_operation.clone(),
+            diagnostics: self.diagnostics.clone(),
+            selection_options: self.selection_options.clone(),
+            pipeline,
+        })
     }
 
     /// Reproject a 2D bounding box by sampling its perimeter.
@@ -743,6 +773,20 @@ mod tests {
     }
 
     #[test]
+    fn explicit_operation_rejects_incompatible_crs_pair() {
+        let err = match Transform::from_operation(
+            CoordinateOperationId(1693),
+            "EPSG:4326",
+            "EPSG:3857",
+        ) {
+            Ok(_) => panic!("incompatible operation should be rejected"),
+            Err(err) => err,
+        };
+        assert!(matches!(err, Error::OperationSelection(_)));
+        assert!(err.to_string().contains("not compatible"));
+    }
+
+    #[test]
     fn explicit_selection_options_choose_grid_operation() {
         let t = Transform::with_selection_options(
             "EPSG:4267",
@@ -766,6 +810,16 @@ mod tests {
         let back = inv.convert(shifted).unwrap();
         assert!((back.0 - original.0).abs() < 1e-6);
         assert!((back.1 - original.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn inverse_preserves_explicit_operation_selection() {
+        let fwd = Transform::from_operation(CoordinateOperationId(1693), "EPSG:4267", "EPSG:4326")
+            .unwrap();
+        let inv = fwd.inverse().unwrap();
+
+        assert_eq!(fwd.selected_operation().id, Some(CoordinateOperationId(1693)));
+        assert_eq!(inv.selected_operation().id, Some(CoordinateOperationId(1693)));
     }
 
     #[test]

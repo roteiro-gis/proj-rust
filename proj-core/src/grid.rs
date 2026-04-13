@@ -84,7 +84,7 @@ pub(crate) struct GridRuntime {
 
 impl GridRuntime {
     pub(crate) fn new(app_provider: Option<Arc<dyn GridProvider>>) -> Self {
-        let mut providers: Vec<Arc<dyn GridProvider>> = vec![Arc::new(EmbeddedGridProvider::default())];
+        let mut providers: Vec<Arc<dyn GridProvider>> = vec![Arc::new(EmbeddedGridProvider)];
         if let Some(provider) = app_provider {
             providers.push(provider);
         }

@@ -21,15 +21,19 @@ pub(crate) fn rank_operation_candidates(
     options: &SelectionOptions,
 ) -> Vec<RankedOperationCandidate> {
     if let SelectionPolicy::Operation(id) = options.policy {
-        return registry::lookup_operation(id)
-            .into_iter()
-            .map(|operation| RankedOperationCandidate {
-                operation,
-                direction: OperationStepDirection::Forward,
-                match_kind: OperationMatchKind::Explicit,
-                reasons: SmallVec::from_slice(&[SelectionReason::ExplicitOperation]),
-            })
-            .collect();
+        let Some(operation) = registry::lookup_operation(id) else {
+            return Vec::new();
+        };
+        let Some(direction) = compatible_direction(source, target, &operation) else {
+            return Vec::new();
+        };
+        let reasons = explicit_selection_reasons(options, &operation);
+        return vec![RankedOperationCandidate {
+            operation,
+            direction,
+            match_kind: OperationMatchKind::Explicit,
+            reasons,
+        }];
     }
 
     let mut candidates = Vec::new();
@@ -120,6 +124,39 @@ pub(crate) fn rank_operation_candidates(
 
     candidates.sort_by(|left, right| compare_candidates(options, left, right));
     candidates
+}
+
+fn compatible_direction(
+    source: &CrsDef,
+    target: &CrsDef,
+    operation: &CoordinateOperation,
+) -> Option<OperationStepDirection> {
+    let source_geo = source.base_geographic_crs_epsg();
+    let target_geo = target.base_geographic_crs_epsg();
+    if is_compatible(source_geo, target_geo, operation) {
+        Some(OperationStepDirection::Forward)
+    } else if is_compatible_reversed(source_geo, target_geo, operation) {
+        Some(OperationStepDirection::Reverse)
+    } else {
+        None
+    }
+}
+
+fn explicit_selection_reasons(
+    options: &SelectionOptions,
+    operation: &CoordinateOperation,
+) -> SmallVec<[SelectionReason; 4]> {
+    let mut reasons = SmallVec::from_slice(&[SelectionReason::ExplicitOperation]);
+    if area_matches(options.point_of_interest, options.area_of_interest, operation) {
+        reasons.push(SelectionReason::AreaOfUseMatch);
+    }
+    if !operation.deprecated {
+        reasons.push(SelectionReason::NonDeprecated);
+    }
+    if operation.preferred {
+        reasons.push(SelectionReason::PreferredOperation);
+    }
+    reasons
 }
 
 fn is_compatible(

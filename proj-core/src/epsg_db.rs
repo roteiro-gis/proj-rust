@@ -145,14 +145,16 @@ fn parse_db() -> RegistryDb {
         let method_id = EPSG_DATA[offset + 12];
         let linear_unit = LinearUnit::from_meters_per_unit(read_f64(EPSG_DATA, offset + 16))
             .expect("valid linear unit in embedded registry");
-        let p0 = read_f64(EPSG_DATA, offset + 24);
-        let p1 = read_f64(EPSG_DATA, offset + 32);
-        let p2 = read_f64(EPSG_DATA, offset + 40);
-        let p3 = read_f64(EPSG_DATA, offset + 48);
-        let p4 = read_f64(EPSG_DATA, offset + 56);
-        let p5 = read_f64(EPSG_DATA, offset + 64);
-        let p6 = read_f64(EPSG_DATA, offset + 72);
-        let method = decode_projection_method(method_id, p0, p1, p2, p3, p4, p5, p6);
+        let params = [
+            read_f64(EPSG_DATA, offset + 24),
+            read_f64(EPSG_DATA, offset + 32),
+            read_f64(EPSG_DATA, offset + 40),
+            read_f64(EPSG_DATA, offset + 48),
+            read_f64(EPSG_DATA, offset + 56),
+            read_f64(EPSG_DATA, offset + 64),
+            read_f64(EPSG_DATA, offset + 72),
+        ];
+        let method = decode_projection_method(method_id, params);
         projected_crs.insert(
             code,
             ProjectedRecord {
@@ -342,16 +344,8 @@ fn parse_db() -> RegistryDb {
     }
 }
 
-fn decode_projection_method(
-    method_id: u8,
-    p0: f64,
-    p1: f64,
-    p2: f64,
-    p3: f64,
-    p4: f64,
-    p5: f64,
-    p6: f64,
-) -> ProjectionMethod {
+fn decode_projection_method(method_id: u8, params: [f64; 7]) -> ProjectionMethod {
+    let [p0, p1, p2, p3, p4, p5, p6] = params;
     match method_id {
         METHOD_WEB_MERCATOR => ProjectionMethod::WebMercator,
         METHOD_TRANSVERSE_MERCATOR => ProjectionMethod::TransverseMercator {
@@ -533,5 +527,13 @@ mod tests {
             .resource_names
             .iter()
             .any(|name| name.eq_ignore_ascii_case("ntv2_0.gsb")));
+    }
+
+    #[test]
+    fn concatenated_grid_operation_reports_grid_usage() {
+        let operation = lookup_operation(8243).expect("operation 8243");
+        assert!(matches!(operation.method, OperationMethod::Concatenated { .. }));
+        assert!(operation.uses_grids());
+        assert!(operation.metadata().uses_grids);
     }
 }

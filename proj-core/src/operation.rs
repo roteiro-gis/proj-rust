@@ -2,6 +2,7 @@ use crate::coord::{Bounds, Coord};
 use crate::crs::{LinearUnit, ProjectionMethod};
 use crate::datum::HelmertParams;
 use smallvec::SmallVec;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 /// Stable identifier for a registry-backed coordinate operation.
@@ -149,9 +150,23 @@ impl CoordinateOperation {
     }
 
     pub fn uses_grids(&self) -> bool {
+        let mut visited = HashSet::new();
+        self.uses_grids_with_visited(&mut visited)
+    }
+
+    fn uses_grids_with_visited(&self, visited: &mut HashSet<CoordinateOperationId>) -> bool {
         match &self.method {
             OperationMethod::GridShift { .. } => true,
-            OperationMethod::Concatenated { .. } => false,
+            OperationMethod::Concatenated { steps } => steps.iter().any(|step| {
+                if !visited.insert(step.operation_id) {
+                    return false;
+                }
+                let uses_grids = crate::registry::lookup_operation(step.operation_id)
+                    .map(|operation| operation.uses_grids_with_visited(visited))
+                    .unwrap_or(false);
+                visited.remove(&step.operation_id);
+                uses_grids
+            }),
             _ => false,
         }
     }
