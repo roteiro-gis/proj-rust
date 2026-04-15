@@ -343,7 +343,6 @@ pub enum SkippedOperationReason {
     PolicyFiltered,
     LessPreferred,
     Deprecated,
-    Incompatible,
 }
 
 #[derive(Debug, Clone, PartialEq)]

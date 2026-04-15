@@ -9,19 +9,19 @@ use crate::operation::{
     GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep, OperationStepDirection,
 };
 use smallvec::SmallVec;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::sync::OnceLock;
 
 static EPSG_DATA: &[u8] = include_bytes!("../data/epsg.bin");
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 4;
+const VERSION: u16 = 5;
 const HEADER_SIZE: usize = 36;
 
 const ELLIPSOID_RECORD_SIZE: usize = 20;
 const DATUM_RECORD_SIZE: usize = 72;
-const GEO_CRS_RECORD_SIZE: usize = 8;
-const PROJ_CRS_RECORD_SIZE: usize = 80;
+const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
+const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
 
 const DATUM_SHIFT_UNKNOWN: u8 = 0;
 const DATUM_SHIFT_IDENTITY: u8 = 1;
@@ -50,6 +50,7 @@ const GRID_INTERPOLATION_BILINEAR: u8 = 1;
 #[derive(Clone)]
 struct GeographicRecord {
     datum_code: u32,
+    name: &'static str,
 }
 
 #[derive(Clone)]
@@ -58,6 +59,7 @@ struct ProjectedRecord {
     datum_code: u32,
     method: ProjectionMethod,
     linear_unit: LinearUnit,
+    name: &'static str,
 }
 
 #[derive(Clone)]
@@ -67,6 +69,8 @@ struct RegistryDb {
     projected_crs: BTreeMap<u32, ProjectedRecord>,
     grids: BTreeMap<u32, GridDefinition>,
     operations: BTreeMap<u32, CoordinateOperation>,
+    operation_ids_by_crs_pair: HashMap<(u32, u32), Vec<u32>>,
+    operation_ids_by_datum_pair: HashMap<(u32, u32), Vec<u32>>,
 }
 
 fn db() -> &'static RegistryDb {
@@ -142,8 +146,10 @@ fn parse_db() -> RegistryDb {
     for _ in 0..num_geo {
         let code = read_u32(EPSG_DATA, offset);
         let datum_code = read_u32(EPSG_DATA, offset + 4);
-        geographic_crs.insert(code, GeographicRecord { datum_code });
-        offset += GEO_CRS_RECORD_SIZE;
+        let name_len = read_u16(EPSG_DATA, offset + GEO_CRS_RECORD_BASE_SIZE) as usize;
+        let name = read_static_string(EPSG_DATA, offset + GEO_CRS_RECORD_BASE_SIZE + 2, name_len);
+        geographic_crs.insert(code, GeographicRecord { datum_code, name });
+        offset += GEO_CRS_RECORD_BASE_SIZE + 2 + name_len;
     }
 
     let mut projected_crs = BTreeMap::new();
@@ -163,6 +169,8 @@ fn parse_db() -> RegistryDb {
             read_f64(EPSG_DATA, offset + 64),
             read_f64(EPSG_DATA, offset + 72),
         ];
+        let name_len = read_u16(EPSG_DATA, offset + PROJ_CRS_RECORD_BASE_SIZE) as usize;
+        let name = read_static_string(EPSG_DATA, offset + PROJ_CRS_RECORD_BASE_SIZE + 2, name_len);
         let method = decode_projection_method(method_id, params);
         projected_crs.insert(
             code,
@@ -171,9 +179,10 @@ fn parse_db() -> RegistryDb {
                 datum_code,
                 method,
                 linear_unit,
+                name,
             },
         );
-        offset += PROJ_CRS_RECORD_SIZE;
+        offset += PROJ_CRS_RECORD_BASE_SIZE + 2 + name_len;
     }
 
     let mut extents = BTreeMap::new();
@@ -344,12 +353,34 @@ fn parse_db() -> RegistryDb {
         offset = cursor;
     }
 
+    let mut operation_ids_by_crs_pair = HashMap::new();
+    let mut operation_ids_by_datum_pair = HashMap::new();
+    for operation in operations.values() {
+        if let (Some(source), Some(target)) = (operation.source_crs_epsg, operation.target_crs_epsg)
+        {
+            operation_ids_by_crs_pair
+                .entry((source, target))
+                .or_insert_with(Vec::new)
+                .push(operation.id.expect("registry operation ids are present").0);
+        }
+        if let (Some(source), Some(target)) =
+            (operation.source_datum_epsg, operation.target_datum_epsg)
+        {
+            operation_ids_by_datum_pair
+                .entry((source, target))
+                .or_insert_with(Vec::new)
+                .push(operation.id.expect("registry operation ids are present").0);
+        }
+    }
+
     RegistryDb {
         datums,
         geographic_crs,
         projected_crs,
         grids,
         operations,
+        operation_ids_by_crs_pair,
+        operation_ids_by_datum_pair,
     }
 }
 
@@ -442,6 +473,14 @@ fn read_string(data: &[u8], offset: usize, len: usize) -> String {
     String::from_utf8_lossy(&data[offset..offset + len]).into_owned()
 }
 
+fn read_static_string(data: &[u8], offset: usize, len: usize) -> &'static str {
+    if len == 0 {
+        ""
+    } else {
+        Box::leak(read_string(data, offset, len).into_boxed_str())
+    }
+}
+
 pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
     db().datums.get(&code).copied()
 }
@@ -449,7 +488,11 @@ pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
 pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
     let record = db().geographic_crs.get(&code)?;
     let datum = db().datums.get(&record.datum_code)?;
-    Some(CrsDef::Geographic(GeographicCrsDef::new(code, *datum, "")))
+    Some(CrsDef::Geographic(GeographicCrsDef::new(
+        code,
+        *datum,
+        record.name,
+    )))
 }
 
 pub(crate) fn lookup_projected(code: u32) -> Option<CrsDef> {
@@ -462,7 +505,7 @@ pub(crate) fn lookup_projected(code: u32) -> Option<CrsDef> {
             *datum,
             record.method,
             record.linear_unit,
-            "",
+            record.name,
         ),
     ))
 }
@@ -486,12 +529,87 @@ pub(crate) fn lookup_operation(code: u32) -> Option<CoordinateOperation> {
     db().operations.get(&code).cloned()
 }
 
-pub(crate) fn operations() -> Vec<CoordinateOperation> {
-    db().operations.values().cloned().collect()
+pub(crate) fn related_operations(
+    source_geo: Option<u32>,
+    target_geo: Option<u32>,
+) -> Vec<&'static CoordinateOperation> {
+    let (Some(source_geo), Some(target_geo)) = (source_geo, target_geo) else {
+        return Vec::new();
+    };
+    let source_datum = lookup_datum_code_for_crs(source_geo);
+    let target_datum = lookup_datum_code_for_crs(target_geo);
+    let mut ids = Vec::new();
+
+    extend_index_hits(
+        &mut ids,
+        &db().operation_ids_by_crs_pair,
+        (source_geo, target_geo),
+    );
+    extend_index_hits(
+        &mut ids,
+        &db().operation_ids_by_crs_pair,
+        (target_geo, source_geo),
+    );
+
+    if let (Some(source_datum), Some(target_datum)) = (source_datum, target_datum) {
+        extend_index_hits(
+            &mut ids,
+            &db().operation_ids_by_datum_pair,
+            (source_datum, target_datum),
+        );
+        extend_index_hits(
+            &mut ids,
+            &db().operation_ids_by_datum_pair,
+            (target_datum, source_datum),
+        );
+    }
+
+    ids.into_iter()
+        .filter_map(|id| db().operations.get(&id))
+        .collect()
+}
+
+pub(crate) fn forward_operations(
+    source_geo: Option<u32>,
+    target_geo: Option<u32>,
+) -> Vec<&'static CoordinateOperation> {
+    let (Some(source_geo), Some(target_geo)) = (source_geo, target_geo) else {
+        return Vec::new();
+    };
+    let source_datum = lookup_datum_code_for_crs(source_geo);
+    let target_datum = lookup_datum_code_for_crs(target_geo);
+    let mut ids = Vec::new();
+
+    extend_index_hits(
+        &mut ids,
+        &db().operation_ids_by_crs_pair,
+        (source_geo, target_geo),
+    );
+    if let (Some(source_datum), Some(target_datum)) = (source_datum, target_datum) {
+        extend_index_hits(
+            &mut ids,
+            &db().operation_ids_by_datum_pair,
+            (source_datum, target_datum),
+        );
+    }
+
+    ids.into_iter()
+        .filter_map(|id| db().operations.get(&id))
+        .collect()
 }
 
 pub(crate) fn lookup_grid(code: u32) -> Option<GridDefinition> {
     db().grids.get(&code).cloned()
+}
+
+fn extend_index_hits(ids: &mut Vec<u32>, index: &HashMap<(u32, u32), Vec<u32>>, key: (u32, u32)) {
+    if let Some(matches) = index.get(&key) {
+        for id in matches {
+            if !ids.contains(id) {
+                ids.push(*id);
+            }
+        }
+    }
 }
 
 #[cfg(test)]

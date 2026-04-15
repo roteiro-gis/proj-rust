@@ -35,12 +35,12 @@ fn walkdir(dir: &std::path::Path, name: &str) -> Vec<PathBuf> {
 }
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 4;
+const VERSION: u16 = 5;
 
 const ELLIPSOID_RECORD_SIZE: usize = 20;
 const DATUM_RECORD_SIZE: usize = 72;
-const GEO_CRS_RECORD_SIZE: usize = 8;
-const PROJ_CRS_RECORD_SIZE: usize = 80;
+const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
+const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
 
 const METHOD_WEB_MERCATOR: u8 = 1;
 const METHOD_TRANSVERSE_MERCATOR: u8 = 2;
@@ -54,7 +54,6 @@ const DATUM_SHIFT_UNKNOWN: u8 = 0;
 const DATUM_SHIFT_IDENTITY: u8 = 1;
 const DATUM_SHIFT_HELMERT: u8 = 2;
 
-const OP_IDENTITY: u8 = 0;
 const OP_HELMERT: u8 = 1;
 const OP_GRID_SHIFT: u8 = 2;
 const OP_CONCATENATED: u8 = 3;
@@ -98,6 +97,7 @@ struct DatumInfo {
 struct GeoCrs {
     code: u32,
     datum_code: u32,
+    name: String,
 }
 
 struct ProjCrs {
@@ -107,6 +107,7 @@ struct ProjCrs {
     method_id: u8,
     linear_unit_to_meter: f64,
     params: [f64; 7],
+    name: String,
 }
 
 #[derive(Clone)]
@@ -513,7 +514,7 @@ fn main() {
     let geo_crs: Vec<GeoCrs> = {
         let mut stmt = conn
             .prepare(
-                "SELECT code, datum_code
+                "SELECT code, datum_code, name
                  FROM geodetic_crs
                  WHERE auth_name='EPSG' AND type='geographic 2D' AND deprecated=0
                  ORDER BY code",
@@ -523,6 +524,7 @@ fn main() {
             Ok(GeoCrs {
                 code: row.get(0)?,
                 datum_code: row.get(1)?,
+                name: row.get(2)?,
             })
         })
         .unwrap()
@@ -538,6 +540,7 @@ fn main() {
                 "SELECT pc.code,
                         pc.geodetic_crs_code,
                         gc.datum_code,
+                        pc.name,
                         pc.conversion_auth_name,
                         pc.conversion_code,
                         a.uom_code,
@@ -557,7 +560,7 @@ fn main() {
                  ORDER BY pc.code",
             )
             .unwrap();
-        let rows: Vec<(u32, u32, u32, String, i64, Option<i64>, Option<f64>)> = stmt
+        let rows: Vec<(u32, u32, u32, String, String, i64, Option<i64>, Option<f64>)> = stmt
             .query_map([], |row| {
                 Ok((
                     row.get(0)?,
@@ -567,13 +570,24 @@ fn main() {
                     row.get(4)?,
                     row.get(5)?,
                     row.get(6)?,
+                    row.get(7)?,
                 ))
             })
             .unwrap()
             .filter_map(|row| row.ok())
             .collect();
 
-        for (code, base_geographic_crs_code, datum_code, conv_auth, conv_code, axis_uom_code, axis_unit_factor) in rows {
+        for (
+            code,
+            base_geographic_crs_code,
+            datum_code,
+            name,
+            conv_auth,
+            conv_code,
+            axis_uom_code,
+            axis_unit_factor,
+        ) in rows
+        {
             let linear_unit_to_meter = match (axis_uom_code, axis_unit_factor) {
                 (Some(_), Some(factor)) => factor,
                 (Some(uom_code), None) => {
@@ -623,6 +637,7 @@ fn main() {
                 method_id,
                 linear_unit_to_meter,
                 params,
+                name,
             });
         }
     }
@@ -1086,14 +1101,15 @@ fn main() {
     }
 
     for crs in &geo_crs {
-        let mut rec = [0u8; GEO_CRS_RECORD_SIZE];
+        let mut rec = [0u8; GEO_CRS_RECORD_BASE_SIZE];
         rec[0..4].copy_from_slice(&crs.code.to_le_bytes());
         rec[4..8].copy_from_slice(&crs.datum_code.to_le_bytes());
         buf.extend_from_slice(&rec);
+        write_string_u16(&mut buf, &crs.name);
     }
 
     for crs in &proj_crs {
-        let mut rec = [0u8; PROJ_CRS_RECORD_SIZE];
+        let mut rec = [0u8; PROJ_CRS_RECORD_BASE_SIZE];
         rec[0..4].copy_from_slice(&crs.code.to_le_bytes());
         rec[4..8].copy_from_slice(&crs.base_geographic_crs_code.to_le_bytes());
         rec[8..12].copy_from_slice(&crs.datum_code.to_le_bytes());
@@ -1104,6 +1120,7 @@ fn main() {
             rec[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
         }
         buf.extend_from_slice(&rec);
+        write_string_u16(&mut buf, &crs.name);
     }
 
     for extent in &extent_list {

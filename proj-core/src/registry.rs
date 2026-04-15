@@ -30,30 +30,25 @@ pub(crate) fn lookup_grid_definition(id: u32) -> Option<GridDefinition> {
     epsg_db::lookup_grid(id)
 }
 
-pub(crate) fn all_operations() -> Vec<CoordinateOperation> {
-    epsg_db::operations()
+pub(crate) fn related_operations(
+    source: &CrsDef,
+    target: &CrsDef,
+) -> Vec<&'static CoordinateOperation> {
+    epsg_db::related_operations(
+        source.base_geographic_crs_epsg(),
+        target.base_geographic_crs_epsg(),
+    )
 }
 
 /// Return all registry operations compatible with the source and target CRS.
 pub fn operations_between(source: &CrsDef, target: &CrsDef) -> Vec<CoordinateOperation> {
-    let source_geo = source.base_geographic_crs_epsg();
-    let target_geo = target.base_geographic_crs_epsg();
-    let source_datum = source_geo.and_then(epsg_db::lookup_datum_code_for_crs);
-    let target_datum = target_geo.and_then(epsg_db::lookup_datum_code_for_crs);
-    epsg_db::operations()
-        .into_iter()
-        .filter(|operation| match (source_geo, target_geo) {
-            (Some(source_code), Some(target_code)) => {
-                (operation.source_crs_epsg == Some(source_code)
-                    && operation.target_crs_epsg == Some(target_code))
-                    || (source_datum.is_some()
-                        && target_datum.is_some()
-                        && operation.source_datum_epsg == source_datum
-                        && operation.target_datum_epsg == target_datum)
-            }
-            _ => false,
-        })
-        .collect()
+    epsg_db::forward_operations(
+        source.base_geographic_crs_epsg(),
+        target.base_geographic_crs_epsg(),
+    )
+    .into_iter()
+    .cloned()
+    .collect()
 }
 
 /// Parse an authority:code string (e.g., "EPSG:4326") and look up the CRS definition.
@@ -91,6 +86,7 @@ mod tests {
         let crs = lookup_epsg(4326).expect("should find 4326");
         assert!(crs.is_geographic());
         assert_eq!(crs.epsg(), 4326);
+        assert_eq!(crs.name(), "WGS 84");
     }
 
     #[test]
@@ -98,6 +94,7 @@ mod tests {
         let crs = lookup_epsg(3857).expect("should find 3857");
         assert!(crs.is_projected());
         assert_eq!(crs.epsg(), 3857);
+        assert_eq!(crs.name(), "WGS 84 / Pseudo-Mercator");
     }
 
     #[test]
@@ -174,5 +171,22 @@ mod tests {
     fn nc_state_plane() {
         let crs = lookup_epsg(32119).expect("should find NC State Plane");
         assert!(crs.is_projected());
+        assert!(!crs.name().is_empty());
+    }
+
+    #[test]
+    fn operations_between_returns_forward_compatible_operations() {
+        let source = lookup_epsg(4267).expect("should find NAD27");
+        let target = lookup_epsg(4326).expect("should find WGS84");
+        let operations = operations_between(&source, &target);
+        let source_datum = crate::epsg_db::lookup_datum_code_for_crs(4267);
+        let target_datum = crate::epsg_db::lookup_datum_code_for_crs(4326);
+
+        assert!(!operations.is_empty());
+        assert!(operations.iter().all(|operation| {
+            (operation.source_crs_epsg == Some(4267) && operation.target_crs_epsg == Some(4326))
+                || (operation.source_datum_epsg == source_datum
+                    && operation.target_datum_epsg == target_datum)
+        }));
     }
 }

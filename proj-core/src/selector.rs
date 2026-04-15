@@ -2,51 +2,68 @@ use crate::coord::{Bounds, Coord};
 use crate::crs::CrsDef;
 use crate::error::Result;
 use crate::operation::{
-    AreaOfInterest, AreaOfUse, CoordinateOperation, OperationMatchKind, OperationMethod,
-    OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason,
+    AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata,
+    OperationMatchKind, OperationMethod, OperationStepDirection, SelectionOptions, SelectionPolicy,
+    SelectionReason, SkippedOperation, SkippedOperationReason,
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::cmp::Ordering;
 
 pub(crate) struct RankedOperationCandidate {
-    pub(crate) operation: CoordinateOperation,
+    pub(crate) operation: Cow<'static, CoordinateOperation>,
     pub(crate) direction: OperationStepDirection,
     pub(crate) match_kind: OperationMatchKind,
     pub(crate) matched_area_of_use: Option<AreaOfUse>,
     pub(crate) reasons: SmallVec<[SelectionReason; 4]>,
 }
 
+pub(crate) struct OperationCandidateSet {
+    pub(crate) ranked: Vec<RankedOperationCandidate>,
+    pub(crate) skipped: Vec<SkippedOperation>,
+}
+
 pub(crate) fn rank_operation_candidates(
     source: &CrsDef,
     target: &CrsDef,
     options: &SelectionOptions,
-) -> Result<Vec<RankedOperationCandidate>> {
+) -> Result<OperationCandidateSet> {
     let resolved_aoi = resolve_area_of_interest(source, target, options)?;
     if let SelectionPolicy::Operation(id) = options.policy {
         let Some(operation) = registry::lookup_operation(id) else {
-            return Ok(Vec::new());
+            return Ok(OperationCandidateSet {
+                ranked: Vec::new(),
+                skipped: Vec::new(),
+            });
         };
         let Some(direction) = compatible_direction(source, target, &operation) else {
-            return Ok(Vec::new());
+            return Ok(OperationCandidateSet {
+                ranked: Vec::new(),
+                skipped: Vec::new(),
+            });
         };
         let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), &operation);
         let reasons = explicit_selection_reasons(matched_area_of_use.is_some(), &operation);
-        return Ok(vec![RankedOperationCandidate {
-            operation,
-            direction,
-            match_kind: OperationMatchKind::Explicit,
-            matched_area_of_use,
-            reasons,
-        }]);
+        return Ok(OperationCandidateSet {
+            ranked: vec![RankedOperationCandidate {
+                operation: Cow::Owned(operation),
+                direction,
+                match_kind: OperationMatchKind::Explicit,
+                matched_area_of_use,
+                reasons,
+            }],
+            skipped: Vec::new(),
+        });
     }
 
     let mut candidates = Vec::new();
+    let mut skipped = Vec::new();
 
     if requires_no_datum_operation(source, target) {
         candidates.push(RankedOperationCandidate {
-            operation: CoordinateOperation {
+            operation: Cow::Owned(CoordinateOperation {
                 id: None,
                 name: "Identity".into(),
                 source_crs_epsg: source.base_geographic_crs_epsg(),
@@ -59,7 +76,7 @@ pub(crate) fn rank_operation_candidates(
                 preferred: true,
                 approximate: false,
                 method: OperationMethod::Identity,
-            },
+            }),
             direction: OperationStepDirection::Forward,
             match_kind: OperationMatchKind::ExactSourceTarget,
             matched_area_of_use: None,
@@ -72,39 +89,42 @@ pub(crate) fn rank_operation_candidates(
 
     let source_geo = source.base_geographic_crs_epsg();
     let target_geo = target.base_geographic_crs_epsg();
-    for operation in registry::all_operations() {
+    for operation in registry::related_operations(source, target) {
         for direction in [
             OperationStepDirection::Forward,
             OperationStepDirection::Reverse,
         ] {
             let compatible = match direction {
-                OperationStepDirection::Forward => {
-                    is_compatible(source_geo, target_geo, &operation)
-                }
+                OperationStepDirection::Forward => is_compatible(source_geo, target_geo, operation),
                 OperationStepDirection::Reverse => {
-                    is_compatible_reversed(source_geo, target_geo, &operation)
+                    is_compatible_reversed(source_geo, target_geo, operation)
                 }
             };
-            if !compatible
-                || !policy_allows(source, target, options, resolved_aoi.as_ref(), &operation)
-            {
+            if !compatible {
                 continue;
             }
 
-            let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), &operation);
+            let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), operation);
+            if let Some((reason, detail)) = policy_skip_reason(
+                source,
+                target,
+                options,
+                matched_area_of_use.is_some(),
+                operation,
+            ) {
+                skipped.push(SkippedOperation {
+                    metadata: selection_metadata(operation, direction, matched_area_of_use),
+                    reason,
+                    detail,
+                });
+                continue;
+            }
+
             let mut reasons = SmallVec::<[SelectionReason; 4]>::new();
-            let match_kind = if matches!(direction, OperationStepDirection::Forward)
-                && operation.source_crs_epsg == source_geo
-                && operation.target_crs_epsg == target_geo
-                || matches!(direction, OperationStepDirection::Reverse)
-                    && operation.source_crs_epsg == target_geo
-                    && operation.target_crs_epsg == source_geo
-            {
+            let match_kind = match_kind_for_candidate(source, target, direction, operation);
+            if matches!(match_kind, OperationMatchKind::ExactSourceTarget) {
                 reasons.push(SelectionReason::ExactSourceTarget);
-                OperationMatchKind::ExactSourceTarget
-            } else {
-                OperationMatchKind::DatumCompatible
-            };
+            }
             if matched_area_of_use.is_some() {
                 reasons.push(SelectionReason::AreaOfUseMatch);
             }
@@ -115,7 +135,7 @@ pub(crate) fn rank_operation_candidates(
                 reasons.push(SelectionReason::PreferredOperation);
             }
             candidates.push(RankedOperationCandidate {
-                operation: operation.clone(),
+                operation: Cow::Borrowed(operation),
                 direction,
                 match_kind,
                 matched_area_of_use,
@@ -130,7 +150,7 @@ pub(crate) fn rank_operation_candidates(
     ) {
         if let Some(operation) = synthetic_helmert_fallback(source, target) {
             candidates.push(RankedOperationCandidate {
-                operation,
+                operation: Cow::Owned(operation),
                 direction: OperationStepDirection::Forward,
                 match_kind: OperationMatchKind::ApproximateFallback,
                 matched_area_of_use: None,
@@ -140,7 +160,10 @@ pub(crate) fn rank_operation_candidates(
     }
 
     candidates.sort_by(compare_candidates);
-    Ok(candidates)
+    Ok(OperationCandidateSet {
+        ranked: candidates,
+        skipped,
+    })
 }
 
 fn compatible_direction(
@@ -174,6 +197,28 @@ fn explicit_selection_reasons(
         reasons.push(SelectionReason::PreferredOperation);
     }
     reasons
+}
+
+fn match_kind_for_candidate(
+    source: &CrsDef,
+    target: &CrsDef,
+    direction: OperationStepDirection,
+    operation: &CoordinateOperation,
+) -> OperationMatchKind {
+    let (candidate_source, candidate_target) = match direction {
+        OperationStepDirection::Forward => (operation.source_crs_epsg, operation.target_crs_epsg),
+        OperationStepDirection::Reverse => (operation.target_crs_epsg, operation.source_crs_epsg),
+    };
+
+    if candidate_source == Some(source.epsg()) && candidate_target == Some(target.epsg()) {
+        OperationMatchKind::ExactSourceTarget
+    } else if candidate_source == source.base_geographic_crs_epsg()
+        && candidate_target == target.base_geographic_crs_epsg()
+    {
+        OperationMatchKind::DerivedGeographic
+    } else {
+        OperationMatchKind::DatumCompatible
+    }
 }
 
 fn is_compatible(
@@ -222,24 +267,49 @@ fn requires_no_datum_operation(source: &CrsDef, target: &CrsDef) -> bool {
         || (source.datum().is_wgs84_compatible() && target.datum().is_wgs84_compatible())
 }
 
-fn policy_allows(
+fn policy_skip_reason(
     source: &CrsDef,
     target: &CrsDef,
     options: &SelectionOptions,
-    resolved_aoi: Option<&ResolvedAreaOfInterest>,
+    matched_area: bool,
     operation: &CoordinateOperation,
-) -> bool {
+) -> Option<(SkippedOperationReason, String)> {
     let datum_shift_required = !requires_no_datum_operation(source, target);
     match options.policy {
-        SelectionPolicy::BestAvailable => true,
-        SelectionPolicy::RequireGrids => !datum_shift_required || operation.uses_grids(),
-        SelectionPolicy::RequireExactAreaMatch => {
-            options.area_of_interest.is_none()
-                || matched_area_of_use(resolved_aoi, operation).is_some()
+        SelectionPolicy::BestAvailable => None,
+        SelectionPolicy::RequireGrids => {
+            if datum_shift_required && !operation.uses_grids() {
+                Some((
+                    SkippedOperationReason::PolicyFiltered,
+                    "selection policy requires a grid-backed datum operation".into(),
+                ))
+            } else {
+                None
+            }
         }
-        SelectionPolicy::AllowApproximateHelmertFallback => true,
-        SelectionPolicy::Operation(_) => true,
+        SelectionPolicy::RequireExactAreaMatch => {
+            if options.area_of_interest.is_some() && !matched_area {
+                Some((
+                    SkippedOperationReason::AreaOfUseMismatch,
+                    "selection policy requires an exact area-of-use match".into(),
+                ))
+            } else {
+                None
+            }
+        }
+        SelectionPolicy::AllowApproximateHelmertFallback => None,
+        SelectionPolicy::Operation(_) => None,
     }
+}
+
+fn selection_metadata(
+    operation: &CoordinateOperation,
+    direction: OperationStepDirection,
+    matched_area_of_use: Option<AreaOfUse>,
+) -> CoordinateOperationMetadata {
+    let mut metadata = operation.metadata_for_direction(direction);
+    metadata.area_of_use = matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
+    metadata
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -294,10 +364,8 @@ fn compare_candidates(
     left: &RankedOperationCandidate,
     right: &RankedOperationCandidate,
 ) -> Ordering {
-    let left_exact = matches!(left.match_kind, OperationMatchKind::ExactSourceTarget);
-    let right_exact = matches!(right.match_kind, OperationMatchKind::ExactSourceTarget);
-    right_exact
-        .cmp(&left_exact)
+    match_kind_rank(right.match_kind)
+        .cmp(&match_kind_rank(left.match_kind))
         .then_with(|| {
             right
                 .matched_area_of_use
@@ -321,6 +389,16 @@ fn compare_candidates(
         })
         .then_with(|| left.operation.deprecated.cmp(&right.operation.deprecated))
         .then_with(|| right.operation.preferred.cmp(&left.operation.preferred))
+}
+
+fn match_kind_rank(kind: OperationMatchKind) -> u8 {
+    match kind {
+        OperationMatchKind::Explicit => 4,
+        OperationMatchKind::ExactSourceTarget => 3,
+        OperationMatchKind::DerivedGeographic => 2,
+        OperationMatchKind::DatumCompatible => 1,
+        OperationMatchKind::ApproximateFallback => 0,
+    }
 }
 
 fn resolve_area_point(

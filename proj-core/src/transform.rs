@@ -117,8 +117,8 @@ impl Transform {
         options: SelectionOptions,
     ) -> Result<Self> {
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
-        let candidates = selector::rank_operation_candidates(from, to, &options)?;
-        if candidates.is_empty() {
+        let candidate_set = selector::rank_operation_candidates(from, to, &options)?;
+        if candidate_set.ranked.is_empty() {
             return Err(match options.policy {
                 SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
                     Some(_) => Error::OperationSelection(format!(
@@ -137,26 +137,33 @@ impl Transform {
             });
         }
 
-        let mut skipped_operations = Vec::new();
+        let mut skipped_operations = candidate_set.skipped;
         let mut missing_required_grid = None;
-        for candidate in candidates {
+        for (index, candidate) in candidate_set.ranked.iter().enumerate() {
             match compile_pipeline(
                 from,
                 to,
-                &candidate.operation,
+                candidate.operation.as_ref(),
                 candidate.direction,
                 &grid_runtime,
             ) {
                 Ok(pipeline) => {
                     let metadata = selected_metadata(
-                        &candidate.operation,
+                        candidate.operation.as_ref(),
                         candidate.direction,
                         candidate.matched_area_of_use.clone(),
                     );
+                    let selected_reasons =
+                        selected_reasons_for(candidate, &candidate_set.ranked[index + 1..]);
+                    skipped_operations.extend(candidate_set.ranked[index + 1..].iter().map(
+                        |other| {
+                            skipped_for_unselected_candidate(other, !candidate.operation.deprecated)
+                        },
+                    ));
                     let diagnostics = OperationSelectionDiagnostics {
                         selected_operation: metadata.clone(),
                         selected_match_kind: candidate.match_kind,
-                        selected_reasons: candidate.reasons,
+                        selected_reasons,
                         skipped_operations,
                         approximate: candidate.operation.approximate,
                         missing_required_grid,
@@ -164,7 +171,7 @@ impl Transform {
                     return Ok(Self {
                         source: *from,
                         target: *to,
-                        selected_operation_definition: candidate.operation,
+                        selected_operation_definition: candidate.operation.clone().into_owned(),
                         selected_direction: candidate.direction,
                         selected_operation: metadata,
                         diagnostics,
@@ -178,7 +185,7 @@ impl Transform {
                     }
                     skipped_operations.push(SkippedOperation {
                         metadata: selected_metadata(
-                            &candidate.operation,
+                            candidate.operation.as_ref(),
                             candidate.direction,
                             candidate.matched_area_of_use.clone(),
                         ),
@@ -194,7 +201,7 @@ impl Transform {
                 Err(error) => {
                     skipped_operations.push(SkippedOperation {
                         metadata: selected_metadata(
-                            &candidate.operation,
+                            candidate.operation.as_ref(),
                             candidate.direction,
                             candidate.matched_area_of_use.clone(),
                         ),
@@ -439,6 +446,82 @@ fn selected_metadata(
     metadata
 }
 
+fn selected_reasons_for(
+    selected: &selector::RankedOperationCandidate,
+    alternatives: &[selector::RankedOperationCandidate],
+) -> SmallVec<[crate::operation::SelectionReason; 4]> {
+    let mut reasons = selected.reasons.clone();
+    if selected_accuracy_preferred(selected, alternatives)
+        && !reasons.contains(&crate::operation::SelectionReason::AccuracyPreferred)
+    {
+        reasons.push(crate::operation::SelectionReason::AccuracyPreferred);
+    }
+    reasons
+}
+
+fn selected_accuracy_preferred(
+    selected: &selector::RankedOperationCandidate,
+    alternatives: &[selector::RankedOperationCandidate],
+) -> bool {
+    let Some(selected_accuracy) = selected.operation.accuracy.map(|value| value.meters) else {
+        return false;
+    };
+
+    alternatives.iter().any(|alternative| {
+        same_pre_accuracy_priority(selected, alternative)
+            && alternative
+                .operation
+                .accuracy
+                .map(|value| selected_accuracy < value.meters)
+                .unwrap_or(false)
+    })
+}
+
+fn same_pre_accuracy_priority(
+    left: &selector::RankedOperationCandidate,
+    right: &selector::RankedOperationCandidate,
+) -> bool {
+    match_kind_priority(left.match_kind) == match_kind_priority(right.match_kind)
+        && left.matched_area_of_use.is_some() == right.matched_area_of_use.is_some()
+}
+
+fn match_kind_priority(kind: crate::operation::OperationMatchKind) -> u8 {
+    match kind {
+        crate::operation::OperationMatchKind::Explicit => 4,
+        crate::operation::OperationMatchKind::ExactSourceTarget => 3,
+        crate::operation::OperationMatchKind::DerivedGeographic => 2,
+        crate::operation::OperationMatchKind::DatumCompatible => 1,
+        crate::operation::OperationMatchKind::ApproximateFallback => 0,
+    }
+}
+
+fn skipped_for_unselected_candidate(
+    candidate: &selector::RankedOperationCandidate,
+    prefer_non_deprecated: bool,
+) -> SkippedOperation {
+    let reason = if prefer_non_deprecated && candidate.operation.deprecated {
+        SkippedOperationReason::Deprecated
+    } else {
+        SkippedOperationReason::LessPreferred
+    };
+    let detail = match reason {
+        SkippedOperationReason::Deprecated => {
+            "not selected because a non-deprecated higher-ranked operation compiled successfully"
+                .into()
+        }
+        _ => "not selected because a higher-ranked operation compiled successfully".into(),
+    };
+    SkippedOperation {
+        metadata: selected_metadata(
+            candidate.operation.as_ref(),
+            candidate.direction,
+            candidate.matched_area_of_use.clone(),
+        ),
+        reason,
+        detail,
+    }
+}
+
 fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
     match step {
         CompiledStep::ProjectionForward { projection } => {
@@ -657,7 +740,10 @@ mod tests {
     use super::*;
     use crate::crs::{CrsDef, GeographicCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod};
     use crate::datum::{self, DatumToWgs84};
-    use crate::operation::AreaOfInterest;
+    use crate::operation::{
+        AreaOfInterest, OperationMatchKind, SelectionPolicy, SelectionReason,
+        SkippedOperationReason,
+    };
 
     const US_FOOT_TO_METER: f64 = 0.3048006096012192;
 
@@ -842,6 +928,79 @@ mod tests {
         .unwrap();
 
         assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
+        assert_eq!(
+            t.selection_diagnostics().selected_match_kind,
+            OperationMatchKind::DerivedGeographic
+        );
+    }
+
+    #[test]
+    fn selection_diagnostics_capture_accuracy_preference() {
+        let t = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(t
+            .selection_diagnostics()
+            .selected_reasons
+            .contains(&SelectionReason::AccuracyPreferred));
+    }
+
+    #[test]
+    fn selection_diagnostics_capture_policy_filtered_candidates() {
+        let t = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4326",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
+                policy: SelectionPolicy::RequireGrids,
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(t
+            .selection_diagnostics()
+            .skipped_operations
+            .iter()
+            .any(|skipped| { matches!(skipped.reason, SkippedOperationReason::PolicyFiltered) }));
+    }
+
+    #[test]
+    fn selection_diagnostics_capture_area_mismatch_candidates() {
+        let t = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
+                policy: SelectionPolicy::RequireExactAreaMatch,
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert!(t
+            .selection_diagnostics()
+            .skipped_operations
+            .iter()
+            .any(|skipped| {
+                matches!(skipped.reason, SkippedOperationReason::AreaOfUseMismatch)
+            }));
     }
 
     #[test]
