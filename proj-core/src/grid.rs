@@ -91,10 +91,11 @@ pub(crate) struct GridRuntime {
 
 impl GridRuntime {
     pub(crate) fn new(app_provider: Option<Arc<dyn GridProvider>>) -> Self {
-        let mut providers: Vec<Arc<dyn GridProvider>> = vec![Arc::new(EmbeddedGridProvider)];
+        let mut providers: Vec<Arc<dyn GridProvider>> = Vec::with_capacity(2);
         if let Some(provider) = app_provider {
             providers.push(provider);
         }
+        providers.push(Arc::new(EmbeddedGridProvider));
         Self {
             providers,
             definition_cache: Mutex::new(HashMap::new()),
@@ -638,6 +639,7 @@ fn read_f32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
 
     #[test]
     fn embedded_ntv2_grid_samples_known_point() {
@@ -663,5 +665,86 @@ mod tests {
             "lon={lon}"
         );
         assert!((lat.to_degrees() - 44.5458827236).abs() < 3e-6, "lat={lat}");
+    }
+
+    struct TrackingGridProvider {
+        override_definition: bool,
+        definition_calls: Arc<AtomicUsize>,
+        load_calls: Arc<AtomicUsize>,
+    }
+
+    impl GridProvider for TrackingGridProvider {
+        fn definition(
+            &self,
+            grid: &GridDefinition,
+        ) -> std::result::Result<Option<GridDefinition>, GridError> {
+            self.definition_calls.fetch_add(1, Ordering::SeqCst);
+            if self.override_definition {
+                let mut overridden = grid.clone();
+                overridden.name = "custom override".into();
+                Ok(Some(overridden))
+            } else {
+                Ok(None)
+            }
+        }
+
+        fn load(
+            &self,
+            grid: &GridDefinition,
+        ) -> std::result::Result<Option<GridHandle>, GridError> {
+            self.load_calls.fetch_add(1, Ordering::SeqCst);
+            EmbeddedGridProvider.load(grid)
+        }
+    }
+
+    fn test_grid_definition() -> GridDefinition {
+        GridDefinition {
+            id: GridId(1),
+            name: "ntv2_0.gsb".into(),
+            format: GridFormat::Ntv2,
+            interpolation: GridInterpolation::Bilinear,
+            area_of_use: None,
+            resource_names: SmallVec::from_vec(vec!["ntv2_0.gsb".into()]),
+        }
+    }
+
+    #[test]
+    fn app_grid_provider_can_override_embedded_grid() {
+        let definition_calls = Arc::new(AtomicUsize::new(0));
+        let load_calls = Arc::new(AtomicUsize::new(0));
+        let provider = TrackingGridProvider {
+            override_definition: true,
+            definition_calls: Arc::clone(&definition_calls),
+            load_calls: Arc::clone(&load_calls),
+        };
+        let runtime = GridRuntime::new(Some(Arc::new(provider)));
+
+        let handle = runtime
+            .resolve_handle(&test_grid_definition())
+            .expect("grid should resolve");
+
+        assert_eq!(handle.definition().name, "custom override");
+        assert_eq!(definition_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(load_calls.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn app_grid_provider_falls_back_to_embedded_grid() {
+        let definition_calls = Arc::new(AtomicUsize::new(0));
+        let load_calls = Arc::new(AtomicUsize::new(0));
+        let provider = TrackingGridProvider {
+            override_definition: false,
+            definition_calls: Arc::clone(&definition_calls),
+            load_calls: Arc::clone(&load_calls),
+        };
+        let runtime = GridRuntime::new(Some(Arc::new(provider)));
+
+        let handle = runtime
+            .resolve_handle(&test_grid_definition())
+            .expect("embedded grid should remain available");
+
+        assert_eq!(handle.definition().name, "ntv2_0.gsb");
+        assert_eq!(definition_calls.load(Ordering::SeqCst), 1);
+        assert_eq!(load_calls.load(Ordering::SeqCst), 1);
     }
 }

@@ -1,10 +1,11 @@
 # Benchmark Report
 
-Date: 2026-03-24
+Date: 2026-04-14
 
-This report summarizes the current parity and comparison benchmark suite for
-`proj-rust` against bundled C PROJ. It captures live parity status and the
-current performance shape for representative 2D and 3D transform workloads.
+This report summarizes the current parity and benchmark suite for `proj-rust`
+against bundled C PROJ. It captures both the current Rust-versus-C performance
+shape and the new transform-construction cost after the indexed operation
+selection work in the embedded registry.
 
 ## System Under Test
 
@@ -21,6 +22,9 @@ throughput claims.
 ## Scope
 
 - Live parity against bundled C PROJ using the checked-in 135-point reference corpus
+- Transform-construction timing for:
+  - `EPSG:4326 -> 3857`
+  - `EPSG:4267 -> 4326`
 - Single-point comparisons for:
   - `EPSG:4326 -> 3857`
   - `EPSG:4326 -> 32618`
@@ -38,20 +42,13 @@ Commands used for this report:
 
 ```sh
 ./scripts/run-reference-parity.sh
-
-cargo bench -p proj-core --features c-proj-compat \
-  --bench transform_compare_bench -- --noplot
-
-cargo bench -p proj-core --bench transform_bench -- 3D --noplot
-
-cargo bench -p proj-core --features c-proj-compat \
-  --bench transform_compare_bench -- 3d --noplot
+./scripts/run-reference-benchmarks.sh
 ```
 
 Notes:
 
 - The parity run passed both live C PROJ tests.
-- The 3D parity run passed the added live C PROJ test cases.
+- The 3D parity run passed the live C PROJ 3D cases.
 - The parity corpus currently contains 135 reference points.
 - Criterion is used for all timing.
 - The batch benchmark reports element throughput for 10,000 coordinate pairs.
@@ -67,50 +64,53 @@ Notes:
 - `proj-core` matched live bundled C PROJ for all supported corpus cases
 - `proj-core` matched live bundled C PROJ for all covered 3D cases
 
+### Construction Summary
+
+| workload | proj-rust |
+| --- | ---: |
+| `construct 4326 -> 3857` | 1.51 us |
+| `construct 4267 -> 4326` | 77.48 us |
+
 ### Single-Point Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `4326 -> 3857` | 19.2 ns | 71.5 ns | `proj-rust` 3.72x faster |
-| `4326 -> 32618` | 35.3 ns | 127.8 ns | `proj-rust` 3.62x faster |
-| `4326 -> 3413` | 49.3 ns | 99.2 ns | `proj-rust` 2.01x faster |
-| `4267 -> 4326` | 169.2 ns | 296.5 ns | `proj-rust` 1.75x faster |
+| `4326 -> 3857` | 25.82 ns | 77.11 ns | `proj-rust` 2.99x faster |
+| `4326 -> 32618` | 42.72 ns | 126.13 ns | `proj-rust` 2.95x faster |
+| `4326 -> 3413` | 57.19 ns | 90.64 ns | `proj-rust` 1.58x faster |
+| `4267 -> 4326` | 162.23 ns | 265.20 ns | `proj-rust` 1.63x faster |
 
 ### Single-Point 3D Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `3D 4326 -> 3857` | 21.0 ns | 75.8 ns | `proj-rust` 3.61x faster |
-| `3D 4267 -> 4326` | 139.0 ns | 266.6 ns | `proj-rust` 1.92x faster |
+| `3D 4326 -> 3857` | 25.26 ns | 73.08 ns | `proj-rust` 2.89x faster |
+| `3D 4267 -> 4326` | 149.08 ns | 270.40 ns | `proj-rust` 1.81x faster |
 
 ### Batch Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `10K 4326 -> 3857` sequential | 250.9 us | 875.2 us | `proj-rust` 3.49x faster |
-| `10K 4326 -> 3857` throughput | 39.9 Melem/s | 11.4 Melem/s | `proj-rust` 3.49x higher throughput |
-| `10K 4326 -> 3857` parallel | 587.5 us | 875.2 us | `proj-rust` 1.49x faster |
-| `10K 4326 -> 3857` parallel throughput | 17.0 Melem/s | 11.4 Melem/s | `proj-rust` 1.49x higher throughput |
+| `10K 4326 -> 3857` sequential | 285.69 us | 778.53 us | `proj-rust` 2.73x faster |
+| `10K 4326 -> 3857` throughput | 35.0 Melem/s | 12.8 Melem/s | `proj-rust` 2.73x higher throughput |
+| `10K 4326 -> 3857` parallel | 294.68 us | 778.53 us | `proj-rust` 2.64x faster |
+| `10K 4326 -> 3857` parallel throughput | 33.9 Melem/s | 12.8 Melem/s | `proj-rust` 2.64x higher throughput |
 
 ### Batch 3D Summary
 
 | workload | proj-rust | result |
 | --- | ---: | --- |
-| `10K 3D 4326 -> 3857` sequential | 205.1 us | 48.8 Melem/s |
-| `10K 3D 4326 -> 3857` parallel | 274.7 us | 36.4 Melem/s |
+| `10K 3D 4326 -> 3857` sequential | 316.96 us | 31.5 Melem/s |
+| `10K 3D 4326 -> 3857` parallel | 268.78 us | 37.2 Melem/s |
 
 ## Interpretation
 
-- `proj-rust` is ahead of bundled C PROJ in every measured case in this suite.
-- The largest gains are the simple projected single-point transforms and the
-  sequential 10K Web Mercator batch.
-- The new 3D path remains very close to the 2D fast path because the third ordinate is preserved unchanged.
-- On this host and at this batch size, `convert_batch_parallel()` is slower
-  than `convert_batch()` because parallel overhead dominates, though it still
-  remains ahead of the C PROJ baseline.
-- The same crossover effect appears in the 3D batch timings.
-- The live parity suite provides a stronger signal than the frozen JSON corpus
-  alone because it checks both corpus drift and current Rust-versus-C behavior.
+- `proj-rust` remains ahead of bundled C PROJ in every measured Rust-versus-C case in this suite.
+- The indexed operation-selection refactor keeps construction costs low for simple transforms while preserving acceptable construction costs for datum-shifted pairs.
+- Simple projected single-point transforms still show the largest relative wins.
+- On this host and at 10K elements, the adaptive parallel path is now competitive with and slightly faster than the sequential path for the covered workloads.
+- The current 3D path stays close to the 2D fast path because the third ordinate is preserved unchanged.
+- The live parity suite remains the strongest correctness signal because it checks both corpus drift and current Rust-versus-C behavior.
 
 ## Limits
 

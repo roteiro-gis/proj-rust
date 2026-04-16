@@ -1,6 +1,18 @@
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 use proj_core::Transform;
 
+fn construct_web_mercator(c: &mut Criterion) {
+    c.bench_function("construct 4326→3857", |b| {
+        b.iter(|| Transform::new(black_box("EPSG:4326"), black_box("EPSG:3857")).unwrap())
+    });
+}
+
+fn construct_datum_shift(c: &mut Criterion) {
+    c.bench_function("construct 4267→4326", |b| {
+        b.iter(|| Transform::new(black_box("EPSG:4267"), black_box("EPSG:4326")).unwrap())
+    });
+}
+
 fn single_point_web_mercator(c: &mut Criterion) {
     let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
     c.bench_function("single point 4326→3857", |b| {
@@ -101,6 +113,8 @@ fn batch_10k_web_mercator_parallel_3d(c: &mut Criterion) {
 
 criterion_group!(
     benches,
+    construct_web_mercator,
+    construct_datum_shift,
     single_point_web_mercator,
     single_point_utm,
     single_point_polar_stereo,
