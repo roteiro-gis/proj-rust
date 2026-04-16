@@ -6,6 +6,12 @@
 //!
 //! The primary type is [`Transform`], which provides CRS-to-CRS coordinate
 //! transformation using authority codes (e.g., `"EPSG:4326"`).
+//! For area-aware or policy-constrained selection, use
+//! [`Transform::with_selection_options`] and inspect
+//! [`Transform::selected_operation`] /
+//! [`Transform::selection_diagnostics`].
+//! The [`registry`], [`operation`], and [`grid`] modules expose the embedded
+//! operation catalog, selection metadata, and NTv2 grid-provider interfaces.
 //!
 //! # Example
 //!

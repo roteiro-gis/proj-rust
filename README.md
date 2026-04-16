@@ -11,12 +11,13 @@ This workspace currently contains:
 
 `proj-rust` is intended for production use within its supported CRS and projection set. It is not a full implementation of all PROJ capabilities.
 
-Current non-goals for the `0.2` release line include:
+Current non-goals for the `0.3` release line include:
 
-- grid-shift based datum transforms
-- vertical or time-dependent CRS operations
-- full PROJ pipeline semantics and operation selection by area of use
-- complete axis-order coverage and full arbitrary angular/unit-model coverage across all CRS definitions
+- vertical, geoid, or time-dependent CRS operations
+- arbitrary user-defined PROJ pipeline parsing/execution beyond the supported CRS and operation model
+- full EPSG/PROJ registry coverage outside the implemented projection families and embedded operation set
+- full custom CRS coverage for arbitrary axis-order, prime-meridian, and geographic angular-unit semantics
+- grid ecosystems beyond the supported embedded and application-supplied NTv2 resources
 
 ## Usage
 
@@ -83,6 +84,12 @@ Definitions that require unsupported axis-order, prime-meridian, or geographic a
 
 Custom CRS definitions can be constructed and passed to `Transform::from_crs_defs()`. The companion `proj-wkt` crate parses EPSG codes, a subset of WKT/PROJ strings, and basic PROJJSON inputs into `CrsDef` values.
 
+## Operation Selection And Grids
+
+`proj-core` `0.3` adds embedded coordinate-operation metadata, default operation selection, and explicit operation execution. `Transform::new()` and `Transform::from_crs_defs()` choose the best supported operation for the CRS pair, while `Transform::with_selection_options()` lets callers supply an area of interest or require grid-backed or exact-area matches.
+
+Use `Transform::selected_operation()`, `Transform::selection_diagnostics()`, `registry::operations_between()`, and `lookup_operation()` when you need deterministic operation inspection. NTv2 grid-backed transforms are supported through the embedded registry, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations.
+
 ## Compatibility Surface
 
 `proj-wkt` also exposes a lightweight `Proj` compatibility facade for downstream code that currently uses the common `new_known_crs` / `new` / `create_crs_to_crs_from_pj` / `convert` flow. It is intentionally narrow and only covers the supported CRS semantics in this workspace.
@@ -100,11 +107,13 @@ Custom CRS definitions can be constructed and passed to `Transform::from_crs_def
 ## Testing
 
 ```sh
-cargo test                        # all tests
+cargo test --workspace
 cargo test -p proj-core --no-default-features  # core crate without rayon/geo-types
+cargo test -p proj-core --features c-proj-compat
 ./scripts/run-reference-parity.sh
-./scripts/verify-release-packaging.sh
-cargo clippy --all-targets -- -D warnings
+./scripts/verify-release-packaging.sh --offline
+cargo clippy --workspace --all-targets -- -D warnings
+./scripts/run-reference-benchmarks.sh
 ```
 
 Prefer `convert_batch()` for small and medium batch sizes.

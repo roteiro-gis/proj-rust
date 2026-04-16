@@ -1,11 +1,11 @@
 # Benchmark Report
 
-Date: 2026-04-14
+Date: 2026-04-16
 
 This report summarizes the current parity and benchmark suite for `proj-rust`
 against bundled C PROJ. It captures both the current Rust-versus-C performance
-shape and the new transform-construction cost after the indexed operation
-selection work in the embedded registry.
+shape and the current transform-construction cost for the `0.3.0` release
+state.
 
 ## System Under Test
 
@@ -41,7 +41,7 @@ throughput claims.
 Commands used for this report:
 
 ```sh
-./scripts/run-reference-parity.sh
+cargo test -p proj-core --features c-proj-compat
 ./scripts/run-reference-benchmarks.sh
 ```
 
@@ -68,47 +68,47 @@ Notes:
 
 | workload | proj-rust |
 | --- | ---: |
-| `construct 4326 -> 3857` | 1.51 us |
-| `construct 4267 -> 4326` | 77.48 us |
+| `construct 4326 -> 3857` | 687.42 ns |
+| `construct 4267 -> 4326` | 31.24 us |
 
 ### Single-Point Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `4326 -> 3857` | 25.82 ns | 77.11 ns | `proj-rust` 2.99x faster |
-| `4326 -> 32618` | 42.72 ns | 126.13 ns | `proj-rust` 2.95x faster |
-| `4326 -> 3413` | 57.19 ns | 90.64 ns | `proj-rust` 1.58x faster |
-| `4267 -> 4326` | 162.23 ns | 265.20 ns | `proj-rust` 1.63x faster |
+| `4326 -> 3857` | 27.25 ns | 72.77 ns | `proj-rust` 2.67x faster |
+| `4326 -> 32618` | 41.18 ns | 130.88 ns | `proj-rust` 3.18x faster |
+| `4326 -> 3413` | 59.30 ns | 92.52 ns | `proj-rust` 1.56x faster |
+| `4267 -> 4326` | 160.37 ns | 276.96 ns | `proj-rust` 1.73x faster |
 
 ### Single-Point 3D Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `3D 4326 -> 3857` | 25.26 ns | 73.08 ns | `proj-rust` 2.89x faster |
-| `3D 4267 -> 4326` | 149.08 ns | 270.40 ns | `proj-rust` 1.81x faster |
+| `3D 4326 -> 3857` | 25.70 ns | 82.27 ns | `proj-rust` 3.20x faster |
+| `3D 4267 -> 4326` | 153.14 ns | 281.22 ns | `proj-rust` 1.84x faster |
 
 ### Batch Summary
 
 | workload | proj-rust | C PROJ | result |
 | --- | ---: | ---: | --- |
-| `10K 4326 -> 3857` sequential | 285.69 us | 778.53 us | `proj-rust` 2.73x faster |
-| `10K 4326 -> 3857` throughput | 35.0 Melem/s | 12.8 Melem/s | `proj-rust` 2.73x higher throughput |
-| `10K 4326 -> 3857` parallel | 294.68 us | 778.53 us | `proj-rust` 2.64x faster |
-| `10K 4326 -> 3857` parallel throughput | 33.9 Melem/s | 12.8 Melem/s | `proj-rust` 2.64x higher throughput |
+| `10K 4326 -> 3857` sequential | 293.75 us | 778.47 us | `proj-rust` 2.65x faster |
+| `10K 4326 -> 3857` throughput | 34.0 Melem/s | 12.8 Melem/s | `proj-rust` 2.65x higher throughput |
+| `10K 4326 -> 3857` parallel | 292.19 us | 778.47 us | `proj-rust` 2.66x faster |
+| `10K 4326 -> 3857` parallel throughput | 34.2 Melem/s | 12.8 Melem/s | `proj-rust` 2.66x higher throughput |
 
 ### Batch 3D Summary
 
 | workload | proj-rust | result |
 | --- | ---: | --- |
-| `10K 3D 4326 -> 3857` sequential | 316.96 us | 31.5 Melem/s |
-| `10K 3D 4326 -> 3857` parallel | 268.78 us | 37.2 Melem/s |
+| `10K 3D 4326 -> 3857` sequential | 258.73 us | 38.6 Melem/s |
+| `10K 3D 4326 -> 3857` parallel | 259.91 us | 38.5 Melem/s |
 
 ## Interpretation
 
 - `proj-rust` remains ahead of bundled C PROJ in every measured Rust-versus-C case in this suite.
-- The indexed operation-selection refactor keeps construction costs low for simple transforms while preserving acceptable construction costs for datum-shifted pairs.
+- Construction is now sub-microsecond for simple registry-backed projected transforms and roughly 31 microseconds for the covered datum-shifted pair.
 - Simple projected single-point transforms still show the largest relative wins.
-- On this host and at 10K elements, the adaptive parallel path is now competitive with and slightly faster than the sequential path for the covered workloads.
+- On this host and at 10K elements, the adaptive parallel path is essentially flat with the sequential path for the covered workloads, which is the intended crossover behavior.
 - The current 3D path stays close to the 2D fast path because the third ordinate is preserved unchanged.
 - The live parity suite remains the strongest correctness signal because it checks both corpus drift and current Rust-versus-C behavior.
 

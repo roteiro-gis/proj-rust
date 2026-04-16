@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0
+
+- add embedded coordinate-operation metadata and selection APIs, including explicit operation lookup, `Transform::from_operation`, `Transform::with_selection_options`, selected-operation introspection, and detailed selection diagnostics
+- add NTv2 grid runtime support with embedded and application-provided grid providers, recursive concatenated operation handling, and bundled registry-backed grid resources
+- expand the embedded EPSG registry with explicit datum-shift states, coordinate operations, areas of use, grid definitions, and CRS names
+- make transform construction operation-aware with typed area-of-interest selection, inverse-aware metadata, and indexed operation lookup instead of registry-wide scans
+- switch projections onto precomputed enum-backed hot paths and compiled transform pipelines, improving construction and execution costs
+- tighten CRS parsing semantics across WKT, PROJJSON, and authority wrappers, rejecting contradictory or unsupported inputs instead of silently normalizing them
+- refresh live bundled C PROJ parity coverage, benchmark coverage, and the published benchmark report for the new operation-selection and 3D paths
+- continue to scope the release as a supported `0.x` line rather than a claim of full PROJ feature parity
+
 ## 0.2.0
 
 - redesign the public CRS API around constructors/getters and a typed `LinearUnit`, replacing raw projected-unit scalars and making the native-unit model explicit
