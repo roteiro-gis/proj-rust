@@ -45,6 +45,8 @@ struct CompiledOperationPipeline {
 }
 
 struct CompiledOperationFallback {
+    operation: CoordinateOperation,
+    direction: OperationStepDirection,
     metadata: CoordinateOperationMetadata,
     pipeline: CompiledOperationPipeline,
 }
@@ -488,7 +490,12 @@ impl Transform {
                             candidate,
                             !selected_candidate.operation.deprecated,
                         ));
-                        fallback_pipelines.push(CompiledOperationFallback { metadata, pipeline });
+                        fallback_pipelines.push(CompiledOperationFallback {
+                            operation: candidate.operation.clone().into_owned(),
+                            direction: candidate.direction,
+                            metadata,
+                            pipeline,
+                        });
                     } else {
                         selected = Some((index, candidate, metadata, pipeline));
                     }
@@ -671,11 +678,36 @@ impl Transform {
             selected_direction,
             self.selected_operation.area_of_use.clone(),
         );
+        let mut fallback_pipelines = Vec::with_capacity(self.fallback_pipelines.len());
+        for fallback in &self.fallback_pipelines {
+            let direction = fallback.direction.inverse();
+            let pipeline = compile_pipeline(
+                &self.target,
+                &self.source,
+                &fallback.operation,
+                direction,
+                &grid_runtime,
+            )?;
+            let metadata = selected_metadata(
+                &fallback.operation,
+                direction,
+                fallback.metadata.area_of_use.clone(),
+            );
+            fallback_pipelines.push(CompiledOperationFallback {
+                operation: fallback.operation.clone(),
+                direction,
+                metadata,
+                pipeline,
+            });
+        }
         let diagnostics = OperationSelectionDiagnostics {
             selected_operation: selected_operation.clone(),
             selected_match_kind: self.diagnostics.selected_match_kind,
             selected_reasons: self.diagnostics.selected_reasons.clone(),
-            fallback_operations: Vec::new(),
+            fallback_operations: fallback_pipelines
+                .iter()
+                .map(|fallback| fallback.metadata.clone())
+                .collect(),
             skipped_operations: Vec::new(),
             approximate: self.diagnostics.approximate,
             missing_required_grid: self.diagnostics.missing_required_grid.clone(),
@@ -690,7 +722,7 @@ impl Transform {
             vertical_transform,
             selection_options: inverse_options,
             pipeline,
-            fallback_pipelines: Vec::new(),
+            fallback_pipelines,
         })
     }
 
@@ -2314,6 +2346,56 @@ mod tests {
             .grid_coverage_misses
             .iter()
             .any(|miss| miss.operation.id == Some(CoordinateOperationId(1313))));
+    }
+
+    #[test]
+    fn inverse_grid_coverage_miss_preserves_fallback_operations() {
+        let fwd = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+        assert_eq!(
+            fwd.selected_operation().id,
+            Some(CoordinateOperationId(1313))
+        );
+        assert!(!fwd.selection_diagnostics().fallback_operations.is_empty());
+
+        let inv = fwd.inverse().unwrap();
+        assert_eq!(
+            inv.selected_operation().id,
+            Some(CoordinateOperationId(1313))
+        );
+        assert_eq!(
+            inv.selected_operation().direction,
+            OperationStepDirection::Reverse
+        );
+        assert!(!inv.selection_diagnostics().fallback_operations.is_empty());
+
+        let outcome = inv.convert_with_diagnostics((0.0, 0.0)).unwrap();
+        let plain = inv.convert((0.0, 0.0)).unwrap();
+
+        assert_eq!(plain, outcome.coord);
+        assert_ne!(outcome.operation.id, Some(CoordinateOperationId(1313)));
+        assert_eq!(outcome.operation.source_crs_epsg, Some(4269));
+        assert_eq!(outcome.operation.target_crs_epsg, Some(4267));
+        assert!(inv
+            .selection_diagnostics()
+            .fallback_operations
+            .iter()
+            .any(|operation| operation.id == outcome.operation.id
+                && operation.direction == outcome.operation.direction));
+        assert!(outcome.grid_coverage_misses.iter().any(|miss| {
+            miss.operation.id == Some(CoordinateOperationId(1313))
+                && miss.operation.direction == OperationStepDirection::Reverse
+        }));
     }
 
     #[test]
