@@ -12,6 +12,9 @@ use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
+pub(crate) const APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL: &str =
+    "approximate Helmert fallback is available but disabled by SelectionPolicy::BestAvailable; opt in with SelectionOptions::allow_approximate_helmert_fallback()";
+
 pub(crate) struct RankedOperationCandidate {
     pub(crate) operation: Cow<'static, CoordinateOperation>,
     pub(crate) direction: OperationStepDirection,
@@ -154,19 +157,30 @@ pub(crate) fn rank_operation_candidates(
         });
     }
 
-    if matches!(
-        options.policy,
-        SelectionPolicy::BestAvailable | SelectionPolicy::AllowApproximateHelmertFallback
-    ) {
-        if let Some(operation) = synthetic_helmert_fallback(source, target) {
-            candidates.push(RankedOperationCandidate {
-                operation: Cow::Owned(operation),
-                direction: OperationStepDirection::Forward,
-                match_kind: OperationMatchKind::ApproximateFallback,
-                matched_area_of_use: None,
-                reasons: SmallVec::from_slice(&[SelectionReason::ApproximateFallback]),
-            });
+    match options.policy {
+        SelectionPolicy::AllowApproximateHelmertFallback => {
+            if let Some(operation) = synthetic_helmert_fallback(source, target) {
+                candidates.push(RankedOperationCandidate {
+                    operation: Cow::Owned(operation),
+                    direction: OperationStepDirection::Forward,
+                    match_kind: OperationMatchKind::ApproximateFallback,
+                    matched_area_of_use: None,
+                    reasons: SmallVec::from_slice(&[SelectionReason::ApproximateFallback]),
+                });
+            }
         }
+        SelectionPolicy::BestAvailable => {
+            if let Some(operation) = synthetic_helmert_fallback(source, target) {
+                skipped.push(SkippedOperation {
+                    metadata: selection_metadata(&operation, OperationStepDirection::Forward, None),
+                    reason: SkippedOperationReason::PolicyFiltered,
+                    detail: APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL.into(),
+                });
+            }
+        }
+        SelectionPolicy::RequireGrids
+        | SelectionPolicy::RequireExactAreaMatch
+        | SelectionPolicy::Operation(_) => {}
     }
 
     candidates.sort_by(compare_candidates);

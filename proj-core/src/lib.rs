@@ -10,6 +10,10 @@
 //! [`Transform::with_selection_options`] and inspect
 //! [`Transform::selected_operation`] /
 //! [`Transform::selection_diagnostics`].
+//! The default [`SelectionPolicy::BestAvailable`] policy does not synthesize
+//! approximate Helmert datum-shift fallbacks; opt in with
+//! [`SelectionOptions::allow_approximate_helmert_fallback`] when that
+//! last-resort behavior is acceptable.
 //! The [`registry`], [`operation`], and [`grid`] modules expose the embedded
 //! operation catalog, selection metadata, and NTv2 grid-provider interfaces.
 //! `convert_3d` preserves `z` when no explicit vertical CRS is present or when
