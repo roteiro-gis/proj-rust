@@ -701,6 +701,24 @@ mod tests {
     }
 
     #[test]
+    fn proj_facade_create_from_definitions_allows_approximate_fallback_option() {
+        let from = Proj::new("+proj=longlat +datum=NAD27").unwrap();
+        let to = Proj::new("+proj=longlat +datum=OSGB36").unwrap();
+
+        let err = expect_proj_error(from.create_crs_to_crs_from_pj(&to, None, None));
+        assert!(err
+            .to_string()
+            .contains("allow_approximate_helmert_fallback"));
+
+        let proj = from
+            .create_crs_to_crs_from_pj(&to, None, Some("allow_approximate_helmert_fallback"))
+            .unwrap();
+        let (lon, lat) = proj.convert((-90.0, 45.0)).unwrap();
+        assert!(lon.is_finite());
+        assert!(lat.is_finite());
+    }
+
+    #[test]
     fn proj_facade_create_from_definitions_with_selection_options() {
         let from = Proj::new("+proj=longlat +datum=WGS84").unwrap();
         let to = Proj::new("EPSG:3857").unwrap();

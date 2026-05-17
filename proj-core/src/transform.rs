@@ -347,6 +347,40 @@ fn apply_vertical_grid_shift(shift: &CompiledVerticalGridShift, coord: Coord3D) 
     Ok(shift.target_unit.from_meters(target_meters))
 }
 
+fn no_ranked_operation_error(
+    from: &CrsDef,
+    to: &CrsDef,
+    options: &SelectionOptions,
+    skipped_operations: &[SkippedOperation],
+) -> Error {
+    let approximate_fallback_disabled = skipped_operations
+        .iter()
+        .any(|skipped| skipped.detail == selector::APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL);
+
+    match options.policy {
+        SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
+            Some(_) => Error::OperationSelection(format!(
+                "operation id {} is not compatible with source EPSG:{} target EPSG:{}",
+                id.0,
+                from.epsg(),
+                to.epsg()
+            )),
+            None => Error::UnknownOperation(format!("unknown operation id {}", id.0)),
+        },
+        _ if approximate_fallback_disabled => Error::OperationSelection(format!(
+            "no non-approximate compatible operation found for source EPSG:{} target EPSG:{}; {}",
+            from.epsg(),
+            to.epsg(),
+            selector::APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL
+        )),
+        _ => Error::OperationSelection(format!(
+            "no compatible operation found for source EPSG:{} target EPSG:{}",
+            from.epsg(),
+            to.epsg()
+        )),
+    }
+}
+
 impl Transform {
     /// Create a transform from authority code strings (e.g., `"EPSG:4326"`).
     pub fn new(from_crs: &str, to_crs: &str) -> Result<Self> {
@@ -433,22 +467,12 @@ impl Transform {
         let vertical_transform = compile_vertical_transform(from, to, &options, &grid_runtime)?;
         let candidate_set = selector::rank_operation_candidates(from, to, &options)?;
         if candidate_set.ranked.is_empty() {
-            return Err(match options.policy {
-                SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
-                    Some(_) => Error::OperationSelection(format!(
-                        "operation id {} is not compatible with source EPSG:{} target EPSG:{}",
-                        id.0,
-                        from.epsg(),
-                        to.epsg()
-                    )),
-                    None => Error::UnknownOperation(format!("unknown operation id {}", id.0)),
-                },
-                _ => Error::OperationSelection(format!(
-                    "no compatible operation found for source EPSG:{} target EPSG:{}",
-                    from.epsg(),
-                    to.epsg()
-                )),
-            });
+            return Err(no_ranked_operation_error(
+                from,
+                to,
+                &options,
+                &candidate_set.skipped,
+            ));
         }
 
         let mut skipped_operations = candidate_set.skipped;
@@ -2320,7 +2344,7 @@ mod tests {
     }
 
     #[test]
-    fn grid_coverage_miss_falls_back_under_best_available_policy() {
+    fn grid_coverage_miss_does_not_use_approximate_fallback_by_default() {
         let t = Transform::with_selection_options(
             "EPSG:4267",
             "EPSG:4269",
@@ -2335,6 +2359,39 @@ mod tests {
         .unwrap();
 
         assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
+        assert!(t.selection_diagnostics().fallback_operations.is_empty());
+
+        let err = t.convert((0.0, 0.0)).unwrap_err();
+
+        assert!(matches!(err, Error::Grid(GridError::OutsideCoverage(_))));
+        assert!(t
+            .selection_diagnostics()
+            .skipped_operations
+            .iter()
+            .any(|skipped| skipped.metadata.approximate
+                && matches!(skipped.reason, SkippedOperationReason::PolicyFiltered)
+                && skipped
+                    .detail
+                    .contains("allow_approximate_helmert_fallback")));
+    }
+
+    #[test]
+    fn grid_coverage_miss_falls_back_when_approximate_fallback_allowed() {
+        let t = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
+                    -80.5041667,
+                    44.5458333,
+                ))),
+                policy: SelectionPolicy::AllowApproximateHelmertFallback,
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
         assert!(!t.selection_diagnostics().fallback_operations.is_empty());
 
         let outcome = t.convert_with_diagnostics((0.0, 0.0)).unwrap();
@@ -2342,6 +2399,7 @@ mod tests {
 
         assert_eq!(plain, outcome.coord);
         assert_ne!(outcome.operation.id, Some(CoordinateOperationId(1313)));
+        assert!(outcome.operation.approximate);
         assert!(outcome
             .grid_coverage_misses
             .iter()
@@ -2358,6 +2416,7 @@ mod tests {
                     -80.5041667,
                     44.5458333,
                 ))),
+                policy: SelectionPolicy::AllowApproximateHelmertFallback,
                 ..SelectionOptions::default()
             },
         )
@@ -2928,17 +2987,51 @@ mod tests {
     }
 
     #[test]
-    fn approximate_fallback_is_modeled_as_helmert_operation() {
+    fn approximate_helmert_fallback_requires_explicit_opt_in() {
         let from = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD27, "Custom NAD27"));
         let to = CrsDef::Geographic(GeographicCrsDef::new(0, datum::OSGB36, "Custom OSGB36"));
 
-        let t = Transform::from_crs_defs(&from, &to).unwrap();
+        let err = expect_transform_error(Transform::from_crs_defs(&from, &to));
+        let message = err.to_string();
+        assert!(message.contains("no non-approximate compatible operation found"));
+        assert!(message.contains("approximate Helmert fallback is available but disabled"));
+        assert!(message.contains("SelectionOptions::allow_approximate_helmert_fallback()"));
+
+        let t = Transform::from_crs_defs_with_selection_options(
+            &from,
+            &to,
+            SelectionOptions::new().allow_approximate_helmert_fallback(),
+        )
+        .unwrap();
 
         assert!(t.selected_operation().approximate);
+        assert!(t.selection_diagnostics().approximate);
+        assert_eq!(
+            t.selection_diagnostics().selected_match_kind,
+            OperationMatchKind::ApproximateFallback
+        );
         assert!(matches!(
             t.selected_operation_definition.method,
             OperationMethod::Helmert { .. }
         ));
+    }
+
+    #[test]
+    fn selection_diagnostics_report_disabled_approximate_fallback() {
+        let t = Transform::new("EPSG:4267", "EPSG:4326").unwrap();
+
+        assert!(!t.selection_diagnostics().approximate);
+        assert!(t
+            .selection_diagnostics()
+            .skipped_operations
+            .iter()
+            .any(|skipped| {
+                matches!(skipped.reason, SkippedOperationReason::PolicyFiltered)
+                    && skipped.metadata.approximate
+                    && skipped
+                        .detail
+                        .contains("allow_approximate_helmert_fallback")
+            }));
     }
 
     #[test]

@@ -301,10 +301,20 @@ pub struct CoordinateOperationMetadata {
 
 #[derive(Debug, Clone)]
 pub enum SelectionPolicy {
+    /// Select the best supported registry or exact synthetic operation.
+    ///
+    /// This default policy does not synthesize approximate Helmert fallbacks.
+    /// Use [`SelectionOptions::allow_approximate_helmert_fallback`] when a
+    /// last-resort approximate datum shift is acceptable.
     BestAvailable,
+    /// Require a grid-backed datum operation whenever a datum shift is needed.
     RequireGrids,
+    /// Require selected registry operations to match the configured area of interest.
     RequireExactAreaMatch,
+    /// Permit a synthetic approximate Helmert operation when no better
+    /// supported operation is available.
     AllowApproximateHelmertFallback,
+    /// Select one explicit registry operation by id.
     Operation(CoordinateOperationId),
 }
 
@@ -390,7 +400,10 @@ impl SelectionOptions {
         self
     }
 
-    /// Select the best available operation.
+    /// Select the best supported registry or exact synthetic operation.
+    ///
+    /// This is the default policy. It does not synthesize approximate Helmert
+    /// fallbacks.
     pub fn best_available(self) -> Self {
         self.with_policy(SelectionPolicy::BestAvailable)
     }
@@ -405,7 +418,12 @@ impl SelectionOptions {
         self.with_policy(SelectionPolicy::RequireExactAreaMatch)
     }
 
-    /// Allow approximate Helmert fallback operations when no better operation is available.
+    /// Allow approximate Helmert fallback operations when no better supported
+    /// operation is available.
+    ///
+    /// This opt-in policy can synthesize a last-resort Helmert operation from
+    /// source and target datum metadata. The selected operation is marked
+    /// `approximate` in operation metadata and diagnostics.
     pub fn allow_approximate_helmert_fallback(self) -> Self {
         self.with_policy(SelectionPolicy::AllowApproximateHelmertFallback)
     }
