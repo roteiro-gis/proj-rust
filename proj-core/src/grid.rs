@@ -3,7 +3,7 @@ use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::f64::consts::PI;
 use std::path::{Component, Path, PathBuf};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -256,7 +256,7 @@ impl GridProvider for EmbeddedGridProvider {
 
 pub struct FilesystemGridProvider {
     roots: Vec<PathBuf>,
-    data_cache: Mutex<HashMap<GridDataCacheKey, Arc<CachedGridData>>>,
+    data_cache: GridDataCache,
 }
 
 impl FilesystemGridProvider {
@@ -342,6 +342,28 @@ struct CachedGridData {
     checksum: String,
 }
 
+type GridDataCache = Mutex<HashMap<GridDataCacheKey, Arc<GridDataCacheSlot>>>;
+
+struct GridDataCacheSlot {
+    state: Mutex<GridDataCacheState>,
+    ready: Condvar,
+}
+
+enum GridDataCacheState {
+    Loading,
+    Ready(Arc<CachedGridData>),
+    Failed(GridError),
+}
+
+impl GridDataCacheSlot {
+    fn loading() -> Self {
+        Self {
+            state: Mutex::new(GridDataCacheState::Loading),
+            ready: Condvar::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct GridDataCacheKey {
     format: GridFormat,
@@ -357,29 +379,62 @@ impl GridDataCacheKey {
     }
 }
 
-fn embedded_grid_data_cache() -> &'static Mutex<HashMap<GridDataCacheKey, Arc<CachedGridData>>> {
-    static CACHE: OnceLock<Mutex<HashMap<GridDataCacheKey, Arc<CachedGridData>>>> = OnceLock::new();
+fn embedded_grid_data_cache() -> &'static GridDataCache {
+    static CACHE: OnceLock<GridDataCache> = OnceLock::new();
     CACHE.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
 fn cached_grid_data(
-    cache: &Mutex<HashMap<GridDataCacheKey, Arc<CachedGridData>>>,
+    cache: &GridDataCache,
     key: GridDataCacheKey,
     parse: impl FnOnce() -> std::result::Result<CachedGridData, GridError>,
 ) -> std::result::Result<Arc<CachedGridData>, GridError> {
-    if let Some(cached) = cache
-        .lock()
-        .expect("grid data cache poisoned")
-        .get(&key)
-        .cloned()
-    {
-        return Ok(cached);
+    let (slot, should_load) = {
+        let mut cache = cache.lock().expect("grid data cache poisoned");
+        if let Some(slot) = cache.get(&key) {
+            (Arc::clone(slot), false)
+        } else {
+            let slot = Arc::new(GridDataCacheSlot::loading());
+            cache.insert(key.clone(), Arc::clone(&slot));
+            (slot, true)
+        }
+    };
+
+    if should_load {
+        let result = parse().map(Arc::new);
+        if result.is_err() {
+            let mut cache = cache.lock().expect("grid data cache poisoned");
+            let should_remove = cache
+                .get(&key)
+                .map(|cached_slot| Arc::ptr_eq(cached_slot, &slot))
+                .unwrap_or(false);
+            if should_remove {
+                cache.remove(&key);
+            }
+        }
+
+        let mut state = slot.state.lock().expect("grid data cache slot poisoned");
+        match &result {
+            Ok(data) => *state = GridDataCacheState::Ready(Arc::clone(data)),
+            Err(error) => *state = GridDataCacheState::Failed(error.clone()),
+        }
+        slot.ready.notify_all();
+        return result;
     }
 
-    let parsed = Arc::new(parse()?);
-    let mut cache = cache.lock().expect("grid data cache poisoned");
-    let cached = cache.entry(key).or_insert_with(|| Arc::clone(&parsed));
-    Ok(Arc::clone(cached))
+    let mut state = slot.state.lock().expect("grid data cache slot poisoned");
+    loop {
+        match &*state {
+            GridDataCacheState::Ready(data) => return Ok(Arc::clone(data)),
+            GridDataCacheState::Failed(error) => return Err(error.clone()),
+            GridDataCacheState::Loading => {
+                state = slot
+                    .ready
+                    .wait(state)
+                    .expect("grid data cache slot poisoned");
+            }
+        }
+    }
 }
 
 fn parse_grid_data(
@@ -1067,6 +1122,8 @@ fn read_f32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::Barrier;
+    use std::time::Duration;
 
     #[test]
     fn embedded_ntv2_grid_samples_known_point() {
@@ -1122,6 +1179,83 @@ mod tests {
             sha256_hex(b"abc"),
             "sha256:ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
+    }
+
+    struct SingleFlightTrackingProvider {
+        data_cache: GridDataCache,
+        parse_calls: Arc<AtomicUsize>,
+        bytes: Vec<u8>,
+    }
+
+    impl GridProvider for SingleFlightTrackingProvider {
+        fn definition(
+            &self,
+            grid: &GridDefinition,
+        ) -> std::result::Result<Option<GridDefinition>, GridError> {
+            Ok(Some(grid.clone()))
+        }
+
+        fn load(
+            &self,
+            grid: &GridDefinition,
+        ) -> std::result::Result<Option<GridHandle>, GridError> {
+            let key = GridDataCacheKey::new(grid.format, "single-flight-test-grid");
+            let data = cached_grid_data(&self.data_cache, key, || {
+                self.parse_calls.fetch_add(1, Ordering::SeqCst);
+                std::thread::sleep(Duration::from_millis(25));
+                parse_cached_grid_data(grid.format, &grid.name, &self.bytes)
+            })?;
+
+            Ok(Some(GridHandle {
+                definition: grid.clone(),
+                data,
+            }))
+        }
+    }
+
+    #[test]
+    fn cached_grid_data_single_flights_concurrent_loads() {
+        const THREADS: usize = 12;
+
+        let parse_calls = Arc::new(AtomicUsize::new(0));
+        let provider = Arc::new(SingleFlightTrackingProvider {
+            data_cache: Mutex::new(HashMap::new()),
+            parse_calls: Arc::clone(&parse_calls),
+            bytes: test_gtx_bytes(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        });
+        let definition = GridDefinition {
+            id: GridId(9_999),
+            name: "single-flight-test.gtx".into(),
+            format: GridFormat::Gtx,
+            interpolation: GridInterpolation::Bilinear,
+            area_of_use: None,
+            resource_names: SmallVec::from_vec(vec!["single-flight-test.gtx".into()]),
+        };
+        let barrier = Arc::new(Barrier::new(THREADS));
+
+        let handles = std::thread::scope(|scope| {
+            let mut joins = Vec::new();
+            for _ in 0..THREADS {
+                let provider = Arc::clone(&provider);
+                let definition = definition.clone();
+                let barrier = Arc::clone(&barrier);
+                joins.push(scope.spawn(move || {
+                    barrier.wait();
+                    provider.load(&definition).unwrap().unwrap()
+                }));
+            }
+
+            joins
+                .into_iter()
+                .map(|join| join.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        assert_eq!(parse_calls.load(Ordering::SeqCst), 1);
+        for handle in &handles[1..] {
+            assert!(Arc::ptr_eq(&handles[0].data, &handle.data));
+            assert_eq!(handles[0].checksum(), handle.checksum());
+        }
     }
 
     struct TrackingGridProvider {
