@@ -22,6 +22,9 @@
 //! vertical reference frame with different linear units. Grid/geoid height
 //! transformations require explicit vertical grid operations and caller-supplied
 //! grid resources; otherwise they are rejected.
+//! Geographic antimeridian AOIs use
+//! [`AreaOfInterest::geographic_wrapped_bounds`], while ordinary projected and
+//! source/target bounds keep strict `min <= max` validation.
 //! With the default `geo-types` feature, [`Transform::convert_geometry`]
 //! transforms whole 2D `geo-types` geometries and fails on the first invalid
 //! coordinate without returning partial results.

@@ -104,6 +104,8 @@ The default `SelectionPolicy::BestAvailable` does not synthesize approximate Hel
 
 Use `Transform::selected_operation()`, `Transform::selection_diagnostics()`, `Transform::vertical_diagnostics()`, `registry::operation_candidates_between()`, and `lookup_operation()` when you need deterministic operation inspection including operation direction. NTv2 horizontal grid-backed transforms are supported through the embedded registry, parsed PROJ `+nadgrids` custom CRS definitions, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations. Vertical same-reference unit conversion is supported. NOAA/VDatum binary GTX vertical grids are supported through `FilesystemGridProvider` or a custom `GridProvider` when the caller supplies an explicit `VerticalGridOperation`; vertical grid selection honors the operation area of use, falls back across candidate grids after coverage misses, and reports resolved grid SHA-256 checksums in diagnostics. Packaged geoid grid assets and broad vertical operation selection remain outside the default registry.
 
+Use `AreaOfInterest::geographic_wrapped_bounds(...)` for geographic AOI boxes crossing the antimeridian (`west > east`) and `Transform::transform_geographic_wrapped_bounds(...)` to reproject such source-geographic bounds. Normal `Bounds::is_valid()` and projected/source/target AOI bounds remain strict and require `min <= max`.
+
 With the default `geo-types` feature, `Transform::convert_geometry()` transforms whole 2D `geo-types` geometries including points, lines, polygons, multi-geometries, rectangles, geometry collections, and `Geometry` enum values. Geometry transforms stop at the first coordinate error and do not return partial results.
 
 ## Compatibility Surface
