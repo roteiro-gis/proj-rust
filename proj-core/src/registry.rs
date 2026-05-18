@@ -434,4 +434,18 @@ mod tests {
 
         assert!(matches!(err, Error::OutOfRange(_)));
     }
+
+    #[test]
+    fn operation_candidate_discovery_accepts_wrapped_geographic_aoi_bounds() {
+        let source = lookup_epsg(4267).expect("should find NAD27");
+        let target = lookup_epsg(4326).expect("should find WGS84");
+        let options = SelectionOptions {
+            area_of_interest: Some(crate::operation::AreaOfInterest::geographic_wrapped_bounds(
+                crate::coord::Bounds::new(170.0, -20.0, -170.0, -10.0),
+            )),
+            ..SelectionOptions::default()
+        };
+
+        operation_candidates_between_with_selection_options(&source, &target, &options).unwrap();
+    }
 }

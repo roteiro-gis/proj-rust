@@ -25,18 +25,47 @@ pub struct AreaOfUse {
 
 impl AreaOfUse {
     pub fn contains_point(&self, point: Coord) -> bool {
-        point.x >= self.west
-            && point.x <= self.east
+        longitude_range_contains_point(self.west, self.east, point.x)
             && point.y >= self.south
             && point.y <= self.north
     }
 
     pub fn contains_bounds(&self, bounds: Bounds) -> bool {
-        bounds.min_x >= self.west
-            && bounds.max_x <= self.east
+        longitude_range_contains_range(self.west, self.east, bounds.min_x, bounds.max_x)
             && bounds.min_y >= self.south
             && bounds.max_y <= self.north
     }
+}
+
+fn longitude_range_contains_point(west: f64, east: f64, longitude: f64) -> bool {
+    longitude_delta(west, longitude) <= longitude_span(west, east)
+}
+
+fn longitude_range_contains_range(
+    outer_west: f64,
+    outer_east: f64,
+    inner_west: f64,
+    inner_east: f64,
+) -> bool {
+    let outer_span = longitude_span(outer_west, outer_east);
+    if outer_span >= 360.0 {
+        return true;
+    }
+    let inner_start = longitude_delta(outer_west, inner_west);
+    let inner_span = longitude_span(inner_west, inner_east);
+    inner_start + inner_span <= outer_span
+}
+
+fn longitude_span(west: f64, east: f64) -> f64 {
+    if east >= west {
+        east - west
+    } else {
+        east + 360.0 - west
+    }
+}
+
+fn longitude_delta(west: f64, east: f64) -> f64 {
+    (east - west).rem_euclid(360.0)
 }
 
 /// Nominal operation accuracy in meters.
@@ -62,7 +91,11 @@ impl OperationStepDirection {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AreaOfInterestCrs {
+    /// Geographic degrees with conventional west <= east bounds.
     GeographicDegrees,
+    /// Geographic degrees with bounds crossing the antimeridian, represented
+    /// by west > east.
+    GeographicDegreesWrapped,
     SourceCrs,
     TargetCrs,
 }
@@ -71,6 +104,7 @@ impl AreaOfInterestCrs {
     pub fn inverse(self) -> Self {
         match self {
             Self::GeographicDegrees => Self::GeographicDegrees,
+            Self::GeographicDegreesWrapped => Self::GeographicDegreesWrapped,
             Self::SourceCrs => Self::TargetCrs,
             Self::TargetCrs => Self::SourceCrs,
         }
@@ -96,6 +130,19 @@ impl AreaOfInterest {
     pub fn geographic_bounds(bounds: Bounds) -> Self {
         Self {
             crs: AreaOfInterestCrs::GeographicDegrees,
+            point: None,
+            bounds: Some(bounds),
+        }
+    }
+
+    /// Construct a geographic area of interest that crosses the antimeridian.
+    ///
+    /// The bounds are interpreted as west/south/east/north in degrees and must
+    /// satisfy `west > east`; use [`Self::geographic_bounds`] for normal
+    /// non-wrapped geographic bounds.
+    pub fn geographic_wrapped_bounds(bounds: Bounds) -> Self {
+        Self {
+            crs: AreaOfInterestCrs::GeographicDegreesWrapped,
             point: None,
             bounds: Some(bounds),
         }
@@ -611,6 +658,43 @@ mod tests {
             &provider
         ));
         assert_eq!(options.vertical_grid_operations, vec![first, second]);
+    }
+
+    #[test]
+    fn geographic_wrapped_bounds_constructor_marks_antimeridian_aoi() {
+        let bounds = Bounds::new(170.0, -20.0, -170.0, -10.0);
+        let area = AreaOfInterest::geographic_wrapped_bounds(bounds);
+
+        assert_eq!(area.crs, AreaOfInterestCrs::GeographicDegreesWrapped);
+        assert_eq!(area.bounds, Some(bounds));
+        assert_eq!(area.point, None);
+        assert_eq!(area.inverse(), area);
+    }
+
+    #[test]
+    fn area_of_use_contains_antimeridian_points_and_bounds() {
+        let area = AreaOfUse {
+            west: 160.0,
+            south: -25.0,
+            east: -160.0,
+            north: -5.0,
+            name: "Pacific antimeridian test area".into(),
+        };
+
+        assert!(area.contains_point(Coord::new(170.0, -15.0)));
+        assert!(area.contains_point(Coord::new(-170.0, -15.0)));
+        assert!(!area.contains_point(Coord::new(0.0, -15.0)));
+        assert!(area.contains_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0)));
+        assert!(!area.contains_bounds(Bounds::new(150.0, -20.0, -170.0, -10.0)));
+
+        let world = AreaOfUse {
+            west: -180.0,
+            south: -90.0,
+            east: 180.0,
+            north: 90.0,
+            name: "World".into(),
+        };
+        assert!(world.contains_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0)));
     }
 
     #[test]

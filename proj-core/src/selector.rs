@@ -434,7 +434,8 @@ fn resolve_area_point(
     target: &CrsDef,
 ) -> Result<Coord> {
     match area.crs {
-        crate::operation::AreaOfInterestCrs::GeographicDegrees => {
+        crate::operation::AreaOfInterestCrs::GeographicDegrees
+        | crate::operation::AreaOfInterestCrs::GeographicDegreesWrapped => {
             validate_geographic_area_point(point)?;
             Ok(point)
         }
@@ -449,11 +450,13 @@ fn resolve_area_bounds(
     source: &CrsDef,
     target: &CrsDef,
 ) -> Result<Bounds> {
-    validate_area_bounds_shape(bounds)?;
-
     let crs = match area.crs {
         crate::operation::AreaOfInterestCrs::GeographicDegrees => {
             validate_geographic_area_bounds(bounds)?;
+            return Ok(bounds);
+        }
+        crate::operation::AreaOfInterestCrs::GeographicDegreesWrapped => {
+            validate_wrapped_geographic_area_bounds(bounds)?;
             return Ok(bounds);
         }
         crate::operation::AreaOfInterestCrs::SourceCrs => source,
@@ -464,6 +467,8 @@ fn resolve_area_bounds(
         validate_geographic_area_bounds(bounds)?;
         return Ok(bounds);
     }
+
+    validate_area_bounds_shape(bounds)?;
 
     let segments = 8usize;
     let mut transformed: Option<Bounds> = None;
@@ -525,6 +530,30 @@ fn validate_area_bounds_shape(bounds: Bounds) -> Result<()> {
 
 fn validate_geographic_area_bounds(bounds: Bounds) -> Result<()> {
     validate_area_bounds_shape(bounds)?;
+    validate_geographic_bounds_coordinates(bounds)
+}
+
+fn validate_wrapped_geographic_area_bounds(bounds: Bounds) -> Result<()> {
+    validate_wrapped_area_bounds_shape(bounds)?;
+    validate_geographic_bounds_coordinates(bounds)
+}
+
+fn validate_wrapped_area_bounds_shape(bounds: Bounds) -> Result<()> {
+    if !bounds.min_x.is_finite()
+        || !bounds.min_y.is_finite()
+        || !bounds.max_x.is_finite()
+        || !bounds.max_y.is_finite()
+        || bounds.min_x <= bounds.max_x
+        || bounds.min_y > bounds.max_y
+    {
+        return Err(Error::OutOfRange(
+            "wrapped geographic area-of-interest bounds must be finite and satisfy west > east and south <= north".into(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_geographic_bounds_coordinates(bounds: Bounds) -> Result<()> {
     for point in [
         Coord::new(bounds.min_x, bounds.min_y),
         Coord::new(bounds.min_x, bounds.max_y),

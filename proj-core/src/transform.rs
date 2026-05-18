@@ -390,6 +390,43 @@ fn no_ranked_operation_error(
     }
 }
 
+fn validate_wrapped_geographic_transform_bounds(bounds: Bounds) -> Result<()> {
+    if !bounds.min_x.is_finite()
+        || !bounds.min_y.is_finite()
+        || !bounds.max_x.is_finite()
+        || !bounds.max_y.is_finite()
+        || bounds.min_x <= bounds.max_x
+        || bounds.min_y > bounds.max_y
+    {
+        return Err(Error::OutOfRange(
+            "wrapped geographic bounds must be finite and satisfy west > east and south <= north"
+                .into(),
+        ));
+    }
+
+    for point in [
+        Coord::new(bounds.min_x, bounds.min_y),
+        Coord::new(bounds.min_x, bounds.max_y),
+        Coord::new(bounds.max_x, bounds.min_y),
+        Coord::new(bounds.max_x, bounds.max_y),
+    ] {
+        if !(-180.0..=180.0).contains(&point.x) {
+            return Err(Error::OutOfRange(format!(
+                "wrapped geographic bounds longitude {:.8} degrees is outside [-180, 180]",
+                point.x
+            )));
+        }
+        if !(-90.0..=90.0).contains(&point.y) {
+            return Err(Error::OutOfRange(format!(
+                "wrapped geographic bounds latitude {:.8} degrees is outside [-90, 90]",
+                point.y
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 impl Transform {
     /// Create a transform from authority code strings (e.g., `"EPSG:4326"`).
     pub fn new(from_crs: &str, to_crs: &str) -> Result<Self> {
@@ -777,6 +814,36 @@ impl Transform {
             ));
         }
 
+        self.transform_valid_bounds(bounds, densify_points)
+    }
+
+    /// Reproject a geographic bounding box that crosses the antimeridian.
+    ///
+    /// `bounds` is interpreted as west/south/east/north in source geographic
+    /// degrees and must satisfy `west > east`. Projected and normal
+    /// non-wrapped bounds should use [`Self::transform_bounds`].
+    pub fn transform_geographic_wrapped_bounds(
+        &self,
+        bounds: Bounds,
+        densify_points: usize,
+    ) -> Result<Bounds> {
+        if !self.source.is_geographic() {
+            return Err(Error::InvalidDefinition(
+                "wrapped geographic bounds require a geographic source CRS".into(),
+            ));
+        }
+        validate_wrapped_geographic_transform_bounds(bounds)?;
+
+        let west_segment = Bounds::new(bounds.min_x, bounds.min_y, 180.0, bounds.max_y);
+        let east_segment = Bounds::new(-180.0, bounds.min_y, bounds.max_x, bounds.max_y);
+        let mut transformed = self.transform_valid_bounds(west_segment, densify_points)?;
+        let east_transformed = self.transform_valid_bounds(east_segment, densify_points)?;
+        transformed.expand_to_include(Coord::new(east_transformed.min_x, east_transformed.min_y));
+        transformed.expand_to_include(Coord::new(east_transformed.max_x, east_transformed.max_y));
+        Ok(transformed)
+    }
+
+    fn transform_valid_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
         let segments = densify_points
             .checked_add(1)
             .ok_or_else(|| Error::OutOfRange("densify point count is too large".into()))?;
@@ -2468,8 +2535,43 @@ mod tests {
     }
 
     #[test]
+    fn area_of_interest_accepts_wrapped_geographic_bounds() {
+        let t = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_wrapped_bounds(Bounds::new(
+                    170.0, -20.0, -170.0, -10.0,
+                ))),
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        assert_eq!(t.source_crs().epsg(), 4267);
+        assert_eq!(t.target_crs().epsg(), 4269);
+    }
+
+    #[test]
+    fn area_of_interest_rejects_wrapped_geographic_bounds_that_do_not_wrap() {
+        let err = expect_transform_error(Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4269",
+            SelectionOptions {
+                area_of_interest: Some(AreaOfInterest::geographic_wrapped_bounds(Bounds::new(
+                    160.0, -20.0, 170.0, -10.0,
+                ))),
+                ..SelectionOptions::default()
+            },
+        ));
+
+        assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+    }
+
+    #[test]
     fn area_of_interest_validates_geographic_source_and_target_bounds() {
         for area_of_interest in [
+            AreaOfInterest::source_crs_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0)),
             AreaOfInterest::source_crs_bounds(Bounds::new(-181.0, 40.0, -170.0, 45.0)),
             AreaOfInterest::target_crs_bounds(Bounds::new(-80.0, 40.0, -70.0, 91.0)),
         ] {
@@ -3294,6 +3396,30 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(err, Error::OutOfRange(_)));
+    }
+
+    #[test]
+    fn transform_wrapped_geographic_bounds_crossing_antimeridian() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+
+        let result = t
+            .transform_geographic_wrapped_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0), 8)
+            .unwrap();
+
+        assert!(result.min_x < -20_000_000.0, "min_x = {}", result.min_x);
+        assert!(result.max_x > 20_000_000.0, "max_x = {}", result.max_x);
+        assert!(result.min_y < -1_000_000.0, "min_y = {}", result.min_y);
+        assert!(result.max_y < 0.0, "max_y = {}", result.max_y);
+    }
+
+    #[test]
+    fn transform_wrapped_geographic_bounds_rejects_projected_source() {
+        let t = Transform::new("EPSG:3857", "EPSG:4326").unwrap();
+        let err = t
+            .transform_geographic_wrapped_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0), 0)
+            .unwrap_err();
+
+        assert!(matches!(err, Error::InvalidDefinition(_)));
     }
 
     #[test]
