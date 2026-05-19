@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
+
 ## 0.6.0
 
 - add EPSG:32662 Plate Carree registry lookup, operation selection, and reference-corpus coverage, with a regression test that every README-advertised EPSG code resolves

@@ -5,6 +5,7 @@ use crate::error::{Error, Result};
 use crate::grid::GridDefinition;
 use crate::operation::{
     CoordinateOperation, CoordinateOperationId, CoordinateOperationMetadata, SelectionOptions,
+    VerticalGridOperation,
 };
 use crate::selector;
 
@@ -46,6 +47,11 @@ pub fn lookup_operation(id: CoordinateOperationId) -> Option<CoordinateOperation
     epsg_db::lookup_operation(id.0)
 }
 
+/// Look up a registry-backed vertical grid operation by EPSG operation code.
+pub fn lookup_vertical_grid_operation(id: CoordinateOperationId) -> Option<VerticalGridOperation> {
+    epsg_db::lookup_vertical_grid_operation(id.0)
+}
+
 /// Look up a grid definition by its identifier.
 pub(crate) fn lookup_grid_definition(id: u32) -> Option<GridDefinition> {
     epsg_db::lookup_grid(id)
@@ -70,6 +76,17 @@ pub fn operations_between(source: &CrsDef, target: &CrsDef) -> Vec<CoordinateOpe
     .into_iter()
     .cloned()
     .collect()
+}
+
+/// Return registry-backed vertical grid operations compatible with the CRS pair.
+///
+/// This includes reverse-compatible operations when transforming from a
+/// gravity-related vertical CRS back to ellipsoidal height.
+pub fn vertical_grid_operations_between(
+    source: &CrsDef,
+    target: &CrsDef,
+) -> Vec<VerticalGridOperation> {
+    epsg_db::vertical_grid_operations_between(source, target)
 }
 
 /// Return selectable operation metadata for the source and target CRS.
@@ -192,10 +209,56 @@ mod tests {
     }
 
     #[test]
+    fn lookup_registry_vertical_grid_operation() {
+        let operation = lookup_vertical_grid_operation(CoordinateOperationId(10013))
+            .expect("should find NAD83 to NAVD88 vertical grid operation");
+        assert_eq!(operation.target_vertical_crs_epsg, Some(5703));
+        assert_eq!(operation.target_vertical_datum_epsg, Some(5103));
+        assert_eq!(operation.grid.format, crate::grid::GridFormat::Gtx);
+        assert!(operation
+            .grid
+            .resource_names
+            .iter()
+            .any(|name| name == "g2003u01.bin"));
+    }
+
+    #[test]
+    fn discovers_registry_vertical_grid_operations_for_crs_pair() {
+        let source_horizontal = lookup_epsg(4269).expect("should find NAD83");
+        let geographic = source_horizontal.as_geographic().unwrap().clone();
+        let horizontal = crate::HorizontalCrsDef::Geographic(geographic.clone());
+        let source_vertical = VerticalCrsDef::ellipsoidal_height(
+            0,
+            geographic.datum().clone(),
+            crate::LinearUnit::metre(),
+            "NAD83 ellipsoidal height",
+        );
+        let source = CrsDef::Compound(Box::new(crate::CompoundCrsDef::new(
+            0,
+            horizontal.clone(),
+            source_vertical,
+            "NAD83 + ellipsoidal height",
+        )));
+        let target = CrsDef::Compound(Box::new(crate::CompoundCrsDef::new(
+            0,
+            horizontal,
+            lookup_vertical_epsg(5703).unwrap(),
+            "NAD83 + NAVD88 height",
+        )));
+
+        let operations = vertical_grid_operations_between(&source, &target);
+        assert!(!operations.is_empty());
+        assert!(operations
+            .iter()
+            .any(|operation| operation.target_vertical_crs_epsg == Some(5703)
+                && operation.grid.format == crate::grid::GridFormat::Gtx));
+    }
+
+    #[test]
     fn embedded_registry_provenance_reports_source_database() {
         let value: serde_json::Value =
             serde_json::from_str(embedded_registry_provenance_json()).unwrap();
-        assert_eq!(value["schema_version"], 2);
+        assert_eq!(value["schema_version"], 3);
         assert_eq!(
             value["source_database"]["metadata"]["PROJ.VERSION"],
             "9.6.2"
@@ -208,7 +271,8 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 883878);
+        assert_eq!(value["output"]["byte_len"], 887960);
+        assert_eq!(value["counts"]["vertical_operations"], 25);
         assert!(value["output"]["sha256"]
             .as_str()
             .unwrap()

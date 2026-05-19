@@ -7,6 +7,7 @@ use crate::grid::{GridDefinition, GridFormat};
 use crate::operation::{
     AreaOfUse, CoordinateOperation, CoordinateOperationId, GridId, GridInterpolation,
     GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep, OperationStepDirection,
+    VerticalGridOffsetConvention, VerticalGridOperation,
 };
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
@@ -16,8 +17,8 @@ static EPSG_DATA: &[u8] = include_bytes!("../data/epsg.bin");
 pub(crate) const PROVENANCE_JSON: &str = include_str!("../data/epsg.provenance.json");
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 6;
-const HEADER_SIZE: usize = 36;
+const VERSION: u16 = 7;
+const HEADER_SIZE: usize = 40;
 
 const ELLIPSOID_RECORD_SIZE: usize = 20;
 const DATUM_RECORD_SIZE: usize = 72;
@@ -52,7 +53,9 @@ const FLAG_PREFERRED: u8 = 1 << 1;
 const FLAG_APPROXIMATE: u8 = 1 << 2;
 
 const GRID_FORMAT_NTV2: u8 = 1;
+const GRID_FORMAT_GTX: u8 = 2;
 const GRID_INTERPOLATION_BILINEAR: u8 = 1;
+const VERTICAL_OFFSET_GEOID_HEIGHT_METERS: u8 = 1;
 
 #[derive(Clone)]
 struct GeographicRecord {
@@ -76,8 +79,17 @@ struct RegistryDb {
     projected_crs: BTreeMap<u32, ProjectedRecord>,
     grids: BTreeMap<u32, GridDefinition>,
     operations: BTreeMap<u32, CoordinateOperation>,
+    vertical_grid_operations: BTreeMap<u32, RegistryVerticalGridOperation>,
     operation_ids_by_crs_pair: HashMap<(u32, u32), Vec<u32>>,
     operation_ids_by_datum_pair: HashMap<(u32, u32), Vec<u32>>,
+}
+
+#[derive(Clone)]
+struct RegistryVerticalGridOperation {
+    operation: VerticalGridOperation,
+    source_horizontal_crs_epsg: Option<u32>,
+    target_horizontal_crs_epsg: Option<u32>,
+    deprecated: bool,
 }
 
 fn db() -> &'static RegistryDb {
@@ -101,6 +113,7 @@ fn parse_db() -> RegistryDb {
     let num_extents = read_u32(EPSG_DATA, 24) as usize;
     let num_grids = read_u32(EPSG_DATA, 28) as usize;
     let num_operations = read_u32(EPSG_DATA, 32) as usize;
+    let num_vertical_operations = read_u32(EPSG_DATA, 36) as usize;
 
     let mut offset = HEADER_SIZE;
 
@@ -219,6 +232,7 @@ fn parse_db() -> RegistryDb {
         let id = read_u32(EPSG_DATA, offset);
         let format = match EPSG_DATA[offset + 4] {
             GRID_FORMAT_NTV2 => GridFormat::Ntv2,
+            GRID_FORMAT_GTX => GridFormat::Gtx,
             _ => GridFormat::Unsupported,
         };
         let interpolation = match EPSG_DATA[offset + 5] {
@@ -360,6 +374,69 @@ fn parse_db() -> RegistryDb {
         offset = cursor;
     }
 
+    let mut vertical_grid_operations = BTreeMap::new();
+    for _ in 0..num_vertical_operations {
+        let id = read_u32(EPSG_DATA, offset);
+        let flags = EPSG_DATA[offset + 4];
+        let offset_convention = match EPSG_DATA[offset + 5] {
+            VERTICAL_OFFSET_GEOID_HEIGHT_METERS => VerticalGridOffsetConvention::GeoidHeightMeters,
+            other => panic!("unsupported vertical grid offset convention {other}"),
+        };
+        let area_count = read_u16(EPSG_DATA, offset + 6) as usize;
+        let source_horizontal_crs_epsg = opt_code(read_u32(EPSG_DATA, offset + 8));
+        let target_horizontal_crs_epsg = opt_code(read_u32(EPSG_DATA, offset + 12));
+        let grid_horizontal_crs_epsg = opt_code(read_u32(EPSG_DATA, offset + 16));
+        let source_vertical_crs_epsg = opt_code(read_u32(EPSG_DATA, offset + 20));
+        let target_vertical_crs_epsg = opt_code(read_u32(EPSG_DATA, offset + 24));
+        let source_vertical_datum_epsg = opt_code(read_u32(EPSG_DATA, offset + 28));
+        let target_vertical_datum_epsg = opt_code(read_u32(EPSG_DATA, offset + 32));
+        let grid_id = read_u32(EPSG_DATA, offset + 36);
+        let accuracy = read_f64(EPSG_DATA, offset + 40);
+        let name_len = read_u16(EPSG_DATA, offset + 48) as usize;
+        let mut cursor = offset + 50;
+        let name = read_string(EPSG_DATA, cursor, name_len);
+        cursor += name_len;
+        let mut area_of_use = None;
+        for index in 0..area_count {
+            let area_code = read_u32(EPSG_DATA, cursor);
+            cursor += 4;
+            if index == 0 {
+                area_of_use = extents.get(&area_code).cloned();
+            }
+        }
+        let grid = grids
+            .get(&grid_id)
+            .unwrap_or_else(|| panic!("missing vertical grid definition {grid_id}"))
+            .clone();
+
+        vertical_grid_operations.insert(
+            id,
+            RegistryVerticalGridOperation {
+                operation: VerticalGridOperation {
+                    name,
+                    grid,
+                    grid_horizontal_crs_epsg,
+                    source_vertical_crs_epsg,
+                    target_vertical_crs_epsg,
+                    source_vertical_datum_epsg,
+                    target_vertical_datum_epsg,
+                    accuracy: if accuracy.is_nan() {
+                        None
+                    } else {
+                        Some(OperationAccuracy { meters: accuracy })
+                    },
+                    area_of_use,
+                    offset_convention,
+                },
+                source_horizontal_crs_epsg,
+                target_horizontal_crs_epsg,
+                deprecated: flags & FLAG_DEPRECATED != 0,
+            },
+        );
+
+        offset = cursor;
+    }
+
     let mut operation_ids_by_crs_pair = HashMap::new();
     let mut operation_ids_by_datum_pair = HashMap::new();
     for operation in operations.values() {
@@ -386,6 +463,7 @@ fn parse_db() -> RegistryDb {
         projected_crs,
         grids,
         operations,
+        vertical_grid_operations,
         operation_ids_by_crs_pair,
         operation_ids_by_datum_pair,
     }
@@ -643,6 +721,51 @@ pub(crate) fn lookup_operation(code: u32) -> Option<CoordinateOperation> {
     db().operations.get(&code).cloned()
 }
 
+pub(crate) fn lookup_vertical_grid_operation(code: u32) -> Option<VerticalGridOperation> {
+    db().vertical_grid_operations
+        .get(&code)
+        .map(|record| record.operation.clone())
+}
+
+pub(crate) fn vertical_grid_operations_between(
+    source: &CrsDef,
+    target: &CrsDef,
+) -> Vec<VerticalGridOperation> {
+    let (Some(source_vertical), Some(target_vertical)) =
+        (source.vertical_crs(), target.vertical_crs())
+    else {
+        return Vec::new();
+    };
+
+    let mut matches = Vec::new();
+    for record in db().vertical_grid_operations.values() {
+        if vertical_operation_matches(&record.operation, source_vertical, target_vertical)
+            && horizontal_filter_matches(record.source_horizontal_crs_epsg, source)
+            && horizontal_filter_matches(record.target_horizontal_crs_epsg, target)
+        {
+            matches.push((record.deprecated, record.operation.clone()));
+            continue;
+        }
+
+        let inverse = record.operation.inverse();
+        let reverse_source_horizontal = record
+            .target_horizontal_crs_epsg
+            .or(record.source_horizontal_crs_epsg);
+        if vertical_operation_matches(&inverse, source_vertical, target_vertical)
+            && horizontal_filter_matches(reverse_source_horizontal, source)
+            && horizontal_filter_matches(record.source_horizontal_crs_epsg, target)
+        {
+            matches.push((record.deprecated, inverse));
+        }
+    }
+
+    matches.sort_by(|left, right| left.0.cmp(&right.0));
+    matches
+        .into_iter()
+        .map(|(_, operation)| operation)
+        .collect()
+}
+
 pub(crate) fn related_operations(
     source_geo: Option<u32>,
     target_geo: Option<u32>,
@@ -714,6 +837,32 @@ pub(crate) fn forward_operations(
 
 pub(crate) fn lookup_grid(code: u32) -> Option<GridDefinition> {
     db().grids.get(&code).cloned()
+}
+
+fn vertical_operation_matches(
+    operation: &VerticalGridOperation,
+    source: &VerticalCrsDef,
+    target: &VerticalCrsDef,
+) -> bool {
+    vertical_crs_filter_matches(operation.source_vertical_crs_epsg, source)
+        && vertical_crs_filter_matches(operation.target_vertical_crs_epsg, target)
+        && vertical_datum_filter_matches(operation.source_vertical_datum_epsg, source)
+        && vertical_datum_filter_matches(operation.target_vertical_datum_epsg, target)
+}
+
+fn vertical_crs_filter_matches(filter: Option<u32>, vertical: &VerticalCrsDef) -> bool {
+    filter.is_none_or(|epsg| {
+        let vertical_epsg = vertical.epsg();
+        vertical_epsg != 0 && vertical_epsg == epsg
+    })
+}
+
+fn vertical_datum_filter_matches(filter: Option<u32>, vertical: &VerticalCrsDef) -> bool {
+    filter.is_none_or(|epsg| vertical.vertical_datum_epsg() == Some(epsg))
+}
+
+fn horizontal_filter_matches(filter: Option<u32>, crs: &CrsDef) -> bool {
+    filter.is_none_or(|epsg| crs.base_geographic_crs_epsg() == Some(epsg))
 }
 
 fn extend_index_hits(ids: &mut Vec<u32>, index: &HashMap<(u32, u32), Vec<u32>>, key: (u32, u32)) {

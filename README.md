@@ -18,7 +18,7 @@ This workspace currently contains:
 
 Current non-goals for the `0.6` release line include:
 
-- packaged vertical grid assets, broad vertical operation selection, cross-datum vertical, or time-dependent CRS transformation operations
+- packaged vertical grid assets, unsupported vertical grid formats, cross-datum vertical, or time-dependent CRS transformation operations
 - arbitrary user-defined PROJ pipeline parsing/execution beyond the supported CRS and operation model
 - full EPSG/PROJ registry coverage outside the implemented projection families and embedded operation set
 - full custom CRS coverage for arbitrary axis-order, prime-meridian, and geographic angular-unit semantics
@@ -56,7 +56,7 @@ assert!(projected_bounds.max_x > projected_bounds.min_x);
 ```
 
 Coordinates use the CRS's native units: degrees for geographic CRS, and the CRS's declared linear unit for projected CRS (for example meters or US survey feet).
-For `convert_3d()`, the `z` component is preserved unchanged when neither CRS declares an explicit vertical component or both CRS definitions declare the same vertical component in the same unit. When both CRS definitions declare the same vertical reference frame with different linear units, `z` is converted between those units. Grid/geoid-backed ellipsoidal-to-gravity height transforms require an explicit `VerticalGridOperation` and caller-supplied grid resources; otherwise they are rejected.
+For `convert_3d()`, the `z` component is preserved unchanged when neither CRS declares an explicit vertical component or both CRS definitions declare the same vertical component in the same unit. When both CRS definitions declare the same vertical reference frame with different linear units, `z` is converted between those units. Registry-backed GTX geoid operations can be selected automatically for supported ellipsoidal-to-gravity height CRS pairs, but the grid files themselves are not packaged; callers must supply them with `FilesystemGridProvider` or another `GridProvider`.
 
 ## Supported Input Formats
 
@@ -102,7 +102,7 @@ Use `SelectionOptions::new()` with fluent builders such as `.with_area_of_intere
 
 The default `SelectionPolicy::BestAvailable` does not synthesize approximate Helmert datum-shift fallbacks. If a custom CRS pair has no supported registry/grid operation and an approximate Helmert shift derived from datum metadata is acceptable, opt in with `.allow_approximate_helmert_fallback()`. Approximate fallback operations are reported with `approximate = true` in operation metadata and selection diagnostics.
 
-Use `Transform::selected_operation()`, `Transform::selection_diagnostics()`, `Transform::vertical_diagnostics()`, `registry::operation_candidates_between()`, and `lookup_operation()` when you need deterministic operation inspection including operation direction. NTv2 horizontal grid-backed transforms are supported through the embedded registry, parsed PROJ `+nadgrids` custom CRS definitions, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations. Vertical same-reference unit conversion is supported. NOAA/VDatum binary GTX vertical grids are supported through `FilesystemGridProvider` or a custom `GridProvider` when the caller supplies an explicit `VerticalGridOperation`; vertical grid selection honors the operation area of use, falls back across candidate grids after coverage misses, and reports resolved grid SHA-256 checksums in diagnostics. Packaged geoid grid assets and broad vertical operation selection remain outside the default registry.
+Use `Transform::selected_operation()`, `Transform::selection_diagnostics()`, `Transform::vertical_diagnostics()`, `registry::operation_candidates_between()`, `registry::vertical_grid_operations_between()`, `lookup_operation()`, and `lookup_vertical_grid_operation()` when you need deterministic operation inspection including operation direction. NTv2 horizontal grid-backed transforms are supported through the embedded registry, parsed PROJ `+nadgrids` custom CRS definitions, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations. Vertical same-reference unit conversion is supported. Registry-backed GTX geoid operations are selected for supported ellipsoidal-to-gravity height pairs and still resolve grid files through `FilesystemGridProvider` or a custom `GridProvider`; explicit `VerticalGridOperation` values remain available for custom grids. Vertical grid selection honors operation area of use, falls back across candidate grids after coverage misses, and reports selected operation metadata plus resolved grid SHA-256 checksums in diagnostics. Packaged geoid grid assets remain outside the registry.
 
 Use `AreaOfInterest::geographic_wrapped_bounds(...)` for geographic AOI boxes crossing the antimeridian (`west > east`) and `Transform::transform_geographic_wrapped_bounds(...)` to reproject such source-geographic bounds. Normal `Bounds::is_valid()` and projected/source/target AOI bounds remain strict and require `min <= max`.
 
