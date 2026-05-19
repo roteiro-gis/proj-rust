@@ -2228,7 +2228,7 @@ mod tests {
     };
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
-    use std::sync::Arc;
+    use std::sync::{Arc, Barrier};
 
     const US_FOOT_TO_METER: f64 = 0.3048006096012192;
     static TEMP_GRID_COUNTER: AtomicUsize = AtomicUsize::new(0);
@@ -3035,6 +3035,58 @@ mod tests {
         assert!((roundtrip.0 - -74.5).abs() < 1e-6);
         assert!((roundtrip.1 - 40.5).abs() < 1e-6);
         assert!((roundtrip.2 - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn parallel_transform_construction_with_shared_grid_provider_does_not_deadlock() {
+        const THREADS: usize = 8;
+
+        let grid_root = write_test_gtx(&[-30.0, -30.0, -30.0, -30.0]);
+        let provider: Arc<dyn crate::grid::GridProvider> =
+            Arc::new(FilesystemGridProvider::new(vec![grid_root]));
+        let source = registry::lookup_epsg(4979).unwrap();
+        let horizontal =
+            HorizontalCrsDef::Geographic(GeographicCrsDef::new(4326, datum::WGS84, "WGS 84"));
+        let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal,
+            registry::lookup_vertical_epsg(5703).unwrap(),
+            "WGS 84 + NAVD88 height",
+        )));
+        let barrier = Arc::new(Barrier::new(THREADS));
+
+        let results = std::thread::scope(|scope| {
+            let mut joins = Vec::new();
+            for _ in 0..THREADS {
+                let source = source.clone();
+                let target = target.clone();
+                let provider = Arc::clone(&provider);
+                let barrier = Arc::clone(&barrier);
+                joins.push(scope.spawn(move || {
+                    barrier.wait();
+                    let t = Transform::from_crs_defs_with_selection_options(
+                        &source,
+                        &target,
+                        SelectionOptions {
+                            grid_provider: Some(provider),
+                            vertical_grid_operations: vec![test_vertical_grid_operation()],
+                            ..SelectionOptions::default()
+                        },
+                    )
+                    .unwrap();
+                    t.convert_3d((-74.5, 40.5, 100.0)).unwrap()
+                }));
+            }
+
+            joins
+                .into_iter()
+                .map(|join| join.join().unwrap())
+                .collect::<Vec<_>>()
+        });
+
+        for result in results {
+            assert!((result.2 - 130.0).abs() < 1e-9);
+        }
     }
 
     #[test]
