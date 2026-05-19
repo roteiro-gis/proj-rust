@@ -132,8 +132,8 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
 }
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 6;
-const PROVENANCE_SCHEMA_VERSION: u16 = 2;
+const VERSION: u16 = 7;
+const PROVENANCE_SCHEMA_VERSION: u16 = 3;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 const CANONICAL_FLOAT_DECIMAL_PLACES: usize = 13;
 
@@ -164,11 +164,14 @@ const OP_HELMERT: u8 = 1;
 const OP_GRID_SHIFT: u8 = 2;
 const OP_CONCATENATED: u8 = 3;
 
+const VERTICAL_OFFSET_GEOID_HEIGHT_METERS: u8 = 1;
+
 const FLAG_DEPRECATED: u8 = 1 << 0;
 const FLAG_PREFERRED: u8 = 1 << 1;
 const FLAG_APPROXIMATE: u8 = 1 << 2;
 
 const GRID_FORMAT_NTV2: u8 = 1;
+const GRID_FORMAT_GTX: u8 = 2;
 const GRID_FORMAT_UNSUPPORTED: u8 = 255;
 
 const GRID_INTERPOLATION_BILINEAR: u8 = 1;
@@ -220,6 +223,7 @@ struct RegistryCounts {
     extents: usize,
     grid_resources: usize,
     operations: usize,
+    vertical_operations: usize,
 }
 
 const LAT_ORIGIN: i64 = 8801;
@@ -320,6 +324,24 @@ struct OperationRecord {
     approximate: bool,
     area_codes: Vec<u32>,
     payload: OperationPayload,
+}
+
+#[derive(Clone)]
+struct VerticalOperationRecord {
+    table_name: &'static str,
+    code: u32,
+    name: String,
+    source_horizontal_crs_code: u32,
+    target_horizontal_crs_code: u32,
+    grid_horizontal_crs_code: u32,
+    source_vertical_crs_code: u32,
+    target_vertical_crs_code: u32,
+    source_vertical_datum_code: u32,
+    target_vertical_datum_code: u32,
+    grid_id: u32,
+    accuracy: Option<f64>,
+    deprecated: bool,
+    area_codes: Vec<u32>,
 }
 
 fn method_code_to_id(code: i64) -> Option<u8> {
@@ -530,6 +552,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
 fn grid_format_from_method(method_name: &str) -> u8 {
     if method_name == "NTv2" {
         GRID_FORMAT_NTV2
+    } else if method_name.to_ascii_lowercase().contains("(gtx)") {
+        GRID_FORMAT_GTX
     } else {
         GRID_FORMAT_UNSUPPORTED
     }
@@ -685,6 +709,7 @@ fn supported_projection_methods() -> BTreeMap<String, u8> {
 
 fn supported_grid_formats() -> BTreeMap<String, u8> {
     named_codes(&[
+        ("GTX", GRID_FORMAT_GTX),
         ("NTv2", GRID_FORMAT_NTV2),
         ("Unsupported", GRID_FORMAT_UNSUPPORTED),
     ])
@@ -968,6 +993,10 @@ fn main() {
         .collect()
     };
     let geo_codes: BTreeSet<u32> = geo_crs.iter().map(|crs| crs.code).collect();
+    let mut geo_2d_by_datum: BTreeMap<u32, u32> = BTreeMap::new();
+    for crs in &geo_crs {
+        geo_2d_by_datum.entry(crs.datum_code).or_insert(crs.code);
+    }
 
     let mut proj_crs: Vec<ProjCrs> = Vec::new();
     {
@@ -1108,6 +1137,7 @@ fn main() {
     let mut grid_resources: Vec<GridRecord> = Vec::new();
     let mut grid_resource_ids: BTreeMap<(String, String, String), u32> = BTreeMap::new();
     let mut operations: Vec<OperationRecord> = Vec::new();
+    let mut vertical_operations: Vec<VerticalOperationRecord> = Vec::new();
 
     {
         let mut stmt = conn
@@ -1209,6 +1239,140 @@ fn main() {
                     direction: 0,
                     interpolation: GRID_INTERPOLATION_BILINEAR,
                 },
+            });
+        }
+    }
+
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT CAST(gt.code AS TEXT),
+                        gt.name,
+                        CAST(gt.source_crs_code AS TEXT),
+                        src.type,
+                        src.datum_code,
+                        COALESCE(CAST(tgt_v.code AS TEXT), CAST(comp_v.code AS TEXT), ''),
+                        COALESCE(tgt_v.datum_code, comp_v.datum_code),
+                        COALESCE(CAST(cc.horiz_crs_code AS TEXT), ''),
+                        gt.accuracy,
+                        gt.method_name,
+                        gt.grid_name,
+                        COALESCE(gt.grid2_name, ''),
+                        COALESCE(CAST(gt.interpolation_crs_code AS TEXT), ''),
+                        gt.deprecated
+                 FROM grid_transformation gt
+                 JOIN geodetic_crs src
+                   ON src.auth_name = gt.source_crs_auth_name
+                  AND src.code = gt.source_crs_code
+                  AND src.type IN ('geographic 2D', 'geographic 3D')
+                 LEFT JOIN vertical_crs tgt_v
+                   ON tgt_v.auth_name = gt.target_crs_auth_name
+                  AND tgt_v.code = gt.target_crs_code
+                 LEFT JOIN compound_crs cc
+                   ON cc.auth_name = gt.target_crs_auth_name
+                  AND cc.code = gt.target_crs_code
+                 LEFT JOIN vertical_crs comp_v
+                   ON comp_v.auth_name = cc.vertical_crs_auth_name
+                  AND comp_v.code = cc.vertical_crs_code
+                 WHERE gt.auth_name='EPSG'
+                   AND gt.source_crs_auth_name='EPSG'
+                   AND gt.target_crs_auth_name='EPSG'
+                   AND gt.method_name LIKE '%GravityRelatedHeight%'
+                 ORDER BY CAST(gt.code AS INTEGER)",
+            )
+            .unwrap();
+        for row in stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, u32>(4)?,
+                    row.get::<_, String>(5)?,
+                    row.get::<_, Option<u32>>(6)?,
+                    row.get::<_, String>(7)?,
+                    row.get::<_, Option<f64>>(8)?,
+                    row.get::<_, String>(9)?,
+                    row.get::<_, String>(10)?,
+                    row.get::<_, String>(11)?,
+                    row.get::<_, String>(12)?,
+                    row.get::<_, bool>(13)?,
+                ))
+            })
+            .unwrap()
+            .flatten()
+        {
+            let Some(code) = parse_u32_code(&row.0) else {
+                continue;
+            };
+            let Some(source_crs_code) = parse_u32_code(&row.2) else {
+                continue;
+            };
+            let Some(target_vertical_crs_code) = parse_u32_code(&row.5) else {
+                continue;
+            };
+            let Some(target_vertical_datum_code) = row.6 else {
+                continue;
+            };
+            let format = grid_format_from_method(&row.9);
+            if format == GRID_FORMAT_UNSUPPORTED {
+                continue;
+            }
+
+            let source_horizontal_crs_code = if row.3 == "geographic 2D" {
+                source_crs_code
+            } else {
+                match geo_2d_by_datum.get(&row.4).copied() {
+                    Some(code) => code,
+                    None => continue,
+                }
+            };
+            let target_horizontal_crs_code = parse_u32_code(&row.7).unwrap_or(0);
+            let default_grid_horizontal_crs_code = if target_horizontal_crs_code != 0 {
+                target_horizontal_crs_code
+            } else {
+                source_horizontal_crs_code
+            };
+            let grid_horizontal_crs_code =
+                parse_u32_code(&row.12).unwrap_or(default_grid_horizontal_crs_code);
+
+            let grid_key = (row.9.clone(), row.10.clone(), row.11.clone());
+            let grid_id = if let Some(id) = grid_resource_ids.get(&grid_key).copied() {
+                id
+            } else {
+                let id = grid_resources.len() as u32 + 1;
+                let mut resource_names = vec![row.10.clone()];
+                if !row.11.is_empty() {
+                    resource_names.push(row.11.clone());
+                }
+                grid_resources.push(GridRecord {
+                    id,
+                    name: row.10.clone(),
+                    format,
+                    interpolation: GRID_INTERPOLATION_BILINEAR,
+                    area_code: 0,
+                    resource_names,
+                });
+                grid_resource_ids.insert(grid_key, id);
+                id
+            };
+
+            vertical_operations.push(VerticalOperationRecord {
+                table_name: "grid_transformation",
+                code,
+                name: row.1,
+                source_horizontal_crs_code,
+                target_horizontal_crs_code,
+                grid_horizontal_crs_code,
+                source_vertical_crs_code: 0,
+                target_vertical_crs_code,
+                source_vertical_datum_code: 0,
+                target_vertical_datum_code,
+                grid_id,
+                accuracy: row.8,
+                deprecated: row.13,
+                area_codes: Vec::new(),
             });
         }
     }
@@ -1452,6 +1616,11 @@ fn main() {
         .enumerate()
         .map(|(index, operation)| ((operation.table_name, operation.code), index))
         .collect();
+    let vertical_operation_lookup: BTreeMap<(&'static str, u32), usize> = vertical_operations
+        .iter()
+        .enumerate()
+        .map(|(index, operation)| ((operation.table_name, operation.code), index))
+        .collect();
     {
         let mut stmt = conn
             .prepare(
@@ -1497,10 +1666,18 @@ fn main() {
                 continue;
             };
             let table_name = row.0.as_str();
-            let Some(&index) = operation_lookup.get(&(table_name, operation_code)) else {
+            let mut used = false;
+            if let Some(&index) = operation_lookup.get(&(table_name, operation_code)) {
+                operations[index].area_codes.push(extent_code);
+                used = true;
+            }
+            if let Some(&index) = vertical_operation_lookup.get(&(table_name, operation_code)) {
+                vertical_operations[index].area_codes.push(extent_code);
+                used = true;
+            }
+            if !used {
                 continue;
-            };
-            operations[index].area_codes.push(extent_code);
+            }
             extent_records.entry(extent_code).or_insert(ExtentRecord {
                 code: extent_code,
                 name: row.3,
@@ -1515,6 +1692,10 @@ fn main() {
         operation.area_codes.sort_unstable();
         operation.area_codes.dedup();
     }
+    for operation in &mut vertical_operations {
+        operation.area_codes.sort_unstable();
+        operation.area_codes.dedup();
+    }
 
     let mut grid_area_by_id: BTreeMap<u32, u32> = BTreeMap::new();
     for operation in &operations {
@@ -1522,6 +1703,13 @@ fn main() {
             if let Some(area_code) = operation.area_codes.first().copied() {
                 grid_area_by_id.entry(grid_id).or_insert(area_code);
             }
+        }
+    }
+    for operation in &vertical_operations {
+        if let Some(area_code) = operation.area_codes.first().copied() {
+            grid_area_by_id
+                .entry(operation.grid_id)
+                .or_insert(area_code);
         }
     }
     for grid in &mut grid_resources {
@@ -1537,6 +1725,7 @@ fn main() {
     eprintln!("Extents: {}", extent_list.len());
     eprintln!("Grid resources: {}", grid_resources.len());
     eprintln!("Operations: {}", operations.len());
+    eprintln!("Vertical operations: {}", vertical_operations.len());
 
     let counts = RegistryCounts {
         ellipsoids: used_ellipsoids.len(),
@@ -1546,6 +1735,7 @@ fn main() {
         extents: extent_list.len(),
         grid_resources: grid_resources.len(),
         operations: operations.len(),
+        vertical_operations: vertical_operations.len(),
     };
 
     let mut buf = Vec::<u8>::new();
@@ -1559,6 +1749,7 @@ fn main() {
     buf.extend_from_slice(&(extent_list.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(grid_resources.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(operations.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(vertical_operations.len() as u32).to_le_bytes());
 
     for (code, a, inv_f) in &used_ellipsoids {
         let mut rec = [0u8; ELLIPSOID_RECORD_SIZE];
@@ -1680,6 +1871,30 @@ fn main() {
                     buf.extend_from_slice(&[0u8; 3]);
                 }
             }
+        }
+    }
+
+    for operation in &vertical_operations {
+        buf.extend_from_slice(&operation.code.to_le_bytes());
+        let mut flags = 0u8;
+        if operation.deprecated {
+            flags |= FLAG_DEPRECATED;
+        }
+        buf.push(flags);
+        buf.push(VERTICAL_OFFSET_GEOID_HEIGHT_METERS);
+        buf.extend_from_slice(&(operation.area_codes.len() as u16).to_le_bytes());
+        buf.extend_from_slice(&operation.source_horizontal_crs_code.to_le_bytes());
+        buf.extend_from_slice(&operation.target_horizontal_crs_code.to_le_bytes());
+        buf.extend_from_slice(&operation.grid_horizontal_crs_code.to_le_bytes());
+        buf.extend_from_slice(&operation.source_vertical_crs_code.to_le_bytes());
+        buf.extend_from_slice(&operation.target_vertical_crs_code.to_le_bytes());
+        buf.extend_from_slice(&operation.source_vertical_datum_code.to_le_bytes());
+        buf.extend_from_slice(&operation.target_vertical_datum_code.to_le_bytes());
+        buf.extend_from_slice(&operation.grid_id.to_le_bytes());
+        write_optional_f64(&mut buf, operation.accuracy);
+        write_string_u16(&mut buf, &operation.name);
+        for area_code in &operation.area_codes {
+            buf.extend_from_slice(&area_code.to_le_bytes());
         }
     }
 

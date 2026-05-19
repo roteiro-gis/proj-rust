@@ -17,6 +17,7 @@ use crate::registry;
 use crate::selector;
 use crate::{ellipsoid, geocentric};
 use smallvec::SmallVec;
+use std::borrow::Cow;
 use std::sync::Arc;
 
 #[cfg(feature = "rayon")]
@@ -1274,8 +1275,14 @@ fn compile_vertical_grid_shifts(
 ) -> Result<Vec<CompiledVerticalGridShift>> {
     let area = selector::resolve_area_of_interest(source_crs, target_crs, options)?;
     let direction = vertical_grid_shift_direction(source_vertical, target_vertical)?;
-    let mut candidates =
-        matching_vertical_grid_operations(source_vertical, target_vertical, options, area.as_ref());
+    let mut candidates = matching_vertical_grid_operations(
+        source_crs,
+        target_crs,
+        source_vertical,
+        target_vertical,
+        options,
+        area.as_ref(),
+    );
 
     if matches!(options.policy, SelectionPolicy::RequireExactAreaMatch) && area.is_some() {
         candidates.retain(|candidate| candidate.area_of_use_match == Some(true));
@@ -1313,25 +1320,47 @@ fn compile_vertical_grid_shifts(
 }
 
 struct VerticalGridCandidate<'a> {
-    operation: &'a VerticalGridOperation,
+    operation: Cow<'a, VerticalGridOperation>,
     area_of_use_match: Option<bool>,
     grid_area_of_use_match: Option<bool>,
 }
 
 fn matching_vertical_grid_operations<'a>(
+    source_crs: &CrsDef,
+    target_crs: &CrsDef,
     source: &VerticalCrsDef,
     target: &VerticalCrsDef,
     options: &'a SelectionOptions,
     area: Option<&selector::ResolvedAreaOfInterest>,
 ) -> Vec<VerticalGridCandidate<'a>> {
-    options
-        .vertical_grid_operations
-        .iter()
+    if !options.vertical_grid_operations.is_empty() {
+        return options
+            .vertical_grid_operations
+            .iter()
+            .filter(|operation| vertical_grid_operation_matches(operation, source, target))
+            .map(|operation| VerticalGridCandidate {
+                operation: Cow::Borrowed(operation),
+                area_of_use_match: vertical_operation_area_match(operation, area),
+                grid_area_of_use_match: area_of_use_match(
+                    operation.grid.area_of_use.as_ref(),
+                    area,
+                ),
+            })
+            .collect();
+    }
+
+    registry::vertical_grid_operations_between(source_crs, target_crs)
+        .into_iter()
         .filter(|operation| vertical_grid_operation_matches(operation, source, target))
-        .map(|operation| VerticalGridCandidate {
-            operation,
-            area_of_use_match: vertical_operation_area_match(operation, area),
-            grid_area_of_use_match: area_of_use_match(operation.grid.area_of_use.as_ref(), area),
+        .map(|operation| {
+            let operation_area_match = vertical_operation_area_match(&operation, area);
+            let grid_area_of_use_match =
+                area_of_use_match(operation.grid.area_of_use.as_ref(), area);
+            VerticalGridCandidate {
+                operation: Cow::Owned(operation),
+                area_of_use_match: operation_area_match,
+                grid_area_of_use_match,
+            }
         })
         .collect()
 }
@@ -1369,7 +1398,7 @@ fn compile_vertical_grid_shift(
     options: &SelectionOptions,
     grid_runtime: &GridRuntime,
 ) -> Result<CompiledVerticalGridShift> {
-    let operation = candidate.operation;
+    let operation = candidate.operation.as_ref();
     match operation.offset_convention {
         VerticalGridOffsetConvention::GeoidHeightMeters => {}
     }
@@ -2226,6 +2255,7 @@ mod tests {
         SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention,
         VerticalGridOperation, VerticalTransformAction,
     };
+    use std::collections::BTreeSet;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, Barrier};
@@ -2265,6 +2295,71 @@ mod tests {
             std::fs::write(dir.join(name), bytes).unwrap();
         }
         dir
+    }
+
+    fn write_test_gtx_resource_names(
+        resource_names: impl IntoIterator<Item = String>,
+        west: f64,
+        south: f64,
+        values: &[f32],
+    ) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "proj-core-vertical-grid-{}-{}",
+            std::process::id(),
+            TEMP_GRID_COUNTER.fetch_add(1, Ordering::SeqCst)
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&south.to_be_bytes());
+        bytes.extend_from_slice(&west.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&2i32.to_be_bytes());
+        bytes.extend_from_slice(&2i32.to_be_bytes());
+        for value in values {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        for name in resource_names {
+            std::fs::write(dir.join(name), &bytes).unwrap();
+        }
+        dir
+    }
+
+    fn registry_vertical_grid_resource_names(
+        operations: &[VerticalGridOperation],
+    ) -> BTreeSet<String> {
+        operations
+            .iter()
+            .flat_map(|operation| operation.grid.resource_names.iter().cloned())
+            .collect()
+    }
+
+    fn nad83_ellipsoidal_to_navd88_pair() -> (CrsDef, CrsDef) {
+        let horizontal_crs = registry::lookup_epsg(4269).expect("NAD83 geographic CRS");
+        let geographic = horizontal_crs
+            .as_geographic()
+            .expect("NAD83 is geographic")
+            .clone();
+        let horizontal = HorizontalCrsDef::Geographic(geographic.clone());
+        let source_vertical = VerticalCrsDef::ellipsoidal_height(
+            0,
+            geographic.datum().clone(),
+            LinearUnit::metre(),
+            "NAD83 ellipsoidal height",
+        );
+        let source = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal.clone(),
+            source_vertical,
+            "NAD83 + ellipsoidal height",
+        )));
+        let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal,
+            registry::lookup_vertical_epsg(5703).unwrap(),
+            "NAD83 + NAVD88 height",
+        )));
+        (source, target)
     }
 
     fn test_vertical_grid_operation() -> VerticalGridOperation {
@@ -3035,6 +3130,81 @@ mod tests {
         assert!((roundtrip.0 - -74.5).abs() < 1e-6);
         assert!((roundtrip.1 - 40.5).abs() < 1e-6);
         assert!((roundtrip.2 - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn registry_vertical_grid_operation_transforms_without_manual_operation() {
+        let (source, target) = nad83_ellipsoidal_to_navd88_pair();
+        let operations = registry::vertical_grid_operations_between(&source, &target);
+        assert!(!operations.is_empty());
+        assert!(operations.iter().any(|operation| {
+            operation.grid.format == GridFormat::Gtx
+                && operation.target_vertical_crs_epsg == Some(5703)
+                && operation.target_vertical_datum_epsg == Some(5103)
+        }));
+        let grid_root = write_test_gtx_resource_names(
+            registry_vertical_grid_resource_names(&operations),
+            -75.0,
+            40.0,
+            &[-30.0, -30.0, -30.0, -30.0],
+        );
+
+        let t = Transform::from_crs_defs_with_selection_options(
+            &source,
+            &target,
+            SelectionOptions::new()
+                .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(-74.5, 40.5)))
+                .with_grid_provider(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+        )
+        .unwrap();
+
+        let outcome = t.convert_3d_with_diagnostics((-74.5, 40.5, 100.0)).unwrap();
+        assert!((outcome.coord.2 - 130.0).abs() < 1e-9);
+        assert_eq!(
+            outcome.vertical.action,
+            VerticalTransformAction::Transformed
+        );
+        assert_eq!(outcome.vertical.target_vertical_crs_epsg, Some(5703));
+        assert_eq!(outcome.vertical.target_vertical_datum_epsg, Some(5103));
+        assert!(outcome
+            .vertical
+            .operation_name
+            .as_deref()
+            .is_some_and(|name| name.contains("NAVD88")));
+        assert!(outcome.vertical.accuracy.is_some());
+        assert_eq!(outcome.vertical.area_of_use_match, Some(true));
+        assert!(outcome.vertical.area_of_use.is_some());
+        assert!(outcome.vertical.grids[0]
+            .checksum
+            .as_ref()
+            .unwrap()
+            .starts_with("sha256:"));
+        assert_eq!(
+            outcome.vertical.grids[0].accuracy,
+            outcome.vertical.accuracy
+        );
+
+        let inverse = t.inverse().unwrap();
+        let roundtrip = inverse.convert_3d(outcome.coord).unwrap();
+        assert!((roundtrip.0 - -74.5).abs() < 1e-9);
+        assert!((roundtrip.1 - 40.5).abs() < 1e-9);
+        assert!((roundtrip.2 - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn registry_vertical_grid_operation_reports_missing_grid_resource() {
+        let (source, target) = nad83_ellipsoidal_to_navd88_pair();
+
+        let err = expect_transform_error(Transform::from_crs_defs_with_selection_options(
+            &source,
+            &target,
+            SelectionOptions::new()
+                .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(-74.5, 40.5))),
+        ));
+
+        let message = err.to_string();
+        assert!(message.contains("unavailable"), "{message}");
+        assert!(message.contains("g2003u"), "{message}");
     }
 
     #[test]

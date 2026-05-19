@@ -19,9 +19,10 @@
 //! `convert_3d` preserves `z` when no explicit vertical CRS is present or when
 //! source and target compound CRS definitions have identical vertical
 //! components. It converts `z` units when both vertical components use the same
-//! vertical reference frame with different linear units. Grid/geoid height
-//! transformations require explicit vertical grid operations and caller-supplied
-//! grid resources; otherwise they are rejected.
+//! vertical reference frame with different linear units. Registry-backed GTX
+//! geoid operations can be selected for supported ellipsoidal-to-gravity height
+//! CRS pairs, while grid files still resolve through caller-supplied grid
+//! providers.
 //! Geographic antimeridian AOIs use
 //! [`AreaOfInterest::geographic_wrapped_bounds`], while ordinary projected and
 //! source/target bounds keep strict `min <= max` validation.
@@ -85,8 +86,9 @@ pub use operation::{
 };
 pub use registry::{
     lookup_authority_code, lookup_datum_epsg, lookup_epsg, lookup_operation, lookup_vertical_epsg,
-    operation_candidates_between, operation_candidates_between_with_selection_options,
-    operations_between,
+    lookup_vertical_grid_operation, operation_candidates_between,
+    operation_candidates_between_with_selection_options, operations_between,
+    vertical_grid_operations_between,
 };
 pub use transform::Transform;
 #[cfg(feature = "geo-types")]
