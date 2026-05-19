@@ -995,9 +995,7 @@ fn main() {
     let geo_codes: BTreeSet<u32> = geo_crs.iter().map(|crs| crs.code).collect();
     let mut geo_2d_by_datum: BTreeMap<u32, u32> = BTreeMap::new();
     for crs in &geo_crs {
-        geo_2d_by_datum
-            .entry(crs.datum_code)
-            .or_insert(crs.code);
+        geo_2d_by_datum.entry(crs.datum_code).or_insert(crs.code);
     }
 
     let mut proj_crs: Vec<ProjCrs> = Vec::new();

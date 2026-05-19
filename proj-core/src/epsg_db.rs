@@ -759,7 +759,7 @@ pub(crate) fn vertical_grid_operations_between(
         }
     }
 
-    matches.sort_by(|left, right| left.0.cmp(&right.0));
+    matches.sort_by_key(|left| left.0);
     matches
         .into_iter()
         .map(|(_, operation)| operation)
