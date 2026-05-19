@@ -1,7 +1,11 @@
 use crate::semantics::{
-    normalize_key, validate_supported_geographic_or_ellipsoidal_height_semantics,
-    validate_supported_geographic_semantics, validate_supported_projected_semantics, AxisDirection,
-    CoordinateSystemSpec, GeographicCoordinateSystemKind,
+    linear_unit_from_meters_per_unit, normalize_key, projection_parameter_unit_kind,
+    radians_to_degrees_factor, resolve_structured_datum,
+    validate_supported_geographic_or_ellipsoidal_height_semantics,
+    validate_supported_geographic_semantics, validate_supported_projected_semantics,
+    validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
+    AxisDirection, CoordinateSystemSpec, DatumAliasScope, GeographicCoordinateSystemKind,
+    ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, Result};
 use proj_core::{
@@ -588,23 +592,6 @@ fn parse_wkt_vertical(inner: &str) -> Result<VerticalCrsDef> {
     )?)
 }
 
-fn validate_vertical_unit_matches_authority(
-    context: &str,
-    declared_unit: LinearUnit,
-    canonical: &VerticalCrsDef,
-) -> Result<()> {
-    let declared = declared_unit.meters_per_unit();
-    let expected = canonical.linear_unit_to_meter();
-    if (declared - expected).abs() <= 1e-12 * declared.abs().max(expected.abs()).max(1.0) {
-        return Ok(());
-    }
-
-    Err(ParseError::UnsupportedSemantics(format!(
-        "{context} declares a vertical unit that conflicts with EPSG:{}",
-        canonical.epsg()
-    )))
-}
-
 fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
     let datum_inner = find_top_level_element_inner(
         inner,
@@ -625,7 +612,7 @@ fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
     let ellipsoid = parse_structured_ellipsoid(datum_inner)
         .ok_or_else(|| ParseError::Parse("WKT datum is missing a supported ellipsoid".into()))?;
 
-    resolve_structured_datum(&datum_name, &ellipsoid)
+    resolve_structured_datum(DatumAliasScope::Wkt, &datum_name, &ellipsoid)
         .ok_or_else(|| ParseError::Parse("unsupported or unrecognized WKT datum".into()))
 }
 
@@ -639,14 +626,6 @@ fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Re
             "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
         )))
     }
-}
-
-#[derive(Debug)]
-struct StructuredEllipsoid {
-    epsg: Option<u32>,
-    name: String,
-    semi_major_axis: f64,
-    inverse_flattening: f64,
 }
 
 fn parse_structured_ellipsoid(inner: &str) -> Option<StructuredEllipsoid> {
@@ -673,94 +652,6 @@ fn extract_top_level_epsg_from_inner(inner: &str) -> Option<u32> {
         }
     });
     found
-}
-
-fn resolve_structured_datum(
-    datum_name: &str,
-    ellipsoid: &StructuredEllipsoid,
-) -> Option<proj_core::Datum> {
-    let candidates = [
-        (
-            &["wgs84", "wgs1984", "worldgeodeticsystem1984"][..],
-            &["wgs84"][..],
-            proj_core::datum::WGS84,
-            Some(7030),
-        ),
-        (
-            &["northamericandatum1983", "nad83"][..],
-            &["grs1980", "grs80"][..],
-            proj_core::datum::NAD83,
-            Some(7019),
-        ),
-        (
-            &["northamericandatum1927", "nad27"][..],
-            &["clarke1866", "clrk66"][..],
-            proj_core::datum::NAD27,
-            Some(7008),
-        ),
-        (
-            &[
-                "europeanterrestrialreferencesystem1989ensemble",
-                "europeanterrestrialreferencesystem1989",
-                "etrs89",
-            ][..],
-            &["grs1980", "grs80"][..],
-            proj_core::datum::ETRS89,
-            Some(7019),
-        ),
-        (
-            &["ordnancesurveyofgreatbritain1936", "osgb36"][..],
-            &["airy1830", "airy"][..],
-            proj_core::datum::OSGB36,
-            Some(7001),
-        ),
-        (
-            &["europeandatum1950", "ed50"][..],
-            &["international1924", "intl1924", "intl"][..],
-            proj_core::datum::ED50,
-            Some(7022),
-        ),
-        (
-            &["pulkovo1942", "pulkovo1942(58)"][..],
-            &["krassowsky1940", "krassowsky", "krass"][..],
-            proj_core::datum::PULKOVO1942,
-            Some(7024),
-        ),
-        (
-            &["tokyo", "tokyodatum"][..],
-            &["bessel1841", "bessel"][..],
-            proj_core::datum::TOKYO,
-            Some(7004),
-        ),
-    ];
-
-    for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in candidates {
-        if datum_aliases.contains(&datum_name)
-            && ellipsoid_matches(ellipsoid, &datum, ellipsoid_aliases, ellipsoid_epsg)
-        {
-            return Some(datum);
-        }
-    }
-
-    None
-}
-
-fn ellipsoid_matches(
-    actual: &StructuredEllipsoid,
-    datum: &proj_core::Datum,
-    aliases: &[&str],
-    epsg: Option<u32>,
-) -> bool {
-    let expected_rf = if datum.ellipsoid.f == 0.0 {
-        0.0
-    } else {
-        1.0 / datum.ellipsoid.f
-    };
-
-    epsg.is_some_and(|expected| actual.epsg == Some(expected))
-        || (aliases.iter().any(|alias| *alias == actual.name)
-            && (actual.semi_major_axis - datum.ellipsoid.a).abs() < 1e-9
-            && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
 }
 
 /// Extract a quoted value like PROJECTION["Transverse_Mercator"].
@@ -800,14 +691,6 @@ fn parse_wkt_parameters(
     params
 }
 
-#[derive(Clone, Copy)]
-enum ParameterUnitKind {
-    Angle,
-    Length,
-    Scale,
-    Other,
-}
-
 fn parse_parameter_element(
     inner: &str,
     projected_linear_unit: LinearUnit,
@@ -821,7 +704,7 @@ fn parse_parameter_element(
     let name = trim_wkt_token(fields[0]);
     let normalized_name = normalize_key(name);
     let value = fields[1].trim().parse::<f64>().ok()?;
-    let unit_kind = parameter_unit_kind(&normalized_name);
+    let unit_kind = projection_parameter_unit_kind(&normalized_name);
 
     let nested_factor = fields.iter().skip(2).find_map(|field| {
         let field = field.trim();
@@ -835,62 +718,15 @@ fn parse_parameter_element(
     });
 
     let default_factor = match unit_kind {
-        ParameterUnitKind::Angle => base_angle_unit_to_degree,
-        ParameterUnitKind::Length => projected_linear_unit.meters_per_unit(),
-        ParameterUnitKind::Scale | ParameterUnitKind::Other => 1.0,
+        ProjectionParameterUnitKind::Angle => base_angle_unit_to_degree,
+        ProjectionParameterUnitKind::Length => projected_linear_unit.meters_per_unit(),
+        ProjectionParameterUnitKind::Scale | ProjectionParameterUnitKind::Other => 1.0,
     };
 
     Some((
         normalized_name,
         value * nested_factor.unwrap_or(default_factor),
     ))
-}
-
-fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
-    match normalized_name {
-        "centralmeridian"
-        | "longitudeofcenter"
-        | "longitudeofcentre"
-        | "longitudeofprojectioncenter"
-        | "longitudeofprojectioncentre"
-        | "longitudeofnaturalorigin"
-        | "longitudeoffalseorigin"
-        | "longitudeoforigin"
-        | "latitudeoforigin"
-        | "latitudeofcenter"
-        | "latitudeofcentre"
-        | "latitudeofprojectioncenter"
-        | "latitudeofprojectioncentre"
-        | "latitudeofnaturalorigin"
-        | "latitudeoffalseorigin"
-        | "azimuth"
-        | "azimuthinitialline"
-        | "azimuthofinitialline"
-        | "azimuthatprojectioncenter"
-        | "azimuthatprojectioncentre"
-        | "rectifiedgridangle"
-        | "anglefromrectifiedtoskewgrid"
-        | "standardparallel"
-        | "standardparallel1"
-        | "standardparallel2"
-        | "latitudeofstandardparallel"
-        | "latitudeof1ststandardparallel"
-        | "latitudeof2ndstandardparallel" => ParameterUnitKind::Angle,
-        "falseeasting"
-        | "falsenorthing"
-        | "eastingatfalseorigin"
-        | "northingatfalseorigin"
-        | "eastingatprojectioncenter"
-        | "eastingatprojectioncentre"
-        | "northingatprojectioncenter"
-        | "northingatprojectioncentre" => ParameterUnitKind::Length,
-        "scalefactor"
-        | "scalefactoratnaturalorigin"
-        | "scalefactoratprojectionorigin"
-        | "scalefactoratprojectioncenter"
-        | "scalefactoratprojectioncentre" => ParameterUnitKind::Scale,
-        _ => ParameterUnitKind::Other,
-    }
 }
 
 fn split_top_level_fields(s: &str) -> Vec<&str> {
@@ -934,8 +770,8 @@ fn extract_projected_linear_unit(inner: &str) -> Option<LinearUnit> {
     let mut linear_unit = None;
     for_each_top_level_element(inner, |name, element_inner| {
         if name.eq_ignore_ascii_case("UNIT") || name.eq_ignore_ascii_case("LENGTHUNIT") {
-            linear_unit = parse_unit_factor(element_inner)
-                .and_then(|factor| LinearUnit::from_meters_per_unit(factor).ok());
+            linear_unit =
+                parse_unit_factor(element_inner).and_then(linear_unit_from_meters_per_unit);
         }
     });
     linear_unit
@@ -1008,35 +844,6 @@ fn extract_coordinate_system(inner: &str) -> CoordinateSystemSpec {
     coordinate_system
 }
 
-fn validate_supported_vertical_coordinate_system(
-    context: &str,
-    coordinate_system: &CoordinateSystemSpec,
-) -> Result<()> {
-    if let Some(subtype) = &coordinate_system.subtype {
-        if normalize_key(subtype) != "vertical" {
-            return Err(ParseError::UnsupportedSemantics(format!(
-                "{context} uses unsupported coordinate system subtype `{subtype}`"
-            )));
-        }
-    }
-
-    if let Some(dimension) = coordinate_system.dimension {
-        if dimension != 1 {
-            return Err(ParseError::UnsupportedSemantics(format!(
-                "{context} uses {dimension} axes, but only 1D vertical coordinate systems are supported"
-            )));
-        }
-    }
-
-    if !coordinate_system.axes.is_empty() && coordinate_system.axes != [AxisDirection::Up] {
-        return Err(ParseError::UnsupportedSemantics(format!(
-            "{context} uses unsupported vertical axis direction; expected up"
-        )));
-    }
-
-    Ok(())
-}
-
 fn parse_axis_direction(inner: &str) -> AxisDirection {
     split_top_level_fields(inner)
         .get(1)
@@ -1075,8 +882,8 @@ fn extract_top_level_length_unit(inner: &str, include_legacy_unit: bool) -> Opti
         if name.eq_ignore_ascii_case("LENGTHUNIT")
             || (include_legacy_unit && name.eq_ignore_ascii_case("UNIT"))
         {
-            linear_unit = parse_unit_factor(element_inner)
-                .and_then(|factor| LinearUnit::from_meters_per_unit(factor).ok());
+            linear_unit =
+                parse_unit_factor(element_inner).and_then(linear_unit_from_meters_per_unit);
         }
     });
     linear_unit
@@ -1091,8 +898,7 @@ fn axis_linear_unit(axis_inner: &str) -> Option<LinearUnit> {
             if unit_name.eq_ignore_ascii_case("LENGTHUNIT")
                 || unit_name.eq_ignore_ascii_case("UNIT")
             {
-                parse_unit_factor(unit_inner)
-                    .and_then(|factor| LinearUnit::from_meters_per_unit(factor).ok())
+                parse_unit_factor(unit_inner).and_then(linear_unit_from_meters_per_unit)
             } else {
                 None
             }
@@ -1157,10 +963,6 @@ where
 fn parse_unit_factor(inner: &str) -> Option<f64> {
     let fields = split_top_level_fields(inner);
     fields.get(1)?.trim().parse::<f64>().ok()
-}
-
-fn radians_to_degrees_factor(radians_per_unit: f64) -> f64 {
-    radians_per_unit.to_degrees()
 }
 
 fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {

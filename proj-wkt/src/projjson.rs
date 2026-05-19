@@ -2,13 +2,17 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::semantics::{
-    approx_eq, normalize_key, validate_supported_geographic_or_ellipsoidal_height_semantics,
-    validate_supported_geographic_semantics, validate_supported_projected_semantics, AxisDirection,
-    CoordinateSystemSpec, GeographicCoordinateSystemKind,
+    angle_unit_name_to_degree, approx_eq, linear_unit_from_meters_per_unit, linear_unit_name,
+    normalize_key, projection_parameter_unit_kind, radians_to_degrees_factor, resolve_named_datum,
+    resolve_structured_datum, validate_supported_geographic_or_ellipsoidal_height_semantics,
+    validate_supported_geographic_semantics, validate_supported_projected_semantics,
+    validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
+    AxisDirection, CoordinateSystemSpec, DatumAliasScope, GeographicCoordinateSystemKind,
+    ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, Result};
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
+    CompoundCrsDef, CrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
     ProjectionMethod, VerticalCrsDef,
 };
 
@@ -418,23 +422,6 @@ fn parse_vertical_projjson(value: &Value) -> Result<VerticalCrsDef> {
     )?)
 }
 
-fn validate_vertical_unit_matches_authority(
-    context: &str,
-    declared_unit: LinearUnit,
-    canonical: &VerticalCrsDef,
-) -> Result<()> {
-    let declared = declared_unit.meters_per_unit();
-    let expected = canonical.linear_unit_to_meter();
-    if (declared - expected).abs() <= 1e-12 * declared.abs().max(expected.abs()).max(1.0) {
-        return Ok(());
-    }
-
-    Err(ParseError::UnsupportedSemantics(format!(
-        "{context} declares a vertical unit that conflicts with EPSG:{}",
-        canonical.epsg()
-    )))
-}
-
 fn top_level_epsg_id(value: &Value) -> Option<u32> {
     let id = value.get("id")?;
     let authority = id.get("authority")?.as_str()?;
@@ -486,7 +473,7 @@ fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Re
     }
 }
 
-fn infer_datum_from_json_crs(value: &Value) -> Result<Datum> {
+fn infer_datum_from_json_crs(value: &Value) -> Result<proj_core::Datum> {
     let datum_value = value
         .get("datum")
         .or_else(|| value.get("datum_ensemble"))
@@ -505,29 +492,16 @@ fn infer_datum_from_json_crs(value: &Value) -> Result<Datum> {
     let ellipsoid = parse_structured_ellipsoid_from_json(datum_value);
 
     match ellipsoid.as_ref() {
-        Some(ellipsoid) => resolve_structured_datum(&datum_name, ellipsoid).ok_or_else(|| {
-            ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
-        }),
-        None => resolve_named_datum(&datum_name).ok_or_else(|| {
+        Some(ellipsoid) => {
+            resolve_structured_datum(DatumAliasScope::ProjJson, &datum_name, ellipsoid).ok_or_else(
+                || ParseError::Parse("unsupported PROJJSON datum or CRS definition".into()),
+            )
+        }
+        None => resolve_named_datum(DatumAliasScope::ProjJson, &datum_name).ok_or_else(|| {
             ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
         }),
     }
 }
-
-#[derive(Debug)]
-struct StructuredEllipsoid {
-    epsg: Option<u32>,
-    name: String,
-    semi_major_axis: f64,
-    inverse_flattening: f64,
-}
-
-type DatumCandidate = (
-    &'static [&'static str],
-    &'static [&'static str],
-    Datum,
-    Option<u32>,
-);
 
 fn parse_structured_ellipsoid_from_json(value: &Value) -> Option<StructuredEllipsoid> {
     let ellipsoid = value.get("ellipsoid")?;
@@ -542,104 +516,6 @@ fn parse_structured_ellipsoid_from_json(value: &Value) -> Option<StructuredEllip
             .get("inverse_flattening")
             .and_then(Value::as_f64)?,
     })
-}
-
-fn resolve_structured_datum(datum_name: &str, ellipsoid: &StructuredEllipsoid) -> Option<Datum> {
-    for (datum_aliases, ellipsoid_aliases, datum, ellipsoid_epsg) in datum_candidates() {
-        if datum_aliases.contains(&datum_name)
-            && ellipsoid_matches(ellipsoid, &datum, ellipsoid_aliases, ellipsoid_epsg)
-        {
-            return Some(datum);
-        }
-    }
-
-    None
-}
-
-fn resolve_named_datum(datum_name: &str) -> Option<Datum> {
-    datum_candidates()
-        .iter()
-        .find_map(|(aliases, _, datum, _)| aliases.contains(&datum_name).then_some(datum.clone()))
-}
-
-fn datum_candidates() -> [DatumCandidate; 8] {
-    [
-        (
-            &[
-                "wgs84",
-                "wgs1984",
-                "worldgeodeticsystem1984",
-                "worldgeodeticsystem1984ensemble",
-            ][..],
-            &["wgs84"][..],
-            proj_core::datum::WGS84,
-            Some(7030),
-        ),
-        (
-            &["northamericandatum1983", "nad83"][..],
-            &["grs1980", "grs80"][..],
-            proj_core::datum::NAD83,
-            Some(7019),
-        ),
-        (
-            &["northamericandatum1927", "nad27"][..],
-            &["clarke1866", "clrk66"][..],
-            proj_core::datum::NAD27,
-            Some(7008),
-        ),
-        (
-            &[
-                "europeanterrestrialreferencesystem1989ensemble",
-                "europeanterrestrialreferencesystem1989",
-                "etrs89",
-            ][..],
-            &["grs1980", "grs80"][..],
-            proj_core::datum::ETRS89,
-            Some(7019),
-        ),
-        (
-            &["ordnancesurveyofgreatbritain1936", "osgb36"][..],
-            &["airy1830", "airy"][..],
-            proj_core::datum::OSGB36,
-            Some(7001),
-        ),
-        (
-            &["europeandatum1950", "ed50"][..],
-            &["international1924", "intl1924", "intl"][..],
-            proj_core::datum::ED50,
-            Some(7022),
-        ),
-        (
-            &["pulkovo1942", "pulkovo1942(58)"][..],
-            &["krassowsky1940", "krassowsky", "krass"][..],
-            proj_core::datum::PULKOVO1942,
-            Some(7024),
-        ),
-        (
-            &["tokyo", "tokyodatum"][..],
-            &["bessel1841", "bessel"][..],
-            proj_core::datum::TOKYO,
-            Some(7004),
-        ),
-    ]
-}
-
-fn ellipsoid_matches(
-    actual: &StructuredEllipsoid,
-    datum: &Datum,
-    aliases: &[&str],
-    epsg: Option<u32>,
-) -> bool {
-    let expected_rf = if datum.ellipsoid.f == 0.0 {
-        0.0
-    } else {
-        1.0 / datum.ellipsoid.f
-    };
-
-    epsg.is_some_and(|expected| actual.epsg == Some(expected))
-        || (aliases.iter().any(|alias| *alias == actual.name)
-            && (actual.semi_major_axis - datum.ellipsoid.a).abs() < 1e-9
-            && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
 }
 
 fn epsg_id_from_object(value: Option<&Value>) -> Option<u32> {
@@ -691,23 +567,15 @@ fn parse_parameters(
     params
 }
 
-#[derive(Clone, Copy)]
-enum ParameterUnitKind {
-    Angle,
-    Length,
-    Scale,
-    Other,
-}
-
 fn parameter_factor_from_json(
     param: &Value,
     normalized_name: &str,
     projected_linear_unit: LinearUnit,
     base_angle_unit_to_degree: f64,
 ) -> f64 {
-    let unit_kind = parameter_unit_kind(normalized_name);
+    let unit_kind = projection_parameter_unit_kind(normalized_name);
     match unit_kind {
-        ParameterUnitKind::Angle => param
+        ProjectionParameterUnitKind::Angle => param
             .get("unit")
             .and_then(angle_unit_to_degree_from_json)
             .or_else(|| {
@@ -723,61 +591,14 @@ fn parameter_factor_from_json(
                     .map(radians_to_degrees_factor)
             })
             .unwrap_or(base_angle_unit_to_degree),
-        ParameterUnitKind::Length => param
+        ProjectionParameterUnitKind::Length => param
             .get("unit")
             .and_then(linear_unit_from_json)
             .map(LinearUnit::meters_per_unit)
             .or_else(|| param.get("unit_conversion_factor").and_then(Value::as_f64))
             .or_else(|| param.get("conversion_factor").and_then(Value::as_f64))
             .unwrap_or(projected_linear_unit.meters_per_unit()),
-        ParameterUnitKind::Scale | ParameterUnitKind::Other => 1.0,
-    }
-}
-
-fn parameter_unit_kind(normalized_name: &str) -> ParameterUnitKind {
-    match normalized_name {
-        "centralmeridian"
-        | "longitudeofcenter"
-        | "longitudeofcentre"
-        | "longitudeofprojectioncenter"
-        | "longitudeofprojectioncentre"
-        | "longitudeofnaturalorigin"
-        | "longitudeoffalseorigin"
-        | "longitudeoforigin"
-        | "latitudeoforigin"
-        | "latitudeofcenter"
-        | "latitudeofcentre"
-        | "latitudeofprojectioncenter"
-        | "latitudeofprojectioncentre"
-        | "latitudeofnaturalorigin"
-        | "latitudeoffalseorigin"
-        | "azimuth"
-        | "azimuthinitialline"
-        | "azimuthofinitialline"
-        | "azimuthatprojectioncenter"
-        | "azimuthatprojectioncentre"
-        | "rectifiedgridangle"
-        | "anglefromrectifiedtoskewgrid"
-        | "standardparallel"
-        | "standardparallel1"
-        | "standardparallel2"
-        | "latitudeofstandardparallel"
-        | "latitudeof1ststandardparallel"
-        | "latitudeof2ndstandardparallel" => ParameterUnitKind::Angle,
-        "falseeasting"
-        | "falsenorthing"
-        | "eastingatfalseorigin"
-        | "northingatfalseorigin"
-        | "eastingatprojectioncenter"
-        | "eastingatprojectioncentre"
-        | "northingatprojectioncenter"
-        | "northingatprojectioncentre" => ParameterUnitKind::Length,
-        "scalefactor"
-        | "scalefactoratnaturalorigin"
-        | "scalefactoratprojectionorigin"
-        | "scalefactoratprojectioncenter"
-        | "scalefactoratprojectioncentre" => ParameterUnitKind::Scale,
-        _ => ParameterUnitKind::Other,
+        ProjectionParameterUnitKind::Scale | ProjectionParameterUnitKind::Other => 1.0,
     }
 }
 
@@ -867,35 +688,6 @@ fn coordinate_system_from_json(value: &Value) -> CoordinateSystemSpec {
     }
 }
 
-fn validate_supported_vertical_coordinate_system(
-    context: &str,
-    coordinate_system: &CoordinateSystemSpec,
-) -> Result<()> {
-    if let Some(subtype) = &coordinate_system.subtype {
-        if normalize_key(subtype) != "vertical" {
-            return Err(ParseError::UnsupportedSemantics(format!(
-                "{context} uses unsupported coordinate system subtype `{subtype}`"
-            )));
-        }
-    }
-
-    if let Some(dimension) = coordinate_system.dimension {
-        if dimension != 1 {
-            return Err(ParseError::UnsupportedSemantics(format!(
-                "{context} uses {dimension} axes, but only 1D vertical coordinate systems are supported"
-            )));
-        }
-    }
-
-    if !coordinate_system.axes.is_empty() && coordinate_system.axes != [AxisDirection::Up] {
-        return Err(ParseError::UnsupportedSemantics(format!(
-            "{context} uses unsupported vertical axis direction; expected up"
-        )));
-    }
-
-    Ok(())
-}
-
 fn axis_direction_from_json(axis: &Value) -> AxisDirection {
     axis.get("direction")
         .and_then(Value::as_str)
@@ -947,12 +739,12 @@ fn axis_linear_unit(axis: &Value) -> Option<LinearUnit> {
         .or_else(|| {
             axis.get("unit_conversion_factor")
                 .and_then(Value::as_f64)
-                .and_then(|factor| LinearUnit::from_meters_per_unit(factor).ok())
+                .and_then(linear_unit_from_meters_per_unit)
         })
         .or_else(|| {
             axis.get("conversion_factor")
                 .and_then(Value::as_f64)
-                .and_then(|factor| LinearUnit::from_meters_per_unit(factor).ok())
+                .and_then(linear_unit_from_meters_per_unit)
         })
 }
 
@@ -977,10 +769,10 @@ fn linear_unit_from_json(value: &Value) -> Option<LinearUnit> {
     }
 
     if let Some(factor) = value.get("conversion_factor").and_then(Value::as_f64) {
-        return LinearUnit::from_meters_per_unit(factor).ok();
+        return linear_unit_from_meters_per_unit(factor);
     }
     if let Some(factor) = value.get("unit_conversion_factor").and_then(Value::as_f64) {
-        return LinearUnit::from_meters_per_unit(factor).ok();
+        return linear_unit_from_meters_per_unit(factor);
     }
     value
         .get("name")
@@ -1003,31 +795,6 @@ fn angle_unit_to_degree_from_json(value: &Value) -> Option<f64> {
         .get("name")
         .and_then(Value::as_str)
         .and_then(angle_unit_name_to_degree)
-}
-
-fn linear_unit_name(name: &str) -> Option<LinearUnit> {
-    match normalize_key(name).as_str() {
-        "metre" | "meter" => Some(LinearUnit::metre()),
-        "kilometre" | "kilometer" => Some(LinearUnit::kilometre()),
-        "foot" | "internationalfoot" | "ft" => Some(LinearUnit::foot()),
-        "ussurveyfoot" | "usfoot" | "usft" => Some(LinearUnit::us_survey_foot()),
-        "yard" => LinearUnit::from_meters_per_unit(0.9144).ok(),
-        "nauticalmile" => LinearUnit::from_meters_per_unit(1852.0).ok(),
-        _ => None,
-    }
-}
-
-fn angle_unit_name_to_degree(name: &str) -> Option<f64> {
-    match normalize_key(name).as_str() {
-        "degree" => Some(1.0),
-        "radian" => Some(radians_to_degrees_factor(1.0)),
-        "grad" | "gon" => Some(0.9),
-        _ => None,
-    }
-}
-
-fn radians_to_degrees_factor(radians_per_unit: f64) -> f64 {
-    radians_per_unit.to_degrees()
 }
 
 fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
