@@ -1333,36 +1333,33 @@ fn matching_vertical_grid_operations<'a>(
     options: &'a SelectionOptions,
     area: Option<&selector::ResolvedAreaOfInterest>,
 ) -> Vec<VerticalGridCandidate<'a>> {
-    if !options.vertical_grid_operations.is_empty() {
-        return options
-            .vertical_grid_operations
-            .iter()
-            .filter(|operation| vertical_grid_operation_matches(operation, source, target))
-            .map(|operation| VerticalGridCandidate {
-                operation: Cow::Borrowed(operation),
-                area_of_use_match: vertical_operation_area_match(operation, area),
-                grid_area_of_use_match: area_of_use_match(
-                    operation.grid.area_of_use.as_ref(),
-                    area,
-                ),
-            })
-            .collect();
-    }
-
-    registry::vertical_grid_operations_between(source_crs, target_crs)
-        .into_iter()
+    let mut candidates: Vec<_> = options
+        .vertical_grid_operations
+        .iter()
         .filter(|operation| vertical_grid_operation_matches(operation, source, target))
-        .map(|operation| {
-            let operation_area_match = vertical_operation_area_match(&operation, area);
-            let grid_area_of_use_match =
-                area_of_use_match(operation.grid.area_of_use.as_ref(), area);
-            VerticalGridCandidate {
-                operation: Cow::Owned(operation),
-                area_of_use_match: operation_area_match,
-                grid_area_of_use_match,
-            }
-        })
-        .collect()
+        .map(|operation| vertical_grid_candidate(Cow::Borrowed(operation), area))
+        .collect();
+
+    candidates.extend(
+        registry::vertical_grid_operations_between(source_crs, target_crs)
+            .into_iter()
+            .filter(|operation| vertical_grid_operation_matches(operation, source, target))
+            .map(|operation| vertical_grid_candidate(Cow::Owned(operation), area)),
+    );
+    candidates
+}
+
+fn vertical_grid_candidate<'a>(
+    operation: Cow<'a, VerticalGridOperation>,
+    area: Option<&selector::ResolvedAreaOfInterest>,
+) -> VerticalGridCandidate<'a> {
+    let operation_area_match = vertical_operation_area_match(operation.as_ref(), area);
+    let grid_area_of_use_match = area_of_use_match(operation.grid.area_of_use.as_ref(), area);
+    VerticalGridCandidate {
+        operation,
+        area_of_use_match: operation_area_match,
+        grid_area_of_use_match,
+    }
 }
 
 fn sort_vertical_grid_candidates(candidates: &mut [VerticalGridCandidate<'_>]) {
@@ -2282,19 +2279,29 @@ mod tests {
         ));
         std::fs::create_dir_all(&dir).unwrap();
         for (name, west, south, values) in files {
-            let mut bytes = Vec::new();
-            bytes.extend_from_slice(&(*south).to_be_bytes());
-            bytes.extend_from_slice(&(*west).to_be_bytes());
-            bytes.extend_from_slice(&1.0f64.to_be_bytes());
-            bytes.extend_from_slice(&1.0f64.to_be_bytes());
-            bytes.extend_from_slice(&2i32.to_be_bytes());
-            bytes.extend_from_slice(&2i32.to_be_bytes());
-            for value in *values {
-                bytes.extend_from_slice(&value.to_be_bytes());
-            }
-            std::fs::write(dir.join(name), bytes).unwrap();
+            write_test_gtx_file(&dir, name, *west, *south, values);
         }
         dir
+    }
+
+    fn write_test_gtx_file(
+        dir: &std::path::Path,
+        name: &str,
+        west: f64,
+        south: f64,
+        values: &[f32],
+    ) {
+        let mut bytes = Vec::new();
+        bytes.extend_from_slice(&south.to_be_bytes());
+        bytes.extend_from_slice(&west.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&2i32.to_be_bytes());
+        bytes.extend_from_slice(&2i32.to_be_bytes());
+        for value in values {
+            bytes.extend_from_slice(&value.to_be_bytes());
+        }
+        std::fs::write(dir.join(name), bytes).unwrap();
     }
 
     fn write_test_gtx_resource_names(
@@ -2309,18 +2316,8 @@ mod tests {
             TEMP_GRID_COUNTER.fetch_add(1, Ordering::SeqCst)
         ));
         std::fs::create_dir_all(&dir).unwrap();
-        let mut bytes = Vec::new();
-        bytes.extend_from_slice(&south.to_be_bytes());
-        bytes.extend_from_slice(&west.to_be_bytes());
-        bytes.extend_from_slice(&1.0f64.to_be_bytes());
-        bytes.extend_from_slice(&1.0f64.to_be_bytes());
-        bytes.extend_from_slice(&2i32.to_be_bytes());
-        bytes.extend_from_slice(&2i32.to_be_bytes());
-        for value in values {
-            bytes.extend_from_slice(&value.to_be_bytes());
-        }
         for name in resource_names {
-            std::fs::write(dir.join(name), &bytes).unwrap();
+            write_test_gtx_file(&dir, &name, west, south, values);
         }
         dir
     }
@@ -3189,6 +3186,60 @@ mod tests {
         assert!((roundtrip.0 - -74.5).abs() < 1e-9);
         assert!((roundtrip.1 - 40.5).abs() < 1e-9);
         assert!((roundtrip.2 - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn explicit_vertical_grid_operation_falls_back_to_registry_candidate_after_coverage_miss() {
+        let (source, target) = nad83_ellipsoidal_to_navd88_pair();
+        let operations = registry::vertical_grid_operations_between(&source, &target);
+        assert!(!operations.is_empty());
+        let grid_root = write_test_gtx_resource_names(
+            registry_vertical_grid_resource_names(&operations),
+            -75.0,
+            40.0,
+            &[-30.0, -30.0, -30.0, -30.0],
+        );
+        write_test_gtx_file(
+            &grid_root,
+            "custom-miss.gtx",
+            10.0,
+            10.0,
+            &[-10.0, -10.0, -10.0, -10.0],
+        );
+        let mut explicit =
+            test_vertical_grid_operation_named("custom coverage miss", "custom-miss.gtx");
+        explicit.accuracy = Some(crate::operation::OperationAccuracy { meters: 0.001 });
+
+        let t = Transform::from_crs_defs_with_selection_options(
+            &source,
+            &target,
+            SelectionOptions::new()
+                .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(-74.5, 40.5)))
+                .with_grid_provider(Arc::new(FilesystemGridProvider::new(vec![grid_root])))
+                .with_vertical_grid_operation(explicit),
+        )
+        .unwrap();
+
+        let VerticalTransform::GridShiftList { shifts, .. } = &t.vertical_transform else {
+            panic!("expected vertical grid shift list");
+        };
+        assert!(shifts.len() >= 2);
+        assert_eq!(
+            shifts[0].diagnostics.operation_name.as_deref(),
+            Some("custom coverage miss")
+        );
+
+        let outcome = t.convert_3d_with_diagnostics((-74.5, 40.5, 100.0)).unwrap();
+        assert!((outcome.coord.2 - 130.0).abs() < 1e-9);
+        assert!(outcome
+            .vertical
+            .operation_name
+            .as_deref()
+            .is_some_and(|name| name.contains("NAVD88")));
+        assert_ne!(
+            outcome.vertical.operation_name.as_deref(),
+            Some("custom coverage miss")
+        );
     }
 
     #[test]
