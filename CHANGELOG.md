@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.6.0 - 2026-05-21
+
 - fix `Transform::inverse()` so inverse transforms preserve compiled fallback pipelines and diagnostics, including grid coverage miss reporting when an inverse falls back to another operation
 - make approximate Helmert fallback an explicit opt-in policy: `BestAvailable` no longer synthesizes approximate Helmert fallbacks, and selection errors explain how to enable them
 - add `geo-types` geometry-level transform support for points, line strings, polygons with holes, multi-geometries, rectangles, geometry collections, and `Geometry` enum values
@@ -9,8 +11,6 @@
 - optimize grid loading with a single-flight parse/checksum cache so concurrent requests for the same grid avoid duplicated parse work
 - deduplicate WKT and PROJJSON semantic parsing helpers for datum candidates, unit normalization, parameter mapping, and vertical unit authority validation without intended behavior changes
 - add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
-
-## 0.6.0
 
 - add EPSG:32662 Plate Carree registry lookup, operation selection, and reference-corpus coverage, with a regression test that every README-advertised EPSG code resolves
 - add fluent `SelectionOptions` builders and option-aware `proj-wkt::Proj` facade constructors for area-of-interest, grid policy, and explicit operation selection

@@ -2,10 +2,9 @@
 
 Date: 2026-05-05
 
-This report summarizes the current parity and benchmark suite for `proj-rust`
-against bundled C PROJ. It captures both the current Rust-versus-C performance
-shape and the current transform-construction cost for the `0.6.0` release
-state.
+This historical report summarizes the parity and benchmark suite for
+`proj-rust` against bundled C PROJ at an earlier `0.6.0` release-candidate
+state. It has not been refreshed for the final `0.6.0` release candidate.
 
 ## System Under Test
 
