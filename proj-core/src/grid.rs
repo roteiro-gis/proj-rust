@@ -977,14 +977,22 @@ impl GtxGrid {
         lon_radians: f64,
         lat_radians: f64,
     ) -> std::result::Result<VerticalGridSample, GridError> {
-        let lon_degrees = self.normalize_lon_degrees(lon_radians.to_degrees());
+        let raw_lon_degrees = lon_radians.to_degrees();
         let lat_degrees = lat_radians.to_degrees();
+
+        if !(raw_lon_degrees.is_finite() && lat_degrees.is_finite()) {
+            return Err(GridError::OutsideCoverage(format!(
+                "non-finite longitude {:.8} latitude {:.8}",
+                raw_lon_degrees, lat_degrees
+            )));
+        }
+
+        let lon_degrees = self.normalize_lon_degrees(raw_lon_degrees);
 
         if !self.contains(lon_degrees, lat_degrees) {
             return Err(GridError::OutsideCoverage(format!(
                 "longitude {:.8} latitude {:.8}",
-                lon_radians.to_degrees(),
-                lat_degrees
+                raw_lon_degrees, lat_degrees
             )));
         }
 
@@ -1053,14 +1061,7 @@ impl GtxGrid {
             return lon_degrees;
         }
 
-        let mut lon = lon_degrees;
-        while lon < self.west_degrees {
-            lon += 360.0;
-        }
-        while lon > self.east_degrees {
-            lon -= 360.0;
-        }
-        lon
+        self.west_degrees + (lon_degrees - self.west_degrees).rem_euclid(360.0)
     }
 }
 
@@ -1345,6 +1346,14 @@ mod tests {
             .sample(20.5f64.to_radians(), 10.5f64.to_radians())
             .unwrap();
         assert!((sample.offset_meters - 2.0).abs() < 1e-12);
+
+        let wrapped_sample = grid
+            .sample(
+                (20.5 + 360.0 * 1_000_000_000_000.0f64).to_radians(),
+                10.5f64.to_radians(),
+            )
+            .unwrap();
+        assert!((wrapped_sample.offset_meters - 2.0).abs() < 1e-12);
     }
 
     #[test]
@@ -1364,6 +1373,28 @@ mod tests {
             .sample(30.0f64.to_radians(), 10.5f64.to_radians())
             .unwrap_err();
         assert!(matches!(outside_err, GridError::OutsideCoverage(_)));
+    }
+
+    #[test]
+    fn gtx_grid_rejects_non_finite_coordinates() {
+        let bytes = test_gtx_bytes(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]);
+        let data = parse_grid_data(GridFormat::Gtx, "test.gtx", &bytes).unwrap();
+        let GridData::Gtx(grid) = data else {
+            panic!("expected GTX grid");
+        };
+
+        for (lon, lat) in [
+            (f64::INFINITY, 10.5f64.to_radians()),
+            (f64::NEG_INFINITY, 10.5f64.to_radians()),
+            (f64::NAN, 10.5f64.to_radians()),
+            (20.5f64.to_radians(), f64::INFINITY),
+            (20.5f64.to_radians(), f64::NAN),
+        ] {
+            let err = grid.sample(lon, lat).unwrap_err();
+            assert!(matches!(err, GridError::OutsideCoverage(_)));
+            let message = err.to_string();
+            assert!(message.contains("non-finite"), "{message}");
+        }
     }
 
     #[test]

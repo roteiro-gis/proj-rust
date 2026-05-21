@@ -345,6 +345,15 @@ impl VerticalTransform {
 
 fn apply_vertical_grid_shift(shift: &CompiledVerticalGridShift, coord: Coord3D) -> Result<f64> {
     let (lon, lat) = shift.sample_horizontal.lon_lat_radians(coord.x, coord.y)?;
+    if !(lon.is_finite() && lat.is_finite()) {
+        return Err(Error::Grid(crate::grid::GridError::OutsideCoverage(
+            format!(
+                "non-finite vertical grid sample coordinate: longitude {:.8} latitude {:.8}",
+                lon.to_degrees(),
+                lat.to_degrees()
+            ),
+        )));
+    }
     let offset_meters = shift
         .handle
         .sample_vertical_offset_meters(lon, lat)?
@@ -2246,7 +2255,7 @@ mod tests {
         ProjectionMethod, VerticalCrsDef,
     };
     use crate::datum::{self, DatumToWgs84};
-    use crate::grid::{FilesystemGridProvider, GridDefinition, GridFormat};
+    use crate::grid::{FilesystemGridProvider, GridDefinition, GridError, GridFormat};
     use crate::operation::{
         AreaOfInterest, GridId, GridInterpolation, OperationMatchKind, SelectionPolicy,
         SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention,
@@ -3508,6 +3517,53 @@ mod tests {
 
         let err = t.convert_3d((-80.0, 40.5, 100.0)).unwrap_err();
         assert!(matches!(err, Error::Grid(GridError::OutsideCoverage(_))));
+    }
+
+    #[test]
+    fn vertical_geoid_grid_rejects_non_finite_and_normalizes_large_longitude() {
+        let grid_root = write_test_gtx(&[-30.0, -30.0, -30.0, -30.0]);
+        let horizontal =
+            HorizontalCrsDef::Geographic(GeographicCrsDef::new(4326, datum::WGS84, "WGS 84"));
+        let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal,
+            registry::lookup_vertical_epsg(5703).unwrap(),
+            "WGS 84 + NAVD88 height",
+        )));
+        let source = registry::lookup_epsg(4979).unwrap();
+        let t = Transform::from_crs_defs_with_selection_options(
+            &source,
+            &target,
+            SelectionOptions {
+                grid_provider: Some(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+                vertical_grid_operations: vec![test_vertical_grid_operation()],
+                ..SelectionOptions::default()
+            },
+        )
+        .unwrap();
+
+        for coord in [
+            (f64::INFINITY, 40.5, 100.0),
+            (f64::NEG_INFINITY, 40.5, 100.0),
+            (f64::NAN, 40.5, 100.0),
+            (-74.5, f64::INFINITY, 100.0),
+            (-74.5, f64::NAN, 100.0),
+        ] {
+            let err = t.convert_3d_with_diagnostics(coord).unwrap_err();
+            assert!(matches!(err, Error::Grid(GridError::OutsideCoverage(_))));
+            let message = err.to_string();
+            assert!(message.contains("non-finite"), "{message}");
+        }
+
+        let wrapped_lon = -74.5 + 360.0 * 1_000_000_000_000.0;
+        let outcome = t
+            .convert_3d_with_diagnostics((wrapped_lon, 40.5, 100.0))
+            .unwrap();
+        assert!((outcome.coord.2 - 130.0).abs() < 1e-9);
+        assert_eq!(
+            outcome.vertical.operation_name.as_deref(),
+            Some("Test geoid height to NAVD88")
+        );
     }
 
     #[test]
