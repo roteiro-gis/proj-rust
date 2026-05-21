@@ -736,6 +736,11 @@ pub(crate) fn vertical_grid_operations_between(
     else {
         return Vec::new();
     };
+    if !ellipsoidal_vertical_datum_matches_horizontal(source, source_vertical)
+        || !ellipsoidal_vertical_datum_matches_horizontal(target, target_vertical)
+    {
+        return Vec::new();
+    }
 
     let mut matches = Vec::new();
     for record in db().vertical_grid_operations.values() {
@@ -863,6 +868,13 @@ fn vertical_datum_filter_matches(filter: Option<u32>, vertical: &VerticalCrsDef)
 
 fn horizontal_filter_matches(filter: Option<u32>, crs: &CrsDef) -> bool {
     filter.is_none_or(|epsg| crs.base_geographic_crs_epsg() == Some(epsg))
+}
+
+fn ellipsoidal_vertical_datum_matches_horizontal(crs: &CrsDef, vertical: &VerticalCrsDef) -> bool {
+    match vertical.kind() {
+        VerticalCrsKind::EllipsoidalHeight { datum } => crs.datum().same_datum(datum.as_ref()),
+        VerticalCrsKind::GravityRelatedHeight { .. } => true,
+    }
 }
 
 fn extend_index_hits(ids: &mut Vec<u32>, index: &HashMap<(u32, u32), Vec<u32>>, key: (u32, u32)) {

@@ -2359,6 +2359,34 @@ mod tests {
         (source, target)
     }
 
+    fn nad83_horizontal_wgs84_ellipsoidal_to_navd88_pair() -> (CrsDef, CrsDef) {
+        let horizontal_crs = registry::lookup_epsg(4269).expect("NAD83 geographic CRS");
+        let geographic = horizontal_crs
+            .as_geographic()
+            .expect("NAD83 is geographic")
+            .clone();
+        let horizontal = HorizontalCrsDef::Geographic(geographic);
+        let source_vertical = VerticalCrsDef::ellipsoidal_height(
+            0,
+            datum::WGS84,
+            LinearUnit::metre(),
+            "WGS 84 ellipsoidal height",
+        );
+        let source = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal.clone(),
+            source_vertical,
+            "NAD83 + WGS 84 ellipsoidal height",
+        )));
+        let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal,
+            registry::lookup_vertical_epsg(5703).unwrap(),
+            "NAD83 + NAVD88 height",
+        )));
+        (source, target)
+    }
+
     fn test_vertical_grid_operation() -> VerticalGridOperation {
         test_vertical_grid_operation_named("Test geoid height to NAVD88", "test.gtx")
     }
@@ -3256,6 +3284,35 @@ mod tests {
         let message = err.to_string();
         assert!(message.contains("unavailable"), "{message}");
         assert!(message.contains("g2003u"), "{message}");
+    }
+
+    #[test]
+    fn registry_vertical_grid_operation_rejects_mismatched_ellipsoidal_vertical_datum() {
+        let (valid_source, target) = nad83_ellipsoidal_to_navd88_pair();
+        let operations = registry::vertical_grid_operations_between(&valid_source, &target);
+        assert!(!operations.is_empty());
+        let (mismatched_source, target) = nad83_horizontal_wgs84_ellipsoidal_to_navd88_pair();
+        assert!(registry::vertical_grid_operations_between(&mismatched_source, &target).is_empty());
+        let grid_root = write_test_gtx_resource_names(
+            registry_vertical_grid_resource_names(&operations),
+            -75.0,
+            40.0,
+            &[-30.0, -30.0, -30.0, -30.0],
+        );
+
+        let err = expect_transform_error(Transform::from_crs_defs_with_selection_options(
+            &mismatched_source,
+            &target,
+            SelectionOptions::new()
+                .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(-74.5, 40.5)))
+                .with_grid_provider(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+        ));
+
+        assert!(
+            err.to_string()
+                .contains("no supported vertical grid operation"),
+            "{err}"
+        );
     }
 
     #[test]
