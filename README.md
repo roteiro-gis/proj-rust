@@ -119,7 +119,7 @@ With the default `geo-types` feature, `Transform::convert_geometry()` transforms
 | Flag | Default | Description |
 |---|---|---|
 | `rayon` | yes | Parallel batch transforms via `convert_batch_parallel()` |
-| `geo-types` | yes | `From`/`Into` conversions for `geo_types::Coord<f64>` |
+| `geo-types` | yes | `geo_types::Coord<f64>` conversions and geometry transforms |
 | `c-proj-compat` | no | Optional reference-compatibility integration against bundled C PROJ |
 
 ## Testing
