@@ -5,6 +5,9 @@
 ## 0.6.0 - 2026-05-21
 
 - fix `Transform::inverse()` so inverse transforms preserve compiled fallback pipelines and diagnostics, including grid coverage miss reporting when an inverse falls back to another operation
+- reject invalid source coordinates on identity/same-datum transform paths instead of allowing non-finite or out-of-range values to bypass projection validation
+- fix GTX vertical grid sampling at tolerated lower grid edges so negative cell indices cannot panic or wrap before coverage handling
+- fix PROJ-string projected unit handling so `+x_0` and `+y_0` remain PROJ-compatible meter parameters while `+units` controls output coordinates
 - make approximate Helmert fallback an explicit opt-in policy: `BestAvailable` no longer synthesizes approximate Helmert fallbacks, and selection errors explain how to enable them
 - add `geo-types` geometry-level transform support for points, line strings, polygons with holes, multi-geometries, rectangles, geometry collections, and `Geometry` enum values
 - add antimeridian-aware geographic AOI and bounds support without weakening projected bounds validation

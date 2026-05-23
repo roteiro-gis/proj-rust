@@ -257,7 +257,7 @@ fn validate_grid_resource_name(resource_name: &str) -> Result<()> {
     if path.components().any(|component| {
         matches!(
             component,
-            Component::Prefix(_) | Component::RootDir | Component::ParentDir
+            Component::Prefix(_) | Component::RootDir | Component::CurDir | Component::ParentDir
         )
     }) {
         return Err(ParseError::UnsupportedSemantics(format!(
@@ -337,6 +337,12 @@ fn get_f64(params: &HashMap<String, String>, key: &str) -> Result<f64> {
         Some(value) => parse_f64_param(key, value),
         None => Ok(0.0),
     }
+}
+
+fn get_meter_param(params: &HashMap<String, String>, key: &str) -> Result<f64> {
+    // PROJ false easting/northing parameters are always meters; +units only
+    // controls the native projected coordinates accepted and returned.
+    get_f64(params, key)
 }
 
 fn get_scale(params: &HashMap<String, String>) -> Result<f64> {
@@ -436,8 +442,8 @@ fn parse_utm(params: &HashMap<String, String>) -> Result<CrsDef> {
             lon0,
             lat0: 0.0,
             k0: 0.9996,
-            false_easting: linear_unit.to_meters(500_000.0),
-            false_northing: linear_unit.to_meters(false_northing),
+            false_easting: 500_000.0,
+            false_northing,
         },
         linear_unit,
         "",
@@ -461,8 +467,8 @@ fn parse_tmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
             lon0: get_f64(params, "lon_0")?,
             lat0: get_f64(params, "lat_0")?,
             k0: get_scale(params)?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -486,8 +492,8 @@ fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
             lon0: get_f64(params, "lon_0")?,
             lat_ts: get_f64(params, "lat_ts")?,
             k0: get_scale(params)?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -526,8 +532,8 @@ fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
             lon0: get_f64(params, "lon_0")?,
             lat_ts: lat_ts.copysign(pole),
             k0: get_scale(params)?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -552,8 +558,8 @@ fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
             lat0: get_f64(params, "lat_0")?,
             lat1: get_f64(params, "lat_1")?,
             lat2: get_f64(params, "lat_2")?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -579,8 +585,8 @@ fn parse_laea(params: &HashMap<String, String>) -> Result<CrsDef> {
         ProjectionMethod::LambertAzimuthalEqualArea {
             lon0: get_f64(params, "lon_0")?,
             lat0: get_f64(params, "lat_0")?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -604,8 +610,8 @@ fn parse_sterea(params: &HashMap<String, String>) -> Result<CrsDef> {
             lon0: get_f64(params, "lon_0")?,
             lat0: get_f64(params, "lat_0")?,
             k0: get_scale(params)?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -630,8 +636,8 @@ fn parse_aea(params: &HashMap<String, String>) -> Result<CrsDef> {
             lat0: get_f64(params, "lat_0")?,
             lat1: get_f64(params, "lat_1")?,
             lat2: get_f64(params, "lat_2")?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -676,8 +682,8 @@ fn parse_omerc(params: &HashMap<String, String>) -> Result<CrsDef> {
             azimuth,
             rectified_grid_angle,
             k0: get_scale(params)?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
             variant_b,
         },
         linear_unit,
@@ -701,8 +707,8 @@ fn parse_cass(params: &HashMap<String, String>) -> Result<CrsDef> {
         ProjectionMethod::CassiniSoldner {
             lon0: get_f64(params, "lon_0")?,
             lat0: get_f64(params, "lat_0")?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -725,8 +731,8 @@ fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
         ProjectionMethod::EquidistantCylindrical {
             lon0: get_f64(params, "lon_0")?,
             lat_ts: get_f64(params, "lat_ts")?,
-            false_easting: linear_unit.to_meters(get_f64(params, "x_0")?),
-            false_northing: linear_unit.to_meters(get_f64(params, "y_0")?),
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
         },
         linear_unit,
         "",
@@ -924,16 +930,34 @@ mod tests {
     }
 
     #[test]
-    fn proj_string_projected_units_roundtrip_through_native_feet() {
+    fn proj_string_projected_units_apply_output_units_only() {
         let from = parse_proj_string("+proj=longlat +datum=WGS84 +no_defs").unwrap();
         let to_feet = parse_proj_string(
-            "+proj=tmerc +lat_0=0 +lon_0=-75 +k=0.9996 +x_0=1640416.6666666667 +y_0=0 +datum=WGS84 +units=us-ft +no_defs",
+            "+proj=tmerc +lat_0=0 +lon_0=-75 +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=us-ft +no_defs",
         )
         .unwrap();
         let to_meters = parse_proj_string(
             "+proj=tmerc +lat_0=0 +lon_0=-75 +k=0.9996 +x_0=500000 +y_0=0 +datum=WGS84 +units=m +no_defs",
         )
         .unwrap();
+
+        let feet_tx = proj_core::Transform::from_crs_defs(&from, &to_feet).unwrap();
+        let meter_tx = proj_core::Transform::from_crs_defs(&from, &to_meters).unwrap();
+
+        let (fx, fy) = feet_tx.convert((-74.006, 40.7128)).unwrap();
+        let (mx, my) = meter_tx.convert((-74.006, 40.7128)).unwrap();
+
+        assert!((fx * US_FOOT_TO_METER - mx).abs() < 0.02, "x mismatch");
+        assert!((fy * US_FOOT_TO_METER - my).abs() < 0.02, "y mismatch");
+    }
+
+    #[test]
+    fn proj_string_utm_units_keep_meter_false_offsets() {
+        let from = parse_proj_string("+proj=longlat +datum=WGS84 +no_defs").unwrap();
+        let to_feet =
+            parse_proj_string("+proj=utm +zone=18 +datum=WGS84 +units=us-ft +no_defs").unwrap();
+        let to_meters =
+            parse_proj_string("+proj=utm +zone=18 +datum=WGS84 +units=m +no_defs").unwrap();
 
         let feet_tx = proj_core::Transform::from_crs_defs(&from, &to_feet).unwrap();
         let meter_tx = proj_core::Transform::from_crs_defs(&from, &to_meters).unwrap();
@@ -1028,6 +1052,10 @@ mod tests {
 
         let err =
             parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=../ntv2_0.gsb").unwrap_err();
+        assert!(err.to_string().contains("relative grid resource name"));
+
+        let err =
+            parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=./ntv2_0.gsb").unwrap_err();
         assert!(err.to_string().contains("relative grid resource name"));
 
         let err =

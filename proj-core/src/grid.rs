@@ -1003,6 +1003,22 @@ impl GtxGrid {
         let mut fx = lam - x as f64;
         let mut fy = phi - y as f64;
 
+        if x < 0 {
+            if x == -1 && fx > 1.0 - 1e-9 {
+                x = 0;
+                fx = 0.0;
+            } else {
+                return Err(GridError::OutsideCoverage("GTX negative grid index".into()));
+            }
+        }
+        if y < 0 {
+            if y == -1 && fy > 1.0 - 1e-9 {
+                y = 0;
+                fy = 0.0;
+            } else {
+                return Err(GridError::OutsideCoverage("GTX negative grid index".into()));
+            }
+        }
         if x as usize + 1 >= self.width {
             if x as usize + 1 == self.width && fx < 1e-9 {
                 x -= 1;
@@ -1018,9 +1034,6 @@ impl GtxGrid {
             } else {
                 return Err(GridError::OutsideCoverage("GTX latitude edge".into()));
             }
-        }
-        if x < 0 || y < 0 {
-            return Err(GridError::OutsideCoverage("GTX negative grid index".into()));
         }
 
         let x0 = x as usize;
@@ -1354,6 +1367,14 @@ mod tests {
             )
             .unwrap();
         assert!((wrapped_sample.offset_meters - 2.0).abs() < 1e-12);
+
+        let lower_edge_sample = grid
+            .sample(
+                (20.0 - 5e-11f64).to_radians(),
+                (10.0 - 5e-11f64).to_radians(),
+            )
+            .unwrap();
+        assert!((lower_edge_sample.offset_meters - 0.0).abs() < 1e-12);
     }
 
     #[test]
