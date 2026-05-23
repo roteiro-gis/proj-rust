@@ -12,7 +12,7 @@ use crate::operation::{
     VerticalGridOffsetConvention, VerticalGridOperation, VerticalGridProvenance,
     VerticalTransformAction, VerticalTransformDiagnostics,
 };
-use crate::projection::{make_projection, Projection};
+use crate::projection::{make_projection, validate_lon_lat, validate_projected, Projection};
 use crate::registry;
 use crate::selector;
 use crate::{ellipsoid, geocentric};
@@ -84,14 +84,24 @@ impl PipelineSourceXyUnits {
         }
     }
 
-    fn normalize(self, coord: Coord3D) -> Coord3D {
+    fn normalize(self, coord: Coord3D) -> Result<Coord3D> {
         match self {
             Self::GeographicDegrees => {
-                Coord3D::new(coord.x.to_radians(), coord.y.to_radians(), 0.0)
+                let lon = coord.x.to_radians();
+                let lat = coord.y.to_radians();
+                validate_lon_lat(lon, lat)?;
+                Ok(Coord3D::new(lon, lat, 0.0))
             }
-            Self::ProjectedMeters => Coord3D::new(coord.x, coord.y, 0.0),
+            Self::ProjectedMeters => {
+                validate_projected(coord.x, coord.y)?;
+                Ok(Coord3D::new(coord.x, coord.y, 0.0))
+            }
             Self::ProjectedNativeToMeters(unit) => {
-                Coord3D::new(unit.to_meters(coord.x), unit.to_meters(coord.y), 0.0)
+                validate_projected(coord.x, coord.y)?;
+                let x = unit.to_meters(coord.x);
+                let y = unit.to_meters(coord.y);
+                validate_projected(x, y)?;
+                Ok(Coord3D::new(x, y, 0.0))
             }
         }
     }
@@ -1054,6 +1064,7 @@ impl Transform {
         pipeline: &CompiledOperationPipeline,
         c: Coord3D,
     ) -> Result<PipelineExecutionOutcome> {
+        validate_vertical_ordinate(c.z)?;
         let xy = execute_pipeline_xy(pipeline, c)?;
         let vertical = self.vertical_transform.apply(c)?;
         Ok(PipelineExecutionOutcome {
@@ -1067,6 +1078,7 @@ impl Transform {
         pipeline: &CompiledOperationPipeline,
         c: Coord3D,
     ) -> Result<Coord3D> {
+        validate_vertical_ordinate(c.z)?;
         let xy = execute_pipeline_xy(pipeline, c)?;
         let z = self.vertical_transform.apply_z(c)?;
         Ok(Coord3D::new(xy.x, xy.y, z))
@@ -1704,16 +1716,25 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
 }
 
 fn execute_pipeline_xy(pipeline: &CompiledOperationPipeline, c: Coord3D) -> Result<Coord> {
+    let mut state = pipeline.source_xy_units.normalize(c)?;
     if pipeline.steps.is_empty() {
         return Ok(Coord::new(c.x, c.y));
     }
-    let mut state = pipeline.source_xy_units.normalize(c);
 
     for step in &pipeline.steps {
         state = execute_step(step, state)?;
     }
 
     Ok(pipeline.target_xy_units.denormalize(state))
+}
+
+fn validate_vertical_ordinate(z: f64) -> Result<()> {
+    if !z.is_finite() {
+        return Err(Error::OutOfRange(
+            "vertical input coordinate must be finite".into(),
+        ));
+    }
+    Ok(())
 }
 
 fn compile_pipeline(
@@ -2437,6 +2458,26 @@ mod tests {
         let (x, y) = t.convert((-74.006, 40.7128)).unwrap();
         assert_eq!(x, -74.006);
         assert_eq!(y, 40.7128);
+    }
+
+    #[test]
+    fn identity_transform_rejects_invalid_geographic_coordinates() {
+        let identity = Transform::new("EPSG:4326", "EPSG:4326").unwrap();
+        for coord in [(f64::NAN, 0.0), (0.0, f64::NAN), (0.0, 91.0)] {
+            let err = identity.convert(coord).unwrap_err();
+            assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+        }
+
+        let same_datum = Transform::new("EPSG:4269", "EPSG:4326").unwrap();
+        let err = same_datum.convert((0.0, f64::INFINITY)).unwrap_err();
+        assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+    }
+
+    #[test]
+    fn three_dimensional_transform_rejects_non_finite_height() {
+        let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+        let err = t.convert_3d((0.0, 0.0, f64::NAN)).unwrap_err();
+        assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
     }
 
     #[test]
@@ -3550,9 +3591,9 @@ mod tests {
             (-74.5, f64::NAN, 100.0),
         ] {
             let err = t.convert_3d_with_diagnostics(coord).unwrap_err();
-            assert!(matches!(err, Error::Grid(GridError::OutsideCoverage(_))));
+            assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
             let message = err.to_string();
-            assert!(message.contains("non-finite"), "{message}");
+            assert!(message.contains("finite"), "{message}");
         }
 
         let wrapped_lon = -74.5 + 360.0 * 1_000_000_000_000.0;
