@@ -6,6 +6,15 @@ use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use thiserror::Error;
 
+const NTV2_HEADER_LEN: usize = 11 * 16;
+const NTV2_RECORD_LEN: usize = 4 * 4;
+const MAX_NTV2_SUBFILES: usize = 4_096;
+const MAX_NTV2_CELLS_PER_SUBGRID: usize = 16_777_216;
+const MAX_NTV2_TOTAL_CELLS: usize = 16_777_216;
+const MAX_NTV2_TOTAL_DATA_BYTES: usize = MAX_NTV2_TOTAL_CELLS * NTV2_RECORD_LEN;
+const MAX_NTV2_GRID_BYTES: usize =
+    MAX_NTV2_TOTAL_DATA_BYTES + (MAX_NTV2_SUBFILES + 1) * NTV2_HEADER_LEN;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GridFormat {
     /// NTv2 horizontal datum-shift grid (`.gsb`).
@@ -311,8 +320,7 @@ impl GridProvider for FilesystemGridProvider {
         let cache_path = path.canonicalize().unwrap_or_else(|_| path.clone());
         let key = GridDataCacheKey::new(grid.format, cache_path.to_string_lossy());
         let data = cached_grid_data(&self.data_cache, key, || {
-            let bytes = std::fs::read(&path)
-                .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+            let bytes = read_grid_resource_bytes(&path, grid.format)?;
             parse_cached_grid_data(grid.format, &grid.name, &bytes)
         })?;
 
@@ -330,6 +338,43 @@ fn is_safe_grid_resource_name(name: &str) -> bool {
     }
     path.components()
         .all(|component| matches!(component, Component::Normal(_)))
+}
+
+fn read_grid_resource_bytes(
+    path: &Path,
+    format: GridFormat,
+) -> std::result::Result<Vec<u8>, GridError> {
+    if max_grid_resource_bytes(format).is_some() {
+        let len = std::fs::metadata(path)
+            .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?
+            .len();
+        validate_grid_resource_size(path.display(), format, len)?;
+    }
+
+    std::fs::read(path).map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))
+}
+
+fn validate_grid_resource_size(
+    resource: impl std::fmt::Display,
+    format: GridFormat,
+    len: u64,
+) -> std::result::Result<(), GridError> {
+    if let Some(max_bytes) = max_grid_resource_bytes(format) {
+        let max_bytes_u64 = u64::try_from(max_bytes).unwrap_or(u64::MAX);
+        if len > max_bytes_u64 {
+            return Err(GridError::Parse(format!(
+                "{resource} exceeds maximum {format:?} grid size of {max_bytes} bytes"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn max_grid_resource_bytes(format: GridFormat) -> Option<usize> {
+    match format {
+        GridFormat::Ntv2 => Some(MAX_NTV2_GRID_BYTES),
+        GridFormat::Gtx | GridFormat::Unsupported => None,
+    }
 }
 
 enum GridData {
@@ -442,6 +487,8 @@ fn parse_grid_data(
     name: &str,
     bytes: &[u8],
 ) -> std::result::Result<GridData, GridError> {
+    validate_grid_resource_size(name, format, u64::try_from(bytes.len()).unwrap_or(u64::MAX))?;
+
     match format {
         GridFormat::Ntv2 => Ok(GridData::Ntv2(Ntv2GridSet::parse(bytes)?)),
         GridFormat::Gtx => Ok(GridData::Gtx(GtxGrid::parse(bytes)?)),
@@ -573,10 +620,13 @@ struct Ntv2GridSet {
 
 impl Ntv2GridSet {
     fn parse(bytes: &[u8]) -> std::result::Result<Self, GridError> {
-        const HEADER_LEN: usize = 11 * 16;
-
-        if bytes.len() < HEADER_LEN {
+        if bytes.len() < NTV2_HEADER_LEN {
             return Err(GridError::Parse("NTv2 file too small".into()));
+        }
+        if bytes.len() > MAX_NTV2_GRID_BYTES {
+            return Err(GridError::Parse(format!(
+                "NTv2 grid exceeds maximum size of {MAX_NTV2_GRID_BYTES} bytes"
+            )));
         }
 
         let endian = if u32::from_le_bytes(bytes[8..12].try_into().expect("slice length checked"))
@@ -598,14 +648,25 @@ impl Ntv2GridSet {
         }
 
         let num_subfiles = read_u32(bytes, 40, endian)? as usize;
-        let mut offset = HEADER_LEN;
+        if num_subfiles == 0 || num_subfiles > MAX_NTV2_SUBFILES {
+            return Err(GridError::Parse(format!(
+                "NTv2 subfile count {num_subfiles} exceeds limit {MAX_NTV2_SUBFILES}"
+            )));
+        }
+
+        let mut offset = NTV2_HEADER_LEN;
         let mut grids = Vec::with_capacity(num_subfiles);
         let mut name_to_index = HashMap::new();
         let mut parent_links: Vec<Option<String>> = Vec::with_capacity(num_subfiles);
+        let mut total_cells = 0usize;
+        let mut total_data_bytes = 0usize;
 
         for _ in 0..num_subfiles {
+            let header_end = offset
+                .checked_add(NTV2_HEADER_LEN)
+                .ok_or_else(|| GridError::Parse("NTv2 header offset overflow".into()))?;
             let header = bytes
-                .get(offset..offset + HEADER_LEN)
+                .get(offset..header_end)
                 .ok_or_else(|| GridError::Parse("truncated NTv2 subfile header".into()))?;
             if &header[0..8] != b"SUB_NAME" {
                 return Err(GridError::Parse("invalid NTv2 subfile header tag".into()));
@@ -621,30 +682,65 @@ impl Ntv2GridSet {
             let res_x = read_f64(header, 152, endian)? * PI / 180.0 / 3600.0;
             let gs_count = read_u32(header, 168, endian)? as usize;
 
-            if !(west < east && south < north && res_x > 0.0 && res_y > 0.0) {
+            if !(west.is_finite()
+                && east.is_finite()
+                && south.is_finite()
+                && north.is_finite()
+                && res_x.is_finite()
+                && res_y.is_finite()
+                && west < east
+                && south < north
+                && res_x > 0.0
+                && res_y > 0.0)
+            {
                 return Err(GridError::Parse(format!(
                     "invalid NTv2 georeferencing for subgrid {name}"
                 )));
             }
 
-            let width = (((east - west) / res_x).abs() + 0.5).floor() as usize + 1;
-            let height = (((north - south) / res_y).abs() + 0.5).floor() as usize + 1;
-            if width * height != gs_count {
+            let width = ntv2_axis_cell_count(east - west, res_x, "longitude", &name)?;
+            let height = ntv2_axis_cell_count(north - south, res_y, "latitude", &name)?;
+            let derived_cells = width
+                .checked_mul(height)
+                .ok_or_else(|| GridError::Parse("NTv2 cell count overflow".into()))?;
+            if derived_cells > MAX_NTV2_CELLS_PER_SUBGRID {
+                return Err(GridError::Parse(format!(
+                    "NTv2 subgrid {name} has {derived_cells} cells, exceeding limit {MAX_NTV2_CELLS_PER_SUBGRID}"
+                )));
+            }
+            if derived_cells != gs_count {
                 return Err(GridError::Parse(format!(
                     "NTv2 subgrid {name} cell count mismatch: expected {} got {gs_count}",
-                    width * height
+                    derived_cells
+                )));
+            }
+
+            total_cells = total_cells
+                .checked_add(gs_count)
+                .ok_or_else(|| GridError::Parse("NTv2 total cell count overflow".into()))?;
+            if total_cells > MAX_NTV2_TOTAL_CELLS {
+                return Err(GridError::Parse(format!(
+                    "NTv2 total cell count {total_cells} exceeds limit {MAX_NTV2_TOTAL_CELLS}"
                 )));
             }
 
             let data_len = gs_count
-                .checked_mul(4)
-                .and_then(|count| count.checked_mul(4))
+                .checked_mul(NTV2_RECORD_LEN)
                 .ok_or_else(|| GridError::Parse("NTv2 data size overflow".into()))?;
-            let data = bytes
-                .get(offset + HEADER_LEN..offset + HEADER_LEN + data_len)
-                .ok_or_else(|| {
-                    GridError::Parse(format!("truncated NTv2 data for subgrid {name}"))
-                })?;
+            total_data_bytes = total_data_bytes
+                .checked_add(data_len)
+                .ok_or_else(|| GridError::Parse("NTv2 total data size overflow".into()))?;
+            if total_data_bytes > MAX_NTV2_TOTAL_DATA_BYTES {
+                return Err(GridError::Parse(format!(
+                    "NTv2 data size {total_data_bytes} exceeds limit {MAX_NTV2_TOTAL_DATA_BYTES}"
+                )));
+            }
+            let data_end = header_end
+                .checked_add(data_len)
+                .ok_or_else(|| GridError::Parse("NTv2 data offset overflow".into()))?;
+            let data = bytes.get(header_end..data_end).ok_or_else(|| {
+                GridError::Parse(format!("truncated NTv2 data for subgrid {name}"))
+            })?;
 
             let mut lat_shift = vec![0.0f64; gs_count];
             let mut lon_shift = vec![0.0f64; gs_count];
@@ -686,7 +782,7 @@ impl Ntv2GridSet {
                 lon_shift,
                 children: Vec::new(),
             });
-            offset += HEADER_LEN + data_len;
+            offset = data_end;
         }
 
         let mut roots = Vec::new();
@@ -792,6 +888,36 @@ impl Ntv2GridSet {
         }
         index
     }
+}
+
+fn ntv2_axis_cell_count(
+    span: f64,
+    resolution: f64,
+    axis: &str,
+    name: &str,
+) -> std::result::Result<usize, GridError> {
+    let intervals = span / resolution;
+    if !intervals.is_finite() || intervals < 0.0 {
+        return Err(GridError::Parse(format!(
+            "invalid NTv2 {axis} spacing for subgrid {name}"
+        )));
+    }
+
+    let rounded_intervals = (intervals + 0.5).floor();
+    if !rounded_intervals.is_finite() || rounded_intervals > (MAX_NTV2_CELLS_PER_SUBGRID - 1) as f64
+    {
+        return Err(GridError::Parse(format!(
+            "NTv2 subgrid {name} {axis} cell count exceeds limit {MAX_NTV2_CELLS_PER_SUBGRID}"
+        )));
+    }
+
+    let count = rounded_intervals as usize + 1;
+    if count < 2 {
+        return Err(GridError::Parse(format!(
+            "NTv2 subgrid {name} has fewer than two {axis} cells"
+        )));
+    }
+    Ok(count)
 }
 
 #[derive(Clone)]
@@ -1093,8 +1219,11 @@ fn parse_label(bytes: &[u8]) -> String {
 }
 
 fn read_u32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<u32, GridError> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| GridError::Parse("integer offset overflow".into()))?;
     let slice = bytes
-        .get(offset..offset + 4)
+        .get(offset..end)
         .ok_or_else(|| GridError::Parse("truncated integer".into()))?;
     Ok(match endian {
         Endian::Little => u32::from_le_bytes(slice.try_into().expect("slice length checked")),
@@ -1103,8 +1232,11 @@ fn read_u32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 }
 
 fn read_i32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<i32, GridError> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| GridError::Parse("integer offset overflow".into()))?;
     let slice = bytes
-        .get(offset..offset + 4)
+        .get(offset..end)
         .ok_or_else(|| GridError::Parse("truncated integer".into()))?;
     Ok(match endian {
         Endian::Little => i32::from_le_bytes(slice.try_into().expect("slice length checked")),
@@ -1113,8 +1245,11 @@ fn read_i32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 }
 
 fn read_f64(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<f64, GridError> {
+    let end = offset
+        .checked_add(8)
+        .ok_or_else(|| GridError::Parse("float64 offset overflow".into()))?;
     let slice = bytes
-        .get(offset..offset + 8)
+        .get(offset..end)
         .ok_or_else(|| GridError::Parse("truncated float64".into()))?;
     Ok(match endian {
         Endian::Little => f64::from_le_bytes(slice.try_into().expect("slice length checked")),
@@ -1123,8 +1258,11 @@ fn read_f64(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 }
 
 fn read_f32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<f32, GridError> {
+    let end = offset
+        .checked_add(4)
+        .ok_or_else(|| GridError::Parse("float32 offset overflow".into()))?;
     let slice = bytes
-        .get(offset..offset + 4)
+        .get(offset..end)
         .ok_or_else(|| GridError::Parse("truncated float32".into()))?;
     Ok(match endian {
         Endian::Little => f32::from_le_bytes(slice.try_into().expect("slice length checked")),
@@ -1135,6 +1273,7 @@ fn read_f32(bytes: &[u8], offset: usize, endian: Endian) -> std::result::Result<
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proptest::prelude::*;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Barrier;
     use std::time::Duration;
@@ -1310,6 +1449,149 @@ mod tests {
             interpolation: GridInterpolation::Bilinear,
             area_of_use: None,
             resource_names: SmallVec::from_vec(vec!["ntv2_0.gsb".into()]),
+        }
+    }
+
+    fn write_ntv2_global_header(header: &mut [u8], num_subfiles: u32) {
+        header[8..12].copy_from_slice(&11u32.to_le_bytes());
+        header[40..44].copy_from_slice(&num_subfiles.to_le_bytes());
+        header[56..63].copy_from_slice(b"SECONDS");
+    }
+
+    fn write_ntv2_label(header: &mut [u8], offset: usize, value: &str) {
+        header[offset..offset + 8].fill(b' ');
+        let bytes = value.as_bytes();
+        let len = bytes.len().min(8);
+        header[offset..offset + len].copy_from_slice(&bytes[..len]);
+    }
+
+    fn write_ntv2_f64(header: &mut [u8], offset: usize, value: f64) {
+        header[offset..offset + 8].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn write_ntv2_f64_bits(header: &mut [u8], offset: usize, bits: u64) {
+        header[offset..offset + 8].copy_from_slice(&bits.to_le_bytes());
+    }
+
+    fn write_ntv2_u32(header: &mut [u8], offset: usize, value: u32) {
+        header[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
+    fn minimal_ntv2_bytes() -> Vec<u8> {
+        let mut bytes = vec![0u8; NTV2_HEADER_LEN * 2 + 4 * NTV2_RECORD_LEN];
+        write_ntv2_global_header(&mut bytes[..NTV2_HEADER_LEN], 1);
+
+        let header = &mut bytes[NTV2_HEADER_LEN..NTV2_HEADER_LEN * 2];
+        header[0..8].copy_from_slice(b"SUB_NAME");
+        write_ntv2_label(header, 8, "TEST");
+        write_ntv2_label(header, 24, "NONE");
+        write_ntv2_f64(header, 72, 0.0);
+        write_ntv2_f64(header, 88, 3600.0);
+        write_ntv2_f64(header, 104, 0.0);
+        write_ntv2_f64(header, 120, 3600.0);
+        write_ntv2_f64(header, 136, 3600.0);
+        write_ntv2_f64(header, 152, 3600.0);
+        write_ntv2_u32(header, 168, 4);
+
+        bytes
+    }
+
+    fn grid_handle_parse_error(bytes: &[u8]) -> String {
+        match GridHandle::from_bytes(test_grid_definition(), bytes) {
+            Ok(_) => panic!("expected NTv2 parse failure"),
+            Err(GridError::Parse(message)) => message,
+            Err(error) => panic!("expected NTv2 parse error, got {error}"),
+        }
+    }
+
+    #[test]
+    fn ntv2_rejects_oversized_resource_length_before_reading() {
+        let message = match validate_grid_resource_size(
+            "oversized.gsb",
+            GridFormat::Ntv2,
+            MAX_NTV2_GRID_BYTES as u64 + 1,
+        ) {
+            Ok(()) => panic!("expected NTv2 resource size failure"),
+            Err(GridError::Parse(message)) => message,
+            Err(error) => panic!("expected NTv2 parse error, got {error}"),
+        };
+
+        assert!(message.contains("maximum Ntv2 grid size"), "{message}");
+    }
+
+    #[test]
+    fn grid_handle_rejects_excessive_ntv2_subfile_count_before_allocation() {
+        let mut bytes = vec![0u8; NTV2_HEADER_LEN];
+        write_ntv2_global_header(&mut bytes, u32::MAX);
+
+        let message = grid_handle_parse_error(&bytes);
+
+        assert!(message.contains("subfile count"), "{message}");
+    }
+
+    #[test]
+    fn ntv2_rejects_excessive_axis_count_before_cell_multiplication() {
+        let mut bytes = minimal_ntv2_bytes();
+        let header = &mut bytes[NTV2_HEADER_LEN..NTV2_HEADER_LEN * 2];
+        write_ntv2_f64(header, 120, MAX_NTV2_CELLS_PER_SUBGRID as f64);
+        write_ntv2_f64(header, 152, 1.0);
+
+        let message = grid_handle_parse_error(&bytes);
+
+        assert!(
+            message.contains("longitude cell count exceeds limit"),
+            "{message}"
+        );
+    }
+
+    #[test]
+    fn ntv2_rejects_excessive_subgrid_cell_count_before_allocation() {
+        let mut bytes = minimal_ntv2_bytes();
+        let header = &mut bytes[NTV2_HEADER_LEN..NTV2_HEADER_LEN * 2];
+        write_ntv2_f64(header, 88, 4096.0);
+        write_ntv2_f64(header, 120, 4096.0);
+        write_ntv2_f64(header, 136, 1.0);
+        write_ntv2_f64(header, 152, 1.0);
+        write_ntv2_u32(header, 168, 16_785_409);
+
+        let message = grid_handle_parse_error(&bytes);
+
+        assert!(message.contains("exceeding limit"), "{message}");
+    }
+
+    proptest! {
+        #![proptest_config(ProptestConfig::with_cases(256))]
+
+        #[test]
+        fn ntv2_malformed_subfile_header_fuzz_does_not_panic(
+            name in proptest::collection::vec(any::<u8>(), 8),
+            parent in proptest::collection::vec(any::<u8>(), 8),
+            south_bits in any::<u64>(),
+            north_bits in any::<u64>(),
+            east_bits in any::<u64>(),
+            west_bits in any::<u64>(),
+            res_y_bits in any::<u64>(),
+            res_x_bits in any::<u64>(),
+            gs_count in any::<u32>(),
+            data in proptest::collection::vec(any::<u8>(), 0..512),
+        ) {
+            let mut bytes = vec![0u8; NTV2_HEADER_LEN * 2];
+            write_ntv2_global_header(&mut bytes[..NTV2_HEADER_LEN], 1);
+
+            let header = &mut bytes[NTV2_HEADER_LEN..NTV2_HEADER_LEN * 2];
+            header[0..8].copy_from_slice(b"SUB_NAME");
+            header[8..16].copy_from_slice(&name);
+            header[24..32].copy_from_slice(&parent);
+            write_ntv2_f64_bits(header, 72, south_bits);
+            write_ntv2_f64_bits(header, 88, north_bits);
+            write_ntv2_f64_bits(header, 104, east_bits);
+            write_ntv2_f64_bits(header, 120, west_bits);
+            write_ntv2_f64_bits(header, 136, res_y_bits);
+            write_ntv2_f64_bits(header, 152, res_x_bits);
+            write_ntv2_u32(header, 168, gs_count);
+            bytes.extend_from_slice(&data);
+
+            let _ = Ntv2GridSet::parse(&bytes);
         }
     }
 
