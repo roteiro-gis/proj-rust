@@ -284,7 +284,7 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
         extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
         &extract_coordinate_system(base_geographic_inner),
     )?;
-    let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree);
+    let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree)?;
 
     // Extract common parameters
     let lon0 = first_param(
@@ -668,7 +668,7 @@ fn parse_wkt_parameters(
     s: &str,
     projected_linear_unit: LinearUnit,
     base_angle_unit_to_degree: f64,
-) -> HashMap<String, f64> {
+) -> Result<HashMap<String, f64>> {
     let mut params = HashMap::new();
     let mut search_start = 0usize;
 
@@ -676,11 +676,12 @@ fn parse_wkt_parameters(
         let start = search_start + rel;
         if let Some((name, inner, next)) = parse_wkt_element(s, start) {
             if name.eq_ignore_ascii_case("PARAMETER") {
-                if let Some((key, value)) =
-                    parse_parameter_element(inner, projected_linear_unit, base_angle_unit_to_degree)
-                {
-                    params.insert(key, value);
-                }
+                let (key, value) = parse_parameter_element(
+                    inner,
+                    projected_linear_unit,
+                    base_angle_unit_to_degree,
+                )?;
+                params.insert(key, value);
                 search_start = next;
                 continue;
             }
@@ -688,34 +689,53 @@ fn parse_wkt_parameters(
         search_start = start + "PARAMETER[".len();
     }
 
-    params
+    Ok(params)
 }
 
 fn parse_parameter_element(
     inner: &str,
     projected_linear_unit: LinearUnit,
     base_angle_unit_to_degree: f64,
-) -> Option<(String, f64)> {
+) -> Result<(String, f64)> {
     let fields = split_top_level_fields(inner);
+    let name = fields
+        .first()
+        .map(|field| trim_wkt_token(field))
+        .unwrap_or("");
+    if name.is_empty() {
+        return Err(ParseError::Parse(
+            "WKT projection parameter is missing a name".into(),
+        ));
+    }
     if fields.len() < 2 {
-        return None;
+        return Err(ParseError::Parse(format!(
+            "WKT projection parameter `{name}` is missing a numeric value"
+        )));
     }
 
-    let name = trim_wkt_token(fields[0]);
     let normalized_name = normalize_key(name);
-    let value = fields[1].trim().parse::<f64>().ok()?;
+    let value = parse_wkt_projection_parameter_number(name, fields[1].trim())?;
     let unit_kind = projection_parameter_unit_kind(&normalized_name);
 
-    let nested_factor = fields.iter().skip(2).find_map(|field| {
+    let mut nested_factor = None;
+    for field in fields.iter().skip(2) {
         let field = field.trim();
-        let (unit_name, unit_inner, _) = parse_wkt_element(field, 0)?;
-        match unit_name.to_ascii_uppercase().as_str() {
-            "ANGLEUNIT" => parse_unit_factor(unit_inner).map(radians_to_degrees_factor),
-            "LENGTHUNIT" | "UNIT" => parse_unit_factor(unit_inner),
-            "SCALEUNIT" => parse_unit_factor(unit_inner),
+        let Some((unit_name, unit_inner, _)) = parse_wkt_element(field, 0) else {
+            continue;
+        };
+        nested_factor = match unit_name.to_ascii_uppercase().as_str() {
+            "ANGLEUNIT" => Some(radians_to_degrees_factor(parse_wkt_parameter_unit_factor(
+                name, unit_inner,
+            )?)),
+            "LENGTHUNIT" | "UNIT" | "SCALEUNIT" => {
+                Some(parse_wkt_parameter_unit_factor(name, unit_inner)?)
+            }
             _ => None,
+        };
+        if nested_factor.is_some() {
+            break;
         }
-    });
+    }
 
     let default_factor = match unit_kind {
         ProjectionParameterUnitKind::Angle => base_angle_unit_to_degree,
@@ -723,10 +743,38 @@ fn parse_parameter_element(
         ProjectionParameterUnitKind::Scale | ProjectionParameterUnitKind::Other => 1.0,
     };
 
-    Some((
+    Ok((
         normalized_name,
         value * nested_factor.unwrap_or(default_factor),
     ))
+}
+
+fn parse_wkt_projection_parameter_number(name: &str, raw: &str) -> Result<f64> {
+    let value = raw.parse::<f64>().map_err(|_| {
+        ParseError::Parse(format!(
+            "invalid WKT projection parameter `{name}` value: {raw}"
+        ))
+    })?;
+    if !value.is_finite() {
+        return Err(ParseError::Parse(format!(
+            "WKT projection parameter `{name}` value must be finite"
+        )));
+    }
+    Ok(value)
+}
+
+fn parse_wkt_parameter_unit_factor(parameter_name: &str, inner: &str) -> Result<f64> {
+    let factor = parse_unit_factor(inner).ok_or_else(|| {
+        ParseError::Parse(format!(
+            "invalid WKT projection parameter `{parameter_name}` unit factor"
+        ))
+    })?;
+    if !factor.is_finite() {
+        return Err(ParseError::Parse(format!(
+            "WKT projection parameter `{parameter_name}` unit factor must be finite"
+        )));
+    }
+    Ok(factor)
 }
 
 fn split_top_level_fields(s: &str) -> Vec<&str> {
@@ -1081,6 +1129,24 @@ mod tests {
         let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
         let crs = parse_wkt(wkt).unwrap();
         assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn reject_projected_wkt_with_invalid_parameter_value() {
+        let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian","not-a-number"],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
+        let err = parse_wkt(wkt).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("invalid WKT projection parameter `central_meridian` value"));
+    }
+
+    #[test]
+    fn reject_projected_wkt_with_missing_parameter_value() {
+        let wkt = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian"],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0]]"#;
+        let err = parse_wkt(wkt).unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("WKT projection parameter `central_meridian` is missing a numeric value"));
     }
 
     #[test]
