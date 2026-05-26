@@ -1,4 +1,5 @@
 use crate::ellipsoid::{self, Ellipsoid};
+use crate::error::{Error, Result};
 use crate::grid::GridDefinition;
 use smallvec::SmallVec;
 
@@ -89,6 +90,13 @@ impl DatumToWgs84 {
     pub fn uses_grid_shift(&self) -> bool {
         matches!(self, DatumToWgs84::GridShift(shift) if shift.uses_grid_shift())
     }
+
+    pub fn validate(&self) -> Result<()> {
+        match self {
+            Self::Helmert(params) => params.validate(),
+            Self::Identity | Self::GridShift(_) | Self::Unknown => Ok(()),
+        }
+    }
 }
 
 /// Ordered PROJ-style datum grid list.
@@ -169,6 +177,23 @@ impl HelmertParams {
             rz: 0.0,
             ds: 0.0,
         }
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if self.dx.is_finite()
+            && self.dy.is_finite()
+            && self.dz.is_finite()
+            && self.rx.is_finite()
+            && self.ry.is_finite()
+            && self.rz.is_finite()
+            && self.ds.is_finite()
+        {
+            return Ok(());
+        }
+
+        Err(Error::InvalidDefinition(
+            "Helmert parameters must be finite".into(),
+        ))
     }
 
     /// Return the inverse parameters (WGS84 → this datum).
@@ -327,5 +352,34 @@ mod tests {
         assert_eq!(inv.dx, -1.0);
         assert_eq!(inv.rx, -0.1);
         assert_eq!(inv.ds, -0.5);
+    }
+
+    #[test]
+    fn helmert_params_reject_non_finite_values() {
+        let err = HelmertParams {
+            dx: f64::NAN,
+            dy: 0.0,
+            dz: 0.0,
+            rx: 0.0,
+            ry: 0.0,
+            rz: 0.0,
+            ds: 0.0,
+        }
+        .validate()
+        .unwrap_err();
+        assert!(matches!(err, Error::InvalidDefinition(_)), "got {err}");
+
+        let err = HelmertParams {
+            dx: 0.0,
+            dy: 0.0,
+            dz: 0.0,
+            rx: 0.0,
+            ry: 0.0,
+            rz: f64::INFINITY,
+            ds: 0.0,
+        }
+        .validate()
+        .unwrap_err();
+        assert!(err.to_string().contains("Helmert parameters"), "{err}");
     }
 }

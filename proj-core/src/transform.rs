@@ -1,5 +1,5 @@
 use crate::coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
-use crate::crs::{CrsDef, LinearUnit, VerticalCrsDef};
+use crate::crs::{CrsDef, LinearUnit, VerticalCrsDef, VerticalCrsKind};
 use crate::datum::{DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams};
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
@@ -529,6 +529,9 @@ impl Transform {
         to: &CrsDef,
         options: SelectionOptions,
     ) -> Result<Self> {
+        validate_transform_crs_definition(from)?;
+        validate_transform_crs_definition(to)?;
+
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
         let vertical_transform = compile_vertical_transform(from, to, &options, &grid_runtime)?;
         let candidate_set = selector::rank_operation_candidates(from, to, &options)?;
@@ -1067,8 +1070,10 @@ impl Transform {
         validate_vertical_ordinate(c.z)?;
         let xy = execute_pipeline_xy(pipeline, c)?;
         let vertical = self.vertical_transform.apply(c)?;
+        let coord = Coord3D::new(xy.x, xy.y, vertical.z);
+        validate_pipeline_coord3d("pipeline final output", coord)?;
         Ok(PipelineExecutionOutcome {
-            coord: Coord3D::new(xy.x, xy.y, vertical.z),
+            coord,
             vertical: vertical.diagnostics,
         })
     }
@@ -1081,7 +1086,9 @@ impl Transform {
         validate_vertical_ordinate(c.z)?;
         let xy = execute_pipeline_xy(pipeline, c)?;
         let z = self.vertical_transform.apply_z(c)?;
-        Ok(Coord3D::new(xy.x, xy.y, z))
+        let coord = Coord3D::new(xy.x, xy.y, z);
+        validate_pipeline_coord3d("pipeline final output", coord)?;
+        Ok(coord)
     }
 
     /// Batch transform (sequential).
@@ -1657,14 +1664,14 @@ fn skipped_for_unselected_candidate(
 }
 
 fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
-    match step {
+    let result = match step {
         CompiledStep::ProjectionForward { projection } => {
             let (x, y) = projection.forward(coord.x, coord.y)?;
-            Ok(Coord3D::new(x, y, coord.z))
+            Coord3D::new(x, y, coord.z)
         }
         CompiledStep::ProjectionInverse { projection } => {
             let (lon, lat) = projection.inverse(coord.x, coord.y)?;
-            Ok(Coord3D::new(lon, lat, coord.z))
+            Coord3D::new(lon, lat, coord.z)
         }
         CompiledStep::Helmert { params, inverse } => {
             let (x, y, z) = if *inverse {
@@ -1672,11 +1679,11 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
             } else {
                 helmert::helmert_forward(params, coord.x, coord.y, coord.z)
             };
-            Ok(Coord3D::new(x, y, z))
+            Coord3D::new(x, y, z)
         }
         CompiledStep::GridShift { handle, direction } => {
             let (lon, lat) = handle.apply(coord.x, coord.y, *direction)?;
-            Ok(Coord3D::new(lon, lat, coord.z))
+            Coord3D::new(lon, lat, coord.z)
         }
         CompiledStep::GridShiftList {
             handles,
@@ -1684,9 +1691,13 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
             direction,
         } => {
             let mut last_coverage_miss = None;
+            let mut shifted = None;
             for handle in handles.iter() {
                 match handle.apply(coord.x, coord.y, *direction) {
-                    Ok((lon, lat)) => return Ok(Coord3D::new(lon, lat, coord.z)),
+                    Ok((lon, lat)) => {
+                        shifted = Some(Coord3D::new(lon, lat, coord.z));
+                        break;
+                    }
                     Err(GridError::OutsideCoverage(detail)) => {
                         last_coverage_miss = Some(detail);
                     }
@@ -1694,38 +1705,63 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
                 }
             }
 
-            if *allow_null {
-                return Ok(coord);
+            if let Some(coord) = shifted {
+                coord
+            } else if *allow_null {
+                coord
+            } else {
+                return Err(Error::Grid(GridError::OutsideCoverage(
+                    last_coverage_miss.unwrap_or_else(|| "no datum grid covered coordinate".into()),
+                )));
             }
-
-            Err(Error::Grid(GridError::OutsideCoverage(
-                last_coverage_miss.unwrap_or_else(|| "no datum grid covered coordinate".into()),
-            )))
         }
         CompiledStep::GeodeticToGeocentric { ellipsoid } => {
             let (x, y, z) =
                 geocentric::geodetic_to_geocentric(ellipsoid, coord.x, coord.y, coord.z);
-            Ok(Coord3D::new(x, y, z))
+            Coord3D::new(x, y, z)
         }
         CompiledStep::GeocentricToGeodetic { ellipsoid } => {
             let (lon, lat, h) =
                 geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z);
-            Ok(Coord3D::new(lon, lat, h))
+            Coord3D::new(lon, lat, h)
         }
-    }
+    };
+
+    validate_pipeline_coord3d("pipeline step output", result)?;
+    Ok(result)
 }
 
 fn execute_pipeline_xy(pipeline: &CompiledOperationPipeline, c: Coord3D) -> Result<Coord> {
     let mut state = pipeline.source_xy_units.normalize(c)?;
     if pipeline.steps.is_empty() {
-        return Ok(Coord::new(c.x, c.y));
+        let output = Coord::new(c.x, c.y);
+        validate_pipeline_coord("pipeline final output", output)?;
+        return Ok(output);
     }
 
     for step in &pipeline.steps {
         state = execute_step(step, state)?;
     }
 
-    Ok(pipeline.target_xy_units.denormalize(state))
+    let output = pipeline.target_xy_units.denormalize(state);
+    validate_pipeline_coord("pipeline final output", output)?;
+    Ok(output)
+}
+
+fn validate_pipeline_coord(context: &str, coord: Coord) -> Result<()> {
+    if coord.x.is_finite() && coord.y.is_finite() {
+        return Ok(());
+    }
+
+    Err(Error::OutOfRange(format!("{context} must be finite")))
+}
+
+fn validate_pipeline_coord3d(context: &str, coord: Coord3D) -> Result<()> {
+    if coord.x.is_finite() && coord.y.is_finite() && coord.z.is_finite() {
+        return Ok(());
+    }
+
+    Err(Error::OutOfRange(format!("{context} must be finite")))
 }
 
 fn validate_vertical_ordinate(z: f64) -> Result<()> {
@@ -1733,6 +1769,16 @@ fn validate_vertical_ordinate(z: f64) -> Result<()> {
         return Err(Error::OutOfRange(
             "vertical input coordinate must be finite".into(),
         ));
+    }
+    Ok(())
+}
+
+fn validate_transform_crs_definition(crs: &CrsDef) -> Result<()> {
+    crs.datum().to_wgs84.validate()?;
+    if let Some(vertical) = crs.vertical_crs() {
+        if let VerticalCrsKind::EllipsoidalHeight { datum } = vertical.kind() {
+            datum.to_wgs84.validate()?;
+        }
     }
     Ok(())
 }
@@ -1789,6 +1835,7 @@ fn compile_operation(
     match (&operation.method, direction) {
         (OperationMethod::Identity, _) => {}
         (OperationMethod::Helmert { params }, OperationStepDirection::Forward) => {
+            params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
                 ellipsoid: source_geo.datum().ellipsoid,
             });
@@ -1801,6 +1848,7 @@ fn compile_operation(
             });
         }
         (OperationMethod::Helmert { params }, OperationStepDirection::Reverse) => {
+            params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
                 ellipsoid: source_geo.datum().ellipsoid,
             });
@@ -1912,6 +1960,7 @@ fn compile_to_wgs84(
     match transform {
         DatumToWgs84::Identity => Ok(()),
         DatumToWgs84::Helmert(params) => {
+            params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
                 ellipsoid: source_ellipsoid,
             });
@@ -1942,6 +1991,7 @@ fn compile_from_wgs84(
     match transform {
         DatumToWgs84::Identity => Ok(()),
         DatumToWgs84::Helmert(params) => {
+            params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
                 ellipsoid: ellipsoid::WGS84,
             });
@@ -2478,6 +2528,84 @@ mod tests {
         let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
         let err = t.convert_3d((0.0, 0.0, f64::NAN)).unwrap_err();
         assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+    }
+
+    #[test]
+    fn custom_datum_rejects_non_finite_helmert_params() {
+        let source = CrsDef::Geographic(GeographicCrsDef::new(
+            0,
+            datum::Datum {
+                ellipsoid: datum::WGS84.ellipsoid,
+                to_wgs84: DatumToWgs84::Helmert(datum::HelmertParams {
+                    dx: f64::NAN,
+                    dy: 0.0,
+                    dz: 0.0,
+                    rx: 0.0,
+                    ry: 0.0,
+                    rz: 0.0,
+                    ds: 0.0,
+                }),
+            },
+            "Invalid Helmert datum",
+        ));
+        let target = registry::lookup_epsg(4326).unwrap();
+
+        let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
+
+        assert!(matches!(err, Error::InvalidDefinition(_)), "got {err}");
+        assert!(err.to_string().contains("Helmert parameters"), "{err}");
+    }
+
+    #[test]
+    fn pipeline_rejects_non_finite_step_output() {
+        let source = CrsDef::Geographic(GeographicCrsDef::new(
+            0,
+            datum::Datum {
+                ellipsoid: datum::WGS84.ellipsoid,
+                to_wgs84: DatumToWgs84::Helmert(datum::HelmertParams {
+                    dx: 0.0,
+                    dy: 0.0,
+                    dz: 0.0,
+                    rx: 0.0,
+                    ry: 0.0,
+                    rz: 0.0,
+                    ds: f64::MAX,
+                }),
+            },
+            "Overflowing Helmert datum",
+        ));
+        let target = registry::lookup_epsg(4326).unwrap();
+        let transform = Transform::from_crs_defs_with_selection_options(
+            &source,
+            &target,
+            SelectionOptions::new().allow_approximate_helmert_fallback(),
+        )
+        .unwrap();
+
+        let err = transform.convert((0.0, 0.0)).unwrap_err();
+
+        assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+        assert!(err.to_string().contains("pipeline step output"), "{err}");
+    }
+
+    #[test]
+    fn pipeline_rejects_non_finite_final_output_after_unit_conversion() {
+        let source = registry::lookup_epsg(4326).unwrap();
+        let tiny_unit = LinearUnit::from_meters_per_unit(f64::MIN_POSITIVE).unwrap();
+        let target = CrsDef::Projected(ProjectedCrsDef::new_with_base_geographic_crs(
+            0,
+            4326,
+            datum::WGS84,
+            ProjectionMethod::WebMercator,
+            tiny_unit,
+            "WGS 84 / Pseudo-Mercator in tiny units",
+        ));
+        let transform = Transform::from_crs_defs(&source, &target).unwrap();
+
+        let err = transform.convert((-74.006, 40.7128)).unwrap_err();
+
+        assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
+        assert!(err.to_string().contains("pipeline final output"), "{err}");
     }
 
     #[test]

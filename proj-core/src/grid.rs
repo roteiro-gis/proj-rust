@@ -747,10 +747,15 @@ impl Ntv2GridSet {
             for y in 0..height {
                 for x in 0..width {
                     let source_x = width - 1 - x;
-                    let record_offset = (y * width + source_x) * 16;
+                    let record_offset = (y * width + source_x) * NTV2_RECORD_LEN;
                     let lat = read_f32(data, record_offset, endian)? as f64 * PI / 180.0 / 3600.0;
                     let lon =
                         -(read_f32(data, record_offset + 4, endian)? as f64) * PI / 180.0 / 3600.0;
+                    if !(lat.is_finite() && lon.is_finite()) {
+                        return Err(GridError::Parse(format!(
+                            "non-finite NTv2 shift value in subgrid {name}"
+                        )));
+                    }
                     let dest = y * width + x;
                     lat_shift[dest] = lat;
                     lon_shift[dest] = lon;
@@ -1473,6 +1478,10 @@ mod tests {
         header[offset..offset + 8].copy_from_slice(&bits.to_le_bytes());
     }
 
+    fn write_ntv2_f32(bytes: &mut [u8], offset: usize, value: f32) {
+        bytes[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
+    }
+
     fn write_ntv2_u32(header: &mut [u8], offset: usize, value: u32) {
         header[offset..offset + 4].copy_from_slice(&value.to_le_bytes());
     }
@@ -1557,6 +1566,16 @@ mod tests {
         let message = grid_handle_parse_error(&bytes);
 
         assert!(message.contains("exceeding limit"), "{message}");
+    }
+
+    #[test]
+    fn ntv2_rejects_non_finite_shift_values() {
+        let mut bytes = minimal_ntv2_bytes();
+        write_ntv2_f32(&mut bytes, NTV2_HEADER_LEN * 2, f32::NAN);
+
+        let message = grid_handle_parse_error(&bytes);
+
+        assert!(message.contains("non-finite NTv2 shift value"), "{message}");
     }
 
     proptest! {
