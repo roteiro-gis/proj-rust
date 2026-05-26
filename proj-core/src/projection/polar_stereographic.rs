@@ -132,7 +132,7 @@ impl super::ProjectionImpl for PolarStereographic {
         let t = compute_t(effective_lat, e);
         let rho = self.two_a_k0 * t / t_polar;
 
-        let d_lon = lon - self.lon0;
+        let d_lon = normalize_longitude(lon - self.lon0);
 
         let x = self.false_easting + rho * d_lon.sin();
         let y = self.false_northing - sign * rho * d_lon.cos();
@@ -225,6 +225,26 @@ mod tests {
         let (lon_back, lat_back) = proj.inverse(x, y).unwrap();
         assert!((lon_back - lon).abs() < 1e-8, "lon: {lon_back} vs {lon}");
         assert!((lat_back - lat).abs() < 1e-8, "lat: {lat_back} vs {lat}");
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj = PolarStereographic::new(
+            ellipsoid::WGS84,
+            179.0_f64.to_radians(),
+            70.0_f64.to_radians(),
+            1.0,
+            0.0,
+            0.0,
+        )
+        .unwrap();
+        let lat = 80.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 
     #[test]

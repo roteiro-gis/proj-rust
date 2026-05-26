@@ -1,8 +1,8 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
-    validate_lon_lat, validate_offset, validate_projected,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected,
 };
 
 /// Albers Equal Area Conic projection.
@@ -109,7 +109,7 @@ impl super::ProjectionImpl for AlbersEqualArea {
         validate_lon_lat(lon, lat)?;
         let q = q_func(lat, self.e2);
         let rho = self.a * (self.c - self.n * q).abs().sqrt() / self.n;
-        let theta = self.n * (lon - self.lon0);
+        let theta = self.n * normalize_longitude(lon - self.lon0);
 
         let x = self.false_easting + rho * theta.sin();
         let y = self.false_northing + self.rho0 - rho * theta.cos();
@@ -169,5 +169,26 @@ mod tests {
             lat2.to_degrees(),
             lat.to_degrees()
         );
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj = AlbersEqualArea::new(
+            ellipsoid::GRS80,
+            179.0_f64.to_radians(),
+            23.0_f64.to_radians(),
+            29.5_f64.to_radians(),
+            45.5_f64.to_radians(),
+            0.0,
+            0.0,
+        )
+        .unwrap();
+        let lat = 37.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 }
