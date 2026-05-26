@@ -3,7 +3,8 @@ use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 use crate::ellipsoid::{self, Ellipsoid};
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_lon_lat, validate_projected,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_lon_lat,
+    validate_projected,
 };
 
 /// Web Mercator (EPSG:3857) projection.
@@ -36,7 +37,7 @@ impl super::ProjectionImpl for WebMercator {
             )));
         }
 
-        let x = self.a * lon;
+        let x = self.a * normalize_longitude(lon);
         let y = self.a * (FRAC_PI_4 + lat / 2.0).tan().ln();
 
         ensure_finite_xy("Web Mercator", x, y)
@@ -79,6 +80,18 @@ mod tests {
         let (lon_back, lat_back) = proj.inverse(x, y).unwrap();
         assert!((lon_back - lon).abs() < 1e-10);
         assert!((lat_back - lat).abs() < 1e-10);
+    }
+
+    #[test]
+    fn forward_wraps_longitude() {
+        let proj = WebMercator::new().unwrap();
+        let lat = 40.0_f64.to_radians();
+
+        let wrapped = proj.forward(181.0_f64.to_radians(), lat).unwrap();
+        let canonical = proj.forward((-179.0_f64).to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 
     #[test]

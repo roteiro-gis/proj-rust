@@ -1,8 +1,8 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
-    validate_lon_lat, validate_offset, validate_projected, validate_scale,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected, validate_scale,
 };
 
 /// Standard Mercator projection (ellipsoidal, 1SP/2SP).
@@ -67,7 +67,7 @@ impl super::ProjectionImpl for Mercator {
         let sin_lat = lat.sin();
         let e_sin = self.e * sin_lat;
 
-        let x = self.false_easting + self.a_k0 * (lon - self.lon0);
+        let x = self.false_easting + self.a_k0 * normalize_longitude(lon - self.lon0);
         let y = self.false_northing
             + self.a_k0
                 * ((std::f64::consts::FRAC_PI_4 + lat / 2.0).tan()
@@ -135,6 +135,19 @@ mod tests {
         let (x, y) = proj.forward(0.0, 0.0).unwrap();
         assert!(x.abs() < 0.01, "x = {x}");
         assert!(y.abs() < 0.01, "y = {y}");
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj =
+            Mercator::new(ellipsoid::WGS84, 179.0_f64.to_radians(), 0.0, 1.0, 0.0, 0.0).unwrap();
+        let lat = 40.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 
     #[test]

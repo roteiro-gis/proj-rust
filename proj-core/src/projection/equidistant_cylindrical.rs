@@ -1,13 +1,13 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
-    validate_lon_lat, validate_offset, validate_projected,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected,
 };
 
 /// Equidistant Cylindrical (Plate Carree) projection.
 ///
-/// The simplest projection: x = a * cos(lat_ts) * (lon - lon0), y = a * (lat - lat0).
+/// The simplest projection: x = a * cos(lat_ts) * normalized(lon - lon0), y = a * lat.
 /// When lat_ts = 0, this is the standard Plate Carree.
 pub(crate) struct EquidistantCylindrical {
     a_cos_lat_ts: f64,
@@ -51,7 +51,7 @@ impl EquidistantCylindrical {
 impl super::ProjectionImpl for EquidistantCylindrical {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
-        let x = self.false_easting + self.a_cos_lat_ts * (lon - self.lon0);
+        let x = self.false_easting + self.a_cos_lat_ts * normalize_longitude(lon - self.lon0);
         let y = self.false_northing + self.a * lat;
         ensure_finite_xy("Equidistant Cylindrical", x, y)
     }
@@ -89,6 +89,20 @@ mod tests {
         let (x, y) = proj.forward(0.0, 0.0).unwrap();
         assert!(x.abs() < 0.01);
         assert!(y.abs() < 0.01);
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj =
+            EquidistantCylindrical::new(ellipsoid::WGS84, 179.0_f64.to_radians(), 0.0, 0.0, 0.0)
+                .unwrap();
+        let lat = 40.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 
     #[test]

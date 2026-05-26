@@ -1,8 +1,8 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::Result;
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
-    validate_lon_lat, validate_offset, validate_projected, validate_scale,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected, validate_scale,
 };
 
 /// Transverse Mercator projection.
@@ -128,7 +128,7 @@ impl super::ProjectionImpl for TransverseMercator {
         let k0 = self.k0;
 
         let phi = lat;
-        let d_lon = lon - self.lon0;
+        let d_lon = normalize_longitude(lon - self.lon0);
 
         let sin_phi = phi.sin();
         let cos_phi = phi.cos();
@@ -253,5 +253,25 @@ mod tests {
         let (x, y) = proj.forward(lon, lat).unwrap();
         assert!((x - 500000.0).abs() < TOLERANCE);
         assert!(y.abs() < TOLERANCE);
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj = TransverseMercator::new(
+            ellipsoid::WGS84,
+            179.0_f64.to_radians(),
+            0.0,
+            0.9996,
+            500_000.0,
+            0.0,
+        )
+        .unwrap();
+        let lat = 10.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 }

@@ -1,8 +1,8 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, validate_angle, validate_latitude_param,
-    validate_lon_lat, validate_offset, validate_projected,
+    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected,
 };
 
 /// Lambert Conformal Conic projection (1SP and 2SP).
@@ -101,7 +101,7 @@ impl super::ProjectionImpl for LambertConformalConic {
         validate_lon_lat(lon, lat)?;
         let t = t_func(lat, self.e);
         let rho = self.a * self.f_const * t.powf(self.n);
-        let theta = self.n * (lon - self.lon0);
+        let theta = self.n * normalize_longitude(lon - self.lon0);
 
         let x = self.false_easting + rho * theta.sin();
         let y = self.false_northing + self.rho0 - rho * theta.cos();
@@ -185,5 +185,26 @@ mod tests {
 
         assert!((lon2 - lon).abs() < 1e-8);
         assert!((lat2 - lat).abs() < 1e-8);
+    }
+
+    #[test]
+    fn forward_wraps_longitude_delta() {
+        let proj = LambertConformalConic::new(
+            ellipsoid::GRS80,
+            179.0_f64.to_radians(),
+            46.5_f64.to_radians(),
+            44.0_f64.to_radians(),
+            49.0_f64.to_radians(),
+            700_000.0,
+            6_600_000.0,
+        )
+        .unwrap();
+        let lat = 48.0_f64.to_radians();
+
+        let wrapped = proj.forward((-181.0_f64).to_radians(), lat).unwrap();
+        let canonical = proj.forward(179.0_f64.to_radians(), lat).unwrap();
+
+        assert!((wrapped.0 - canonical.0).abs() < 1e-8);
+        assert!((wrapped.1 - canonical.1).abs() < 1e-8);
     }
 }
