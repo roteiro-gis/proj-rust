@@ -122,7 +122,7 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         .ok_or_else(|| {
             ParseError::Parse("PROJJSON projected CRS is missing conversion.method.name".into())
         })?;
-    let params = parse_parameters(conversion, linear_unit, base_angle_unit_to_degree);
+    let params = parse_parameters(conversion, linear_unit, base_angle_unit_to_degree)?;
 
     let lon0 = first_param(
         &params,
@@ -536,35 +536,67 @@ fn parse_parameters(
     conversion: &Value,
     projected_linear_unit: LinearUnit,
     base_angle_unit_to_degree: f64,
-) -> HashMap<String, f64> {
+) -> Result<HashMap<String, f64>> {
     let mut params = HashMap::new();
-    let values = match conversion.get("parameters").and_then(Value::as_array) {
-        Some(values) => values,
-        None => return params,
+    let values = match conversion.get("parameters") {
+        Some(Value::Array(values)) => values,
+        Some(_) => {
+            return Err(ParseError::Parse(
+                "PROJJSON conversion.parameters must be an array".into(),
+            ));
+        }
+        None => return Ok(params),
     };
 
     for param in values {
-        let Some(name) = param.get("name").and_then(Value::as_str) else {
-            continue;
-        };
+        let name = param.get("name").and_then(Value::as_str).ok_or_else(|| {
+            ParseError::Parse("PROJJSON conversion parameter is missing a name".into())
+        })?;
         let normalized_name = normalize_key(name);
-        let value = match param.get("value") {
-            Some(Value::Number(n)) => n.as_f64(),
-            Some(Value::String(s)) => s.parse::<f64>().ok(),
-            _ => None,
-        };
-        if let Some(value) = value {
-            let factor = parameter_factor_from_json(
-                param,
-                &normalized_name,
-                projected_linear_unit,
-                base_angle_unit_to_degree,
-            );
-            params.insert(normalized_name, value * factor);
-        }
+        let value = parse_projjson_parameter_value(name, param.get("value"))?;
+        let factor = parameter_factor_from_json(
+            param,
+            &normalized_name,
+            projected_linear_unit,
+            base_angle_unit_to_degree,
+        );
+        params.insert(normalized_name, value * factor);
     }
 
-    params
+    Ok(params)
+}
+
+fn parse_projjson_parameter_value(name: &str, value: Option<&Value>) -> Result<f64> {
+    let Some(value) = value else {
+        return Err(ParseError::Parse(format!(
+            "PROJJSON conversion parameter `{name}` is missing value"
+        )));
+    };
+
+    let parsed = match value {
+        Value::Number(n) => n.as_f64().ok_or_else(|| {
+            ParseError::Parse(format!(
+                "invalid PROJJSON conversion parameter `{name}` value"
+            ))
+        })?,
+        Value::String(s) => s.parse::<f64>().map_err(|_| {
+            ParseError::Parse(format!(
+                "invalid PROJJSON conversion parameter `{name}` value: {s}"
+            ))
+        })?,
+        _ => {
+            return Err(ParseError::Parse(format!(
+                "invalid PROJJSON conversion parameter `{name}` value"
+            )));
+        }
+    };
+
+    if !parsed.is_finite() {
+        return Err(ParseError::Parse(format!(
+            "PROJJSON conversion parameter `{name}` value must be finite"
+        )));
+    }
+    Ok(parsed)
 }
 
 fn parameter_factor_from_json(
@@ -1247,6 +1279,68 @@ mod tests {
         .unwrap();
 
         assert!(crs.is_projected());
+    }
+
+    #[test]
+    fn rejects_projected_projjson_with_invalid_parameter_value() {
+        let err = parse_projjson(
+            r#"{
+                "type": "ProjectedCRS",
+                "name": "Custom UTM 18N",
+                "base_crs": {
+                    "name": "WGS 84",
+                    "datum": {
+                        "name": "World Geodetic System 1984"
+                    }
+                },
+                "conversion": {
+                    "method": { "name": "Transverse Mercator" },
+                    "parameters": [
+                        { "name": "Latitude of natural origin", "value": 0 },
+                        { "name": "Longitude of natural origin", "value": "not-a-number" },
+                        { "name": "Scale factor at natural origin", "value": 0.9996 },
+                        { "name": "False easting", "value": 500000 },
+                        { "name": "False northing", "value": 0 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err
+            .to_string()
+            .contains("invalid PROJJSON conversion parameter `Longitude of natural origin` value"));
+    }
+
+    #[test]
+    fn rejects_projected_projjson_with_missing_parameter_value() {
+        let err = parse_projjson(
+            r#"{
+                "type": "ProjectedCRS",
+                "name": "Custom UTM 18N",
+                "base_crs": {
+                    "name": "WGS 84",
+                    "datum": {
+                        "name": "World Geodetic System 1984"
+                    }
+                },
+                "conversion": {
+                    "method": { "name": "Transverse Mercator" },
+                    "parameters": [
+                        { "name": "Latitude of natural origin", "value": 0 },
+                        { "name": "Longitude of natural origin" },
+                        { "name": "Scale factor at natural origin", "value": 0.9996 },
+                        { "name": "False easting", "value": 500000 },
+                        { "name": "False northing", "value": 0 }
+                    ]
+                }
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains(
+            "PROJJSON conversion parameter `Longitude of natural origin` is missing value"
+        ));
     }
 
     #[test]
