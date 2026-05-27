@@ -49,7 +49,7 @@ impl PolarStereographic {
         let is_north = lat_ts >= 0.0;
         let e = ellipsoid.e();
         let e2 = ellipsoid.e2();
-        let a = ellipsoid.a;
+        let a = ellipsoid.semi_major_axis();
 
         // Determine k0:
         // If lat_ts is at the pole (±90°), use provided k0.

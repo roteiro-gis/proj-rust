@@ -636,8 +636,8 @@ fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<Coordi
         preferred: true,
         approximate: false,
         method: OperationMethod::DatumShift {
-            source_to_wgs84: source.datum().to_wgs84.clone(),
-            target_to_wgs84: target.datum().to_wgs84.clone(),
+            source_to_wgs84: source.datum().to_wgs84().clone(),
+            target_to_wgs84: target.datum().to_wgs84().clone(),
         },
     })
 }

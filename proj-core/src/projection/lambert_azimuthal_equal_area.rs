@@ -80,7 +80,7 @@ impl LambertAzimuthalEqualArea {
                 "Lambert Azimuthal Equal Area authalic radius is invalid".into(),
             ));
         }
-        let rq = ellipsoid.a * (q_p / 2.0).sqrt();
+        let rq = ellipsoid.semi_major_axis() * (q_p / 2.0).sqrt();
         let q0 = authalic_q(lat0, e2);
         let beta0 = authalic_latitude(q0, q_p);
         let sin_lat0 = lat0.sin();
@@ -105,7 +105,7 @@ impl LambertAzimuthalEqualArea {
                     ));
                 }
                 let sin_lat0 = lat0.sin();
-                ellipsoid.a * lat0.cos()
+                ellipsoid.semi_major_axis() * lat0.cos()
                     / ((1.0 - e2 * sin_lat0 * sin_lat0).sqrt() * rq * cos_beta0)
             }
             Aspect::NorthPolar | Aspect::SouthPolar => 1.0,
@@ -117,7 +117,7 @@ impl LambertAzimuthalEqualArea {
         }
 
         Ok(Self {
-            a: ellipsoid.a,
+            a: ellipsoid.semi_major_axis(),
             e2,
             spherical,
             spherical_radius: rq,

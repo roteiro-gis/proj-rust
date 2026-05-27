@@ -1774,10 +1774,10 @@ fn validate_vertical_ordinate(z: f64) -> Result<()> {
 }
 
 fn validate_transform_crs_definition(crs: &CrsDef) -> Result<()> {
-    crs.datum().to_wgs84.validate()?;
+    crs.datum().to_wgs84().validate()?;
     if let Some(vertical) = crs.vertical_crs() {
         if let VerticalCrsKind::EllipsoidalHeight { datum } = vertical.kind() {
-            datum.to_wgs84.validate()?;
+            datum.to_wgs84().validate()?;
         }
     }
     Ok(())
@@ -1837,27 +1837,27 @@ fn compile_operation(
         (OperationMethod::Helmert { params }, OperationStepDirection::Forward) => {
             params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
-                ellipsoid: source_geo.datum().ellipsoid,
+                ellipsoid: source_geo.datum().ellipsoid(),
             });
             steps.push(CompiledStep::Helmert {
                 params: *params,
                 inverse: false,
             });
             steps.push(CompiledStep::GeocentricToGeodetic {
-                ellipsoid: target_geo.datum().ellipsoid,
+                ellipsoid: target_geo.datum().ellipsoid(),
             });
         }
         (OperationMethod::Helmert { params }, OperationStepDirection::Reverse) => {
             params.validate()?;
             steps.push(CompiledStep::GeodeticToGeocentric {
-                ellipsoid: source_geo.datum().ellipsoid,
+                ellipsoid: source_geo.datum().ellipsoid(),
             });
             steps.push(CompiledStep::Helmert {
                 params: *params,
                 inverse: true,
             });
             steps.push(CompiledStep::GeocentricToGeodetic {
-                ellipsoid: target_geo.datum().ellipsoid,
+                ellipsoid: target_geo.datum().ellipsoid(),
             });
         }
         (
@@ -1869,13 +1869,13 @@ fn compile_operation(
         ) => {
             compile_to_wgs84(
                 source_to_wgs84,
-                source_geo.datum().ellipsoid,
+                source_geo.datum().ellipsoid(),
                 grid_runtime,
                 steps,
             )?;
             compile_from_wgs84(
                 target_to_wgs84,
-                target_geo.datum().ellipsoid,
+                target_geo.datum().ellipsoid(),
                 grid_runtime,
                 steps,
             )?;
@@ -1889,13 +1889,13 @@ fn compile_operation(
         ) => {
             compile_to_wgs84(
                 target_to_wgs84,
-                source_geo.datum().ellipsoid,
+                source_geo.datum().ellipsoid(),
                 grid_runtime,
                 steps,
             )?;
             compile_from_wgs84(
                 source_to_wgs84,
-                target_geo.datum().ellipsoid,
+                target_geo.datum().ellipsoid(),
                 grid_runtime,
                 steps,
             )?;
@@ -2531,49 +2531,23 @@ mod tests {
     }
 
     #[test]
-    fn custom_datum_rejects_non_finite_helmert_params() {
-        let source = CrsDef::Geographic(GeographicCrsDef::new(
-            0,
-            datum::Datum {
-                ellipsoid: datum::WGS84.ellipsoid,
-                to_wgs84: DatumToWgs84::Helmert(datum::HelmertParams {
-                    dx: f64::NAN,
-                    dy: 0.0,
-                    dz: 0.0,
-                    rx: 0.0,
-                    ry: 0.0,
-                    rz: 0.0,
-                    ds: 0.0,
-                }),
-            },
-            "Invalid Helmert datum",
-        ));
-        let target = registry::lookup_epsg(4326).unwrap();
-
-        let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
-
+    fn helmert_constructor_rejects_non_finite_params() {
+        let err = datum::HelmertParams::new(f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0).unwrap_err();
         assert!(matches!(err, Error::InvalidDefinition(_)), "got {err}");
         assert!(err.to_string().contains("Helmert parameters"), "{err}");
     }
 
     #[test]
     fn pipeline_rejects_non_finite_step_output() {
-        let source = CrsDef::Geographic(GeographicCrsDef::new(
-            0,
-            datum::Datum {
-                ellipsoid: datum::WGS84.ellipsoid,
-                to_wgs84: DatumToWgs84::Helmert(datum::HelmertParams {
-                    dx: 0.0,
-                    dy: 0.0,
-                    dz: 0.0,
-                    rx: 0.0,
-                    ry: 0.0,
-                    rz: 0.0,
-                    ds: f64::MAX,
-                }),
-            },
-            "Overflowing Helmert datum",
-        ));
+        let datum = datum::Datum::new(
+            datum::WGS84.ellipsoid(),
+            DatumToWgs84::Helmert(
+                datum::HelmertParams::new(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, f64::MAX).unwrap(),
+            ),
+        )
+        .unwrap();
+        let source =
+            CrsDef::Geographic(GeographicCrsDef::new(0, datum, "Overflowing Helmert datum"));
         let target = registry::lookup_epsg(4326).unwrap();
         let transform = Transform::from_crs_defs_with_selection_options(
             &source,
@@ -3840,10 +3814,7 @@ mod tests {
 
     #[test]
     fn unknown_custom_datums_do_not_collapse_to_identity() {
-        let unknown = datum::Datum {
-            ellipsoid: datum::WGS84.ellipsoid,
-            to_wgs84: DatumToWgs84::Unknown,
-        };
+        let unknown = datum::Datum::new(datum::WGS84.ellipsoid(), DatumToWgs84::Unknown).unwrap();
         let from = CrsDef::Projected(ProjectedCrsDef::new(
             0,
             unknown.clone(),

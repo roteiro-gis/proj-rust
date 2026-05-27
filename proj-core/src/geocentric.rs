@@ -15,7 +15,7 @@ pub(crate) fn geodetic_to_geocentric(
     let e2 = ellipsoid.e2();
 
     // Radius of curvature in the prime vertical
-    let n = ellipsoid.a / (1.0 - e2 * sin_lat * sin_lat).sqrt();
+    let n = ellipsoid.semi_major_axis() / (1.0 - e2 * sin_lat * sin_lat).sqrt();
 
     let x = (n + h) * cos_lat * lon.cos();
     let y = (n + h) * cos_lat * lon.sin();
@@ -37,7 +37,7 @@ pub(crate) fn geocentric_to_geodetic(
     y: f64,
     z: f64,
 ) -> (f64, f64, f64) {
-    let a = ellipsoid.a;
+    let a = ellipsoid.semi_major_axis();
     let b = ellipsoid.b();
     let e2 = ellipsoid.e2();
     let ep2 = ellipsoid.ep2();

@@ -126,7 +126,8 @@ fn parse_db() -> RegistryDb {
             Ellipsoid::sphere(a)
         } else {
             Ellipsoid::from_a_rf(a, inv_f)
-        };
+        }
+        .unwrap_or_else(|err| panic!("invalid ellipsoid EPSG:{code}: {err}"));
         ellipsoids.insert(code, ellipsoid);
         offset += ELLIPSOID_RECORD_SIZE;
     }
@@ -141,23 +142,24 @@ fn parse_db() -> RegistryDb {
         let to_wgs84 = match EPSG_DATA[offset + 8] {
             DATUM_SHIFT_UNKNOWN => DatumToWgs84::Unknown,
             DATUM_SHIFT_IDENTITY => DatumToWgs84::Identity,
-            DATUM_SHIFT_HELMERT => DatumToWgs84::Helmert(HelmertParams {
-                dx: read_f64(EPSG_DATA, offset + 16),
-                dy: read_f64(EPSG_DATA, offset + 24),
-                dz: read_f64(EPSG_DATA, offset + 32),
-                rx: read_f64(EPSG_DATA, offset + 40),
-                ry: read_f64(EPSG_DATA, offset + 48),
-                rz: read_f64(EPSG_DATA, offset + 56),
-                ds: read_f64(EPSG_DATA, offset + 64),
-            }),
+            DATUM_SHIFT_HELMERT => DatumToWgs84::Helmert(
+                HelmertParams::new(
+                    read_f64(EPSG_DATA, offset + 16),
+                    read_f64(EPSG_DATA, offset + 24),
+                    read_f64(EPSG_DATA, offset + 32),
+                    read_f64(EPSG_DATA, offset + 40),
+                    read_f64(EPSG_DATA, offset + 48),
+                    read_f64(EPSG_DATA, offset + 56),
+                    read_f64(EPSG_DATA, offset + 64),
+                )
+                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code} Helmert params: {err}")),
+            ),
             other => panic!("unsupported datum shift kind: {other}"),
         };
         datums.insert(
             code,
-            Datum {
-                ellipsoid,
-                to_wgs84,
-            },
+            Datum::new(ellipsoid, to_wgs84)
+                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}")),
         );
         offset += DATUM_RECORD_SIZE;
     }
@@ -297,15 +299,16 @@ fn parse_db() -> RegistryDb {
         let method = match method_kind {
             OP_IDENTITY => OperationMethod::Identity,
             OP_HELMERT => {
-                let params = HelmertParams {
-                    dx: read_f64(EPSG_DATA, cursor),
-                    dy: read_f64(EPSG_DATA, cursor + 8),
-                    dz: read_f64(EPSG_DATA, cursor + 16),
-                    rx: read_f64(EPSG_DATA, cursor + 24),
-                    ry: read_f64(EPSG_DATA, cursor + 32),
-                    rz: read_f64(EPSG_DATA, cursor + 40),
-                    ds: read_f64(EPSG_DATA, cursor + 48),
-                };
+                let params = HelmertParams::new(
+                    read_f64(EPSG_DATA, cursor),
+                    read_f64(EPSG_DATA, cursor + 8),
+                    read_f64(EPSG_DATA, cursor + 16),
+                    read_f64(EPSG_DATA, cursor + 24),
+                    read_f64(EPSG_DATA, cursor + 32),
+                    read_f64(EPSG_DATA, cursor + 40),
+                    read_f64(EPSG_DATA, cursor + 48),
+                )
+                .unwrap_or_else(|err| panic!("invalid operation Helmert params: {err}"));
                 cursor += 56;
                 OperationMethod::Helmert { params }
             }

@@ -113,7 +113,8 @@ impl GeneralHotineObliqueMercator {
         let sin_latc = latc.sin();
         let cos_latc = latc.cos();
         let b = (1.0 + e2 * cos_latc.powi(4) / (1.0 - e2)).sqrt();
-        let a_const = ellipsoid.a * b * k0 * (1.0 - e2).sqrt() / (1.0 - e2 * sin_latc * sin_latc);
+        let a_const = ellipsoid.semi_major_axis() * b * k0 * (1.0 - e2).sqrt()
+            / (1.0 - e2 * sin_latc * sin_latc);
         let t0 = t_func(latc, e);
         let d = b * (1.0 - e2).sqrt() / (cos_latc * (1.0 - e2 * sin_latc * sin_latc).sqrt());
         let d_sq = (d * d).max(1.0);
@@ -191,7 +192,8 @@ impl SwissObliqueMercator {
         let e_sin_lat0 = e * sin_lat0;
         let k = isometric_latitude_sphere(chi0)
             - c * isometric_latitude_ellipsoid(lat0, half_e, e_sin_lat0);
-        let k_r = ellipsoid.a * k0 * one_minus_e2.sqrt() / (1.0 - e_sin_lat0 * e_sin_lat0);
+        let k_r = ellipsoid.semi_major_axis() * k0 * one_minus_e2.sqrt()
+            / (1.0 - e_sin_lat0 * e_sin_lat0);
 
         Ok(Self {
             e,
@@ -414,11 +416,11 @@ mod tests {
     }
 
     fn everest_1830_1967() -> Ellipsoid {
-        Ellipsoid::from_a_rf(6_377_298.556, 300.8017)
+        Ellipsoid::from_a_rf(6_377_298.556, 300.8017).unwrap()
     }
 
     fn bessel_1841() -> Ellipsoid {
-        Ellipsoid::from_a_rf(6_377_397.155, 299.1528128)
+        Ellipsoid::from_a_rf(6_377_397.155, 299.1528128).unwrap()
     }
 
     #[test]

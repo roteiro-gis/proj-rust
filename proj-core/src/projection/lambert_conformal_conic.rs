@@ -56,10 +56,10 @@ impl LambertConformalConic {
         }
 
         let f_const = m1 / (n * t1.powf(n));
-        let rho0 = ellipsoid.a * f_const * t0.powf(n);
+        let rho0 = ellipsoid.semi_major_axis() * f_const * t0.powf(n);
 
         Ok(Self {
-            a: ellipsoid.a,
+            a: ellipsoid.semi_major_axis(),
             e,
             lon0,
             n,

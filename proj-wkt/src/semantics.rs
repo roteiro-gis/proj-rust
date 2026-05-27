@@ -321,15 +321,15 @@ fn ellipsoid_matches(
     aliases: &[&str],
     epsg: Option<u32>,
 ) -> bool {
-    let expected_rf = if datum.ellipsoid.f == 0.0 {
+    let expected_rf = if datum.ellipsoid().flattening() == 0.0 {
         0.0
     } else {
-        1.0 / datum.ellipsoid.f
+        1.0 / datum.ellipsoid().flattening()
     };
 
     epsg.is_some_and(|expected| actual.epsg == Some(expected))
         || (aliases.iter().any(|alias| *alias == actual.name)
-            && (actual.semi_major_axis - datum.ellipsoid.a).abs() < 1e-9
+            && (actual.semi_major_axis - datum.ellipsoid().semi_major_axis()).abs() < 1e-9
             && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
 }
 

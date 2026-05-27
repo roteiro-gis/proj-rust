@@ -7,12 +7,38 @@ use smallvec::SmallVec;
 #[derive(Debug, Clone)]
 pub struct Datum {
     /// The reference ellipsoid.
-    pub ellipsoid: Ellipsoid,
+    ellipsoid: Ellipsoid,
     /// Explicit relationship from this datum to WGS84.
-    pub to_wgs84: DatumToWgs84,
+    to_wgs84: DatumToWgs84,
 }
 
 impl Datum {
+    /// Create a datum from an ellipsoid and an explicit path to WGS84.
+    pub fn new(ellipsoid: Ellipsoid, to_wgs84: DatumToWgs84) -> Result<Self> {
+        to_wgs84.validate()?;
+        Ok(Self {
+            ellipsoid,
+            to_wgs84,
+        })
+    }
+
+    const fn new_unchecked(ellipsoid: Ellipsoid, to_wgs84: DatumToWgs84) -> Self {
+        Self {
+            ellipsoid,
+            to_wgs84,
+        }
+    }
+
+    /// Return the reference ellipsoid.
+    pub const fn ellipsoid(&self) -> Ellipsoid {
+        self.ellipsoid
+    }
+
+    /// Return the explicit relationship from this datum to WGS84.
+    pub const fn to_wgs84(&self) -> &DatumToWgs84 {
+        &self.to_wgs84
+    }
+
     /// Returns true if this datum is WGS84 or functionally identical (no Helmert shift needed).
     pub fn is_wgs84_compatible(&self) -> bool {
         matches!(self.to_wgs84, DatumToWgs84::Identity)
@@ -47,19 +73,20 @@ impl Datum {
         let source_to_wgs84 = self
             .helmert_to_wgs84()
             .copied()
-            .unwrap_or_else(|| HelmertParams::translation(0.0, 0.0, 0.0));
+            .unwrap_or_else(HelmertParams::identity);
         let wgs84_to_target = target
             .helmert_to_wgs84()
             .map(HelmertParams::inverse)
-            .unwrap_or_else(|| HelmertParams::translation(0.0, 0.0, 0.0));
+            .unwrap_or_else(HelmertParams::identity);
 
-        Some(source_to_wgs84.compose_approx(&wgs84_to_target))
+        source_to_wgs84.compose_approx(&wgs84_to_target).ok()
     }
 
     /// Returns true if two datums are the same (same ellipsoid, same Helmert parameters).
     pub fn same_datum(&self, other: &Datum) -> bool {
-        let same_ellipsoid = (self.ellipsoid.a - other.ellipsoid.a).abs() < 1e-6
-            && (self.ellipsoid.f - other.ellipsoid.f).abs() < 1e-12;
+        let same_ellipsoid =
+            (self.ellipsoid.semi_major_axis() - other.ellipsoid.semi_major_axis()).abs() < 1e-6
+                && (self.ellipsoid.flattening() - other.ellipsoid.flattening()).abs() < 1e-12;
 
         match (&self.to_wgs84, &other.to_wgs84) {
             (DatumToWgs84::Identity, DatumToWgs84::Identity) => same_ellipsoid,
@@ -150,33 +177,81 @@ pub enum DatumGridShiftEntry {
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct HelmertParams {
     /// X-axis translation in meters.
-    pub dx: f64,
+    dx: f64,
     /// Y-axis translation in meters.
-    pub dy: f64,
+    dy: f64,
     /// Z-axis translation in meters.
-    pub dz: f64,
+    dz: f64,
     /// X-axis rotation in arc-seconds.
-    pub rx: f64,
+    rx: f64,
     /// Y-axis rotation in arc-seconds.
-    pub ry: f64,
+    ry: f64,
     /// Z-axis rotation in arc-seconds.
-    pub rz: f64,
+    rz: f64,
     /// Scale difference in parts-per-million (ppm).
-    pub ds: f64,
+    ds: f64,
 }
 
 impl HelmertParams {
+    /// Create a 7-parameter transformation.
+    pub fn new(dx: f64, dy: f64, dz: f64, rx: f64, ry: f64, rz: f64, ds: f64) -> Result<Self> {
+        let params = Self::new_unchecked(dx, dy, dz, rx, ry, rz, ds);
+        params.validate()?;
+        Ok(params)
+    }
+
     /// Create a translation-only (3-parameter) transformation.
-    pub const fn translation(dx: f64, dy: f64, dz: f64) -> Self {
+    pub fn translation(dx: f64, dy: f64, dz: f64) -> Result<Self> {
+        Self::new(dx, dy, dz, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    /// Identity transformation.
+    pub const fn identity() -> Self {
+        Self::new_unchecked(0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    const fn translation_unchecked(dx: f64, dy: f64, dz: f64) -> Self {
+        Self::new_unchecked(dx, dy, dz, 0.0, 0.0, 0.0, 0.0)
+    }
+
+    const fn new_unchecked(dx: f64, dy: f64, dz: f64, rx: f64, ry: f64, rz: f64, ds: f64) -> Self {
         Self {
             dx,
             dy,
             dz,
-            rx: 0.0,
-            ry: 0.0,
-            rz: 0.0,
-            ds: 0.0,
+            rx,
+            ry,
+            rz,
+            ds,
         }
+    }
+
+    pub const fn dx(&self) -> f64 {
+        self.dx
+    }
+
+    pub const fn dy(&self) -> f64 {
+        self.dy
+    }
+
+    pub const fn dz(&self) -> f64 {
+        self.dz
+    }
+
+    pub const fn rx(&self) -> f64 {
+        self.rx
+    }
+
+    pub const fn ry(&self) -> f64 {
+        self.ry
+    }
+
+    pub const fn rz(&self) -> f64 {
+        self.rz
+    }
+
+    pub const fn ds(&self) -> f64 {
+        self.ds
     }
 
     pub fn validate(&self) -> Result<()> {
@@ -209,16 +284,16 @@ impl HelmertParams {
         }
     }
 
-    pub fn compose_approx(&self, next: &Self) -> Self {
-        Self {
-            dx: self.dx + next.dx,
-            dy: self.dy + next.dy,
-            dz: self.dz + next.dz,
-            rx: self.rx + next.rx,
-            ry: self.ry + next.ry,
-            rz: self.rz + next.rz,
-            ds: self.ds + next.ds,
-        }
+    pub fn compose_approx(&self, next: &Self) -> Result<Self> {
+        Self::new(
+            self.dx + next.dx,
+            self.dy + next.dy,
+            self.dz + next.dz,
+            self.rx + next.rx,
+            self.ry + next.ry,
+            self.rz + next.rz,
+            self.ds + next.ds,
+        )
     }
 
     fn approx_eq(&self, other: &Self) -> bool {
@@ -237,62 +312,49 @@ impl HelmertParams {
 // ---------------------------------------------------------------------------
 
 /// WGS 84 datum.
-pub const WGS84: Datum = Datum {
-    ellipsoid: ellipsoid::WGS84,
-    to_wgs84: DatumToWgs84::Identity,
-};
+pub const WGS84: Datum = Datum::new_unchecked(ellipsoid::WGS84, DatumToWgs84::Identity);
 
 /// NAD83 datum (functionally identical to WGS84 for sub-meter work).
-pub const NAD83: Datum = Datum {
-    ellipsoid: ellipsoid::GRS80,
-    to_wgs84: DatumToWgs84::Identity,
-};
+pub const NAD83: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity);
 
 /// NAD27 datum (Clarke 1866 ellipsoid).
 /// Helmert parameters from EPSG dataset (approximate continental US average).
-pub const NAD27: Datum = Datum {
-    ellipsoid: ellipsoid::CLARKE1866,
-    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-8.0, 160.0, 176.0)),
-};
+pub const NAD27: Datum = Datum::new_unchecked(
+    ellipsoid::CLARKE1866,
+    DatumToWgs84::Helmert(HelmertParams::translation_unchecked(-8.0, 160.0, 176.0)),
+);
 
 /// ETRS89 datum (European Terrestrial Reference System 1989).
 /// Functionally identical to WGS84 for most purposes.
-pub const ETRS89: Datum = Datum {
-    ellipsoid: ellipsoid::GRS80,
-    to_wgs84: DatumToWgs84::Identity,
-};
+pub const ETRS89: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity);
 
 /// OSGB36 datum (Ordnance Survey Great Britain 1936).
-pub const OSGB36: Datum = Datum {
-    ellipsoid: ellipsoid::AIRY1830,
-    to_wgs84: DatumToWgs84::Helmert(HelmertParams {
-        dx: 446.448,
-        dy: -125.157,
-        dz: 542.060,
-        rx: 0.1502,
-        ry: 0.2470,
-        rz: 0.8421,
-        ds: -20.4894,
-    }),
-};
+pub const OSGB36: Datum = Datum::new_unchecked(
+    ellipsoid::AIRY1830,
+    DatumToWgs84::Helmert(HelmertParams::new_unchecked(
+        446.448, -125.157, 542.060, 0.1502, 0.2470, 0.8421, -20.4894,
+    )),
+);
 
 /// Pulkovo 1942 datum (used in Russia and former Soviet states).
-pub const PULKOVO1942: Datum = Datum {
-    ellipsoid: ellipsoid::KRASSOWSKY,
-    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(23.92, -141.27, -80.9)),
-};
+pub const PULKOVO1942: Datum = Datum::new_unchecked(
+    ellipsoid::KRASSOWSKY,
+    DatumToWgs84::Helmert(HelmertParams::translation_unchecked(23.92, -141.27, -80.9)),
+);
 
 /// ED50 datum (European Datum 1950).
-pub const ED50: Datum = Datum {
-    ellipsoid: ellipsoid::INTL1924,
-    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-87.0, -98.0, -121.0)),
-};
+pub const ED50: Datum = Datum::new_unchecked(
+    ellipsoid::INTL1924,
+    DatumToWgs84::Helmert(HelmertParams::translation_unchecked(-87.0, -98.0, -121.0)),
+);
 
 /// Tokyo datum (used in Japan).
-pub const TOKYO: Datum = Datum {
-    ellipsoid: ellipsoid::BESSEL1841,
-    to_wgs84: DatumToWgs84::Helmert(HelmertParams::translation(-146.414, 507.337, 680.507)),
-};
+pub const TOKYO: Datum = Datum::new_unchecked(
+    ellipsoid::BESSEL1841,
+    DatumToWgs84::Helmert(HelmertParams::translation_unchecked(
+        -146.414, 507.337, 680.507,
+    )),
+);
 
 #[cfg(test)]
 mod tests {
@@ -325,61 +387,27 @@ mod tests {
 
     #[test]
     fn unknown_datums_are_not_collapsed_by_ellipsoid() {
-        let a = Datum {
-            ellipsoid: ellipsoid::WGS84,
-            to_wgs84: DatumToWgs84::Unknown,
-        };
-        let b = Datum {
-            ellipsoid: ellipsoid::WGS84,
-            to_wgs84: DatumToWgs84::Unknown,
-        };
+        let a = Datum::new(ellipsoid::WGS84, DatumToWgs84::Unknown).unwrap();
+        let b = Datum::new(ellipsoid::WGS84, DatumToWgs84::Unknown).unwrap();
 
         assert!(!a.same_datum(&b));
     }
 
     #[test]
     fn helmert_inverse_negates() {
-        let h = HelmertParams {
-            dx: 1.0,
-            dy: 2.0,
-            dz: 3.0,
-            rx: 0.1,
-            ry: 0.2,
-            rz: 0.3,
-            ds: 0.5,
-        };
+        let h = HelmertParams::new(1.0, 2.0, 3.0, 0.1, 0.2, 0.3, 0.5).unwrap();
         let inv = h.inverse();
-        assert_eq!(inv.dx, -1.0);
-        assert_eq!(inv.rx, -0.1);
-        assert_eq!(inv.ds, -0.5);
+        assert_eq!(inv.dx(), -1.0);
+        assert_eq!(inv.rx(), -0.1);
+        assert_eq!(inv.ds(), -0.5);
     }
 
     #[test]
     fn helmert_params_reject_non_finite_values() {
-        let err = HelmertParams {
-            dx: f64::NAN,
-            dy: 0.0,
-            dz: 0.0,
-            rx: 0.0,
-            ry: 0.0,
-            rz: 0.0,
-            ds: 0.0,
-        }
-        .validate()
-        .unwrap_err();
+        let err = HelmertParams::new(f64::NAN, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0).unwrap_err();
         assert!(matches!(err, Error::InvalidDefinition(_)), "got {err}");
 
-        let err = HelmertParams {
-            dx: 0.0,
-            dy: 0.0,
-            dz: 0.0,
-            rx: 0.0,
-            ry: 0.0,
-            rz: f64::INFINITY,
-            ds: 0.0,
-        }
-        .validate()
-        .unwrap_err();
+        let err = HelmertParams::new(0.0, 0.0, 0.0, 0.0, 0.0, f64::INFINITY, 0.0).unwrap_err();
         assert!(err.to_string().contains("Helmert parameters"), "{err}");
     }
 }
