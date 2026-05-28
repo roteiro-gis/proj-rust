@@ -56,10 +56,10 @@ impl AlbersEqualArea {
         }
 
         let c = m1 * m1 + n * q1;
-        let rho0 = ellipsoid.a * (c - n * q0).abs().sqrt() / n;
+        let rho0 = ellipsoid.semi_major_axis() * (c - n * q0).abs().sqrt() / n;
 
         Ok(Self {
-            a: ellipsoid.a,
+            a: ellipsoid.semi_major_axis(),
             e2,
             lon0,
             n,

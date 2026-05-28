@@ -1,6 +1,6 @@
 use std::f64::consts::{FRAC_PI_2, FRAC_PI_4};
 
-use crate::ellipsoid::{self, Ellipsoid};
+use crate::ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
     ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_lon_lat,
@@ -19,7 +19,7 @@ impl WebMercator {
     pub(crate) fn new() -> Result<Self> {
         // EPSG:3857 uses sphere with radius = WGS84 semi-major axis.
         Ok(Self {
-            a: Ellipsoid::sphere(ellipsoid::WGS84.a).a,
+            a: ellipsoid::WGS84.semi_major_axis(),
         })
     }
 }

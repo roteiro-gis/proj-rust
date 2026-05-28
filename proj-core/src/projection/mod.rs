@@ -90,7 +90,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::TransverseMercator(
             transverse_mercator::TransverseMercator::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 *k0,
@@ -106,7 +106,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::PolarStereographic(
             polar_stereographic::PolarStereographic::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat_ts.to_radians(),
                 *k0,
@@ -123,7 +123,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::LambertConformalConic(
             lambert_conformal_conic::LambertConformalConic::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 lat1.to_radians(),
@@ -141,7 +141,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::AlbersEqualArea(
             albers_equal_area::AlbersEqualArea::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 lat1.to_radians(),
@@ -157,7 +157,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::LambertAzimuthalEqualArea(
             lambert_azimuthal_equal_area::LambertAzimuthalEqualArea::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 *false_easting,
@@ -171,7 +171,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::LambertAzimuthalEqualArea(
             lambert_azimuthal_equal_area::LambertAzimuthalEqualArea::new_spherical(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 *false_easting,
@@ -186,7 +186,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::ObliqueStereographic(
             oblique_stereographic::ObliqueStereographic::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 *k0,
@@ -205,7 +205,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             variant_b,
         } => Ok(Projection::HotineObliqueMercator(
             hotine_oblique_mercator::HotineObliqueMercator::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 latc.to_radians(),
                 lonc.to_radians(),
                 azimuth.to_radians(),
@@ -223,7 +223,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::CassiniSoldner(
             cassini_soldner::CassiniSoldner::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),
                 *false_easting,
@@ -237,7 +237,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_easting,
             false_northing,
         } => Ok(Projection::Mercator(mercator::Mercator::new(
-            datum.ellipsoid,
+            datum.ellipsoid(),
             lon0.to_radians(),
             lat_ts.to_radians(),
             *k0,
@@ -251,7 +251,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::EquidistantCylindrical(
             equidistant_cylindrical::EquidistantCylindrical::new(
-                datum.ellipsoid,
+                datum.ellipsoid(),
                 lon0.to_radians(),
                 lat_ts.to_radians(),
                 *false_easting,

@@ -1103,7 +1103,10 @@ mod tests {
         .unwrap();
 
         assert!(crs.is_geographic());
-        assert_eq!(crs.datum().ellipsoid.a, proj_core::datum::WGS84.ellipsoid.a);
+        assert_eq!(
+            crs.datum().ellipsoid().semi_major_axis(),
+            proj_core::datum::WGS84.ellipsoid().semi_major_axis()
+        );
     }
 
     #[test]

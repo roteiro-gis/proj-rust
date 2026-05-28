@@ -56,7 +56,7 @@ impl TransverseMercator {
         validate_offset("false easting", false_easting)?;
         validate_offset("false northing", false_northing)?;
 
-        let a = ellipsoid.a;
+        let a = ellipsoid.semi_major_axis();
         let e2 = ellipsoid.e2();
         let ep2 = ellipsoid.ep2();
         let e2_2 = e2 * e2;

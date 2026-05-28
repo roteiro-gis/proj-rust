@@ -47,7 +47,7 @@ impl Mercator {
         };
 
         Ok(Self {
-            a_k0: ellipsoid.a * k0,
+            a_k0: ellipsoid.semi_major_axis() * k0,
             e: ellipsoid.e(),
             lon0,
             false_easting,

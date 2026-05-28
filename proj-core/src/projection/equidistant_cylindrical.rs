@@ -36,11 +36,11 @@ impl EquidistantCylindrical {
                 "Equidistant Cylindrical latitude of true scale cannot be at the poles".into(),
             ));
         }
-        let a_cos_lat_ts = ellipsoid.a * cos_lat_ts;
+        let a_cos_lat_ts = ellipsoid.semi_major_axis() * cos_lat_ts;
 
         Ok(Self {
             a_cos_lat_ts,
-            a: ellipsoid.a,
+            a: ellipsoid.semi_major_axis(),
             lon0,
             false_easting,
             false_northing,

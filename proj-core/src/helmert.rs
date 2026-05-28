@@ -14,14 +14,14 @@ const ARCSEC_TO_RAD: f64 = std::f64::consts::PI / (180.0 * 3600.0);
 /// [Z']   [dz]              [ -ry  rx   1 ] [Z]
 /// ```
 pub(crate) fn helmert_forward(params: &HelmertParams, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
-    let s = 1.0 + params.ds * 1e-6; // ppm to scale factor
-    let rx = params.rx * ARCSEC_TO_RAD;
-    let ry = params.ry * ARCSEC_TO_RAD;
-    let rz = params.rz * ARCSEC_TO_RAD;
+    let s = 1.0 + params.ds() * 1e-6; // ppm to scale factor
+    let rx = params.rx() * ARCSEC_TO_RAD;
+    let ry = params.ry() * ARCSEC_TO_RAD;
+    let rz = params.rz() * ARCSEC_TO_RAD;
 
-    let xo = params.dx + s * (x - rz * y + ry * z);
-    let yo = params.dy + s * (rz * x + y - rx * z);
-    let zo = params.dz + s * (-ry * x + rx * y + z);
+    let xo = params.dx() + s * (x - rz * y + ry * z);
+    let yo = params.dy() + s * (rz * x + y - rx * z);
+    let zo = params.dz() + s * (-ry * x + rx * y + z);
 
     (xo, yo, zo)
 }
@@ -43,7 +43,7 @@ mod tests {
 
     #[test]
     fn identity_with_zero_params() {
-        let params = HelmertParams::translation(0.0, 0.0, 0.0);
+        let params = HelmertParams::translation(0.0, 0.0, 0.0).unwrap();
         let (xo, yo, zo) = helmert_forward(&params, 1000.0, 2000.0, 3000.0);
         assert_eq!(xo, 1000.0);
         assert_eq!(yo, 2000.0);
@@ -52,7 +52,7 @@ mod tests {
 
     #[test]
     fn translation_only() {
-        let params = HelmertParams::translation(10.0, 20.0, 30.0);
+        let params = HelmertParams::translation(10.0, 20.0, 30.0).unwrap();
         let (xo, yo, zo) = helmert_forward(&params, 1000.0, 2000.0, 3000.0);
         assert!((xo - 1010.0).abs() < 1e-6);
         assert!((yo - 2020.0).abs() < 1e-6);
@@ -61,7 +61,8 @@ mod tests {
 
     #[test]
     fn roundtrip_forward_inverse() {
-        let params = datum::OSGB36.helmert_to_wgs84().unwrap();
+        let datum = datum::OSGB36;
+        let params = datum.helmert_to_wgs84().unwrap();
         let x = 3_980_000.0;
         let y = -100_000.0;
         let z = 4_960_000.0;
@@ -77,7 +78,8 @@ mod tests {
     #[test]
     fn nad27_to_wgs84_known_point() {
         // Test the full pipeline: geodetic on NAD27 -> geocentric -> Helmert -> geodetic on WGS84
-        let nad27_params = datum::NAD27.helmert_to_wgs84().unwrap();
+        let nad27 = datum::NAD27;
+        let nad27_params = nad27.helmert_to_wgs84().unwrap();
 
         // A point roughly at 45°N, 90°W on NAD27
         let lon = (-90.0_f64).to_radians();

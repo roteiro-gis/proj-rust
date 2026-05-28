@@ -114,7 +114,7 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
     }
 
     if let Some(d) = params.get("datum") {
-        let mut datum = match d.to_uppercase().as_str() {
+        let datum = match d.to_uppercase().as_str() {
             "WGS84" => datum::WGS84,
             "NAD83" => datum::NAD83,
             "NAD27" => datum::NAD27,
@@ -129,10 +129,13 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
             }
         };
         if let Some(to_wgs84) = towgs84 {
-            datum.to_wgs84 = to_wgs84;
+            return Ok(proj_core::Datum::new(datum.ellipsoid(), to_wgs84)?);
         }
         if let Some(grid_shift) = nadgrids {
-            datum.to_wgs84 = datum_grid_shift_to_wgs84(grid_shift);
+            return Ok(proj_core::Datum::new(
+                datum.ellipsoid(),
+                datum_grid_shift_to_wgs84(grid_shift),
+            )?);
         }
         return Ok(datum);
     }
@@ -152,34 +155,29 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
                 )));
             }
         };
-        return Ok(proj_core::Datum {
-            ellipsoid: ellps,
-            to_wgs84: towgs84.unwrap_or_else(|| {
-                if let Some(grid_shift) = nadgrids {
-                    datum_grid_shift_to_wgs84(grid_shift)
-                } else if (ellps.a - ellipsoid::WGS84.a).abs() < 1e-9
-                    && (ellps.f - ellipsoid::WGS84.f).abs() < 1e-15
-                {
-                    DatumToWgs84::Identity
-                } else {
-                    DatumToWgs84::Unknown
-                }
-            }),
+        let to_wgs84 = towgs84.unwrap_or_else(|| {
+            if let Some(grid_shift) = nadgrids {
+                datum_grid_shift_to_wgs84(grid_shift)
+            } else if (ellps.semi_major_axis() - ellipsoid::WGS84.semi_major_axis()).abs() < 1e-9
+                && (ellps.flattening() - ellipsoid::WGS84.flattening()).abs() < 1e-15
+            {
+                DatumToWgs84::Identity
+            } else {
+                DatumToWgs84::Unknown
+            }
         });
+        return Ok(proj_core::Datum::new(ellps, to_wgs84)?);
     }
 
     if let Some(grid_shift) = nadgrids {
-        return Ok(proj_core::Datum {
-            ellipsoid: ellipsoid::WGS84,
-            to_wgs84: datum_grid_shift_to_wgs84(grid_shift),
-        });
+        return Ok(proj_core::Datum::new(
+            ellipsoid::WGS84,
+            datum_grid_shift_to_wgs84(grid_shift),
+        )?);
     }
 
     if let Some(to_wgs84) = towgs84 {
-        return Ok(proj_core::Datum {
-            ellipsoid: ellipsoid::WGS84,
-            to_wgs84,
-        });
+        return Ok(proj_core::Datum::new(ellipsoid::WGS84, to_wgs84)?);
     }
 
     Ok(datum::WGS84)
@@ -316,15 +314,15 @@ fn parse_towgs84(params: &HashMap<String, String>) -> Result<Option<DatumToWgs84
         )));
     }
 
-    let helmert = proj_core::HelmertParams {
-        dx: vals[0],
-        dy: vals[1],
-        dz: vals[2],
-        rx: *vals.get(3).unwrap_or(&0.0),
-        ry: *vals.get(4).unwrap_or(&0.0),
-        rz: *vals.get(5).unwrap_or(&0.0),
-        ds: *vals.get(6).unwrap_or(&0.0),
-    };
+    let helmert = proj_core::HelmertParams::new(
+        vals[0],
+        vals[1],
+        vals[2],
+        *vals.get(3).unwrap_or(&0.0),
+        *vals.get(4).unwrap_or(&0.0),
+        *vals.get(5).unwrap_or(&0.0),
+        *vals.get(6).unwrap_or(&0.0),
+    )?;
     Ok(Some(if vals.iter().all(|value| *value == 0.0) {
         DatumToWgs84::Identity
     } else {
@@ -916,7 +914,7 @@ mod tests {
         ).unwrap();
         assert!(crs.is_projected());
         if let CrsDef::Projected(p) = &crs {
-            assert!(matches!(&p.datum().to_wgs84, DatumToWgs84::Helmert(_)));
+            assert!(matches!(p.datum().to_wgs84(), DatumToWgs84::Helmert(_)));
         }
     }
 
@@ -998,7 +996,7 @@ mod tests {
         let crs =
             parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb")
                 .unwrap();
-        let DatumToWgs84::GridShift(grids) = &crs.datum().to_wgs84 else {
+        let DatumToWgs84::GridShift(grids) = crs.datum().to_wgs84() else {
             panic!("expected grid shift datum");
         };
         assert_eq!(grids.entries().len(), 2);
@@ -1007,7 +1005,7 @@ mod tests {
     #[test]
     fn parse_nadgrids_null_as_identity_shift() {
         let crs = parse_proj_string("+proj=longlat +ellps=WGS84 +nadgrids=@null").unwrap();
-        assert!(matches!(&crs.datum().to_wgs84, DatumToWgs84::Identity));
+        assert!(matches!(crs.datum().to_wgs84(), DatumToWgs84::Identity));
     }
 
     #[test]
