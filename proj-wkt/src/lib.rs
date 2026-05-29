@@ -79,16 +79,8 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
             .ok_or_else(|| ParseError::Parse("CRS:84 not found in registry".into()));
     }
 
-    // URN format: urn:ogc:def:crs:EPSG::4326
-    if upper.starts_with("URN:OGC:DEF:CRS:") {
-        // Format: urn:ogc:def:crs:AUTHORITY::CODE or urn:ogc:def:crs:AUTHORITY:VERSION:CODE
-        if let Some((_, code_str)) = s.rsplit_once(':') {
-            if let Ok(code) = code_str.parse::<u32>() {
-                return proj_core::lookup_epsg(code)
-                    .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in URN: {code}")));
-            }
-        }
-        return Err(ParseError::Parse(format!("invalid URN format: {s}")));
+    if upper.starts_with("URN:") {
+        return parse_ogc_crs_urn(s);
     }
 
     // Try authority code (EPSG:XXXX)
@@ -138,6 +130,38 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
         "unrecognized CRS format: {:.80}",
         s
     )))
+}
+
+fn parse_ogc_crs_urn(s: &str) -> Result<CrsDef> {
+    let parts = s.split(':').collect::<Vec<_>>();
+    if parts.len() != 7
+        || !parts[0].eq_ignore_ascii_case("urn")
+        || !parts[1].eq_ignore_ascii_case("ogc")
+        || !parts[2].eq_ignore_ascii_case("def")
+        || !parts[3].eq_ignore_ascii_case("crs")
+    {
+        return Err(ParseError::Parse(format!(
+            "invalid CRS URN `{s}`; expected urn:ogc:def:crs:AUTHORITY:VERSION:CODE"
+        )));
+    }
+
+    let authority = parts[4];
+    if authority.is_empty() {
+        return Err(ParseError::Parse(format!(
+            "invalid CRS URN `{s}`; missing authority"
+        )));
+    }
+    if !authority.eq_ignore_ascii_case("EPSG") {
+        return Err(ParseError::Parse(format!(
+            "unsupported CRS URN authority `{authority}`; only EPSG is supported"
+        )));
+    }
+
+    let code = parts[6]
+        .parse::<u32>()
+        .map_err(|_| ParseError::Parse(format!("invalid EPSG code in CRS URN `{s}`")))?;
+    proj_core::lookup_epsg(code)
+        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in CRS URN: {code}")))
 }
 
 /// Create a [`Transform`] from two CRS strings in any format.
@@ -541,8 +565,27 @@ mod tests {
 
     #[test]
     fn urn_with_version() {
-        let crs = parse_crs("urn:ogc:def:crs:EPSG:9.8.15:3857").unwrap();
-        assert!(crs.is_projected());
+        let crs = parse_crs("urn:ogc:def:crs:EPSG:9.9:4326").unwrap();
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 4326);
+    }
+
+    #[test]
+    fn urn_rejects_unsupported_authority() {
+        let err = parse_crs("urn:ogc:def:crs:FOO::4326").unwrap_err();
+        assert!(matches!(err, ParseError::Parse(_)));
+        assert!(err
+            .to_string()
+            .contains("unsupported CRS URN authority `FOO`"));
+    }
+
+    #[test]
+    fn malformed_urn_rejects_with_clear_error() {
+        let err = parse_crs("urn:ogc:def:crs:EPSG:4326").unwrap_err();
+        assert!(matches!(err, ParseError::Parse(_)));
+        assert!(err
+            .to_string()
+            .contains("expected urn:ogc:def:crs:AUTHORITY:VERSION:CODE"));
     }
 
     #[test]
