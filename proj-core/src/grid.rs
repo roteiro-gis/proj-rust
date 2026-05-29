@@ -14,6 +14,10 @@ const MAX_NTV2_TOTAL_CELLS: usize = 16_777_216;
 const MAX_NTV2_TOTAL_DATA_BYTES: usize = MAX_NTV2_TOTAL_CELLS * NTV2_RECORD_LEN;
 const MAX_NTV2_GRID_BYTES: usize =
     MAX_NTV2_TOTAL_DATA_BYTES + (MAX_NTV2_SUBFILES + 1) * NTV2_HEADER_LEN;
+const GTX_HEADER_LEN: usize = 40;
+const GTX_RECORD_LEN: usize = 4;
+const MAX_GTX_CELLS: usize = 16_777_216;
+const MAX_GTX_GRID_BYTES: usize = GTX_HEADER_LEN + MAX_GTX_CELLS * GTX_RECORD_LEN;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GridFormat {
@@ -373,7 +377,8 @@ fn validate_grid_resource_size(
 fn max_grid_resource_bytes(format: GridFormat) -> Option<usize> {
     match format {
         GridFormat::Ntv2 => Some(MAX_NTV2_GRID_BYTES),
-        GridFormat::Gtx | GridFormat::Unsupported => None,
+        GridFormat::Gtx => Some(MAX_GTX_GRID_BYTES),
+        GridFormat::Unsupported => None,
     }
 }
 
@@ -1039,10 +1044,13 @@ struct GtxGrid {
 
 impl GtxGrid {
     fn parse(bytes: &[u8]) -> std::result::Result<Self, GridError> {
-        const HEADER_LEN: usize = 40;
-
-        if bytes.len() < HEADER_LEN {
+        if bytes.len() < GTX_HEADER_LEN {
             return Err(GridError::Parse("GTX file too small".into()));
+        }
+        if bytes.len() > MAX_GTX_GRID_BYTES {
+            return Err(GridError::Parse(format!(
+                "GTX grid exceeds maximum size of {MAX_GTX_GRID_BYTES} bytes"
+            )));
         }
 
         let south_degrees = read_f64(bytes, 0, Endian::Big)?;
@@ -1069,17 +1077,30 @@ impl GtxGrid {
         let count = width
             .checked_mul(height)
             .ok_or_else(|| GridError::Parse("GTX data size overflow".into()))?;
-        let expected_len = HEADER_LEN
-            + count
-                .checked_mul(4)
-                .ok_or_else(|| GridError::Parse("GTX data size overflow".into()))?;
+        if count > MAX_GTX_CELLS {
+            return Err(GridError::Parse(format!(
+                "GTX cell count {count} exceeds limit {MAX_GTX_CELLS}"
+            )));
+        }
+        let data_len = count
+            .checked_mul(GTX_RECORD_LEN)
+            .ok_or_else(|| GridError::Parse("GTX data size overflow".into()))?;
+        let expected_len = GTX_HEADER_LEN
+            .checked_add(data_len)
+            .ok_or_else(|| GridError::Parse("GTX data size overflow".into()))?;
+        if expected_len > MAX_GTX_GRID_BYTES {
+            return Err(GridError::Parse(format!(
+                "GTX data size {expected_len} exceeds limit {MAX_GTX_GRID_BYTES}"
+            )));
+        }
         if bytes.len() < expected_len {
             return Err(GridError::Parse("truncated GTX data".into()));
         }
 
         let mut offsets_meters = Vec::with_capacity(count);
         for index in 0..count {
-            let value = read_f32(bytes, HEADER_LEN + index * 4, Endian::Big)? as f64;
+            let value =
+                read_f32(bytes, GTX_HEADER_LEN + index * GTX_RECORD_LEN, Endian::Big)? as f64;
             if (value + 88.8888).abs() <= 1e-4 {
                 offsets_meters.push(f64::NAN);
             } else {
@@ -1636,16 +1657,64 @@ mod tests {
 
     fn test_gtx_bytes(values: &[f32]) -> Vec<u8> {
         let mut bytes = Vec::new();
-        bytes.extend_from_slice(&10.0f64.to_be_bytes());
-        bytes.extend_from_slice(&20.0f64.to_be_bytes());
-        bytes.extend_from_slice(&1.0f64.to_be_bytes());
-        bytes.extend_from_slice(&1.0f64.to_be_bytes());
-        bytes.extend_from_slice(&3i32.to_be_bytes());
-        bytes.extend_from_slice(&3i32.to_be_bytes());
+        write_gtx_header(&mut bytes, 3, 3);
         for value in values {
             bytes.extend_from_slice(&value.to_be_bytes());
         }
         bytes
+    }
+
+    fn write_gtx_header(bytes: &mut Vec<u8>, height: i32, width: i32) {
+        bytes.extend_from_slice(&10.0f64.to_be_bytes());
+        bytes.extend_from_slice(&20.0f64.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&1.0f64.to_be_bytes());
+        bytes.extend_from_slice(&height.to_be_bytes());
+        bytes.extend_from_slice(&width.to_be_bytes());
+    }
+
+    fn gtx_parse_error(bytes: &[u8]) -> String {
+        match parse_grid_data(GridFormat::Gtx, "test.gtx", bytes) {
+            Ok(_) => panic!("expected GTX parse failure"),
+            Err(GridError::Parse(message)) => message,
+            Err(error) => panic!("expected GTX parse error, got {error}"),
+        }
+    }
+
+    #[test]
+    fn gtx_rejects_excessive_dimensions_before_allocation() {
+        let mut bytes = Vec::new();
+        write_gtx_header(&mut bytes, 4097, 4097);
+
+        let message = gtx_parse_error(&bytes);
+
+        assert!(message.contains("GTX cell count"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
+    }
+
+    #[test]
+    fn gtx_rejects_oversized_resource_length_before_reading() {
+        let message = match validate_grid_resource_size(
+            "oversized.gtx",
+            GridFormat::Gtx,
+            MAX_GTX_GRID_BYTES as u64 + 1,
+        ) {
+            Ok(()) => panic!("expected GTX resource size failure"),
+            Err(GridError::Parse(message)) => message,
+            Err(error) => panic!("expected GTX parse error, got {error}"),
+        };
+
+        assert!(message.contains("maximum Gtx grid size"), "{message}");
+    }
+
+    #[test]
+    fn gtx_truncated_data_remains_parse_error() {
+        let mut bytes = Vec::new();
+        write_gtx_header(&mut bytes, 3, 3);
+
+        let message = gtx_parse_error(&bytes);
+
+        assert!(message.contains("truncated GTX data"), "{message}");
     }
 
     #[test]
