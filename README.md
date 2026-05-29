@@ -54,22 +54,22 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 
 Custom definitions are accepted only when they map to this library's CRS model: longitude/east, latitude/north geographic axes in degrees with a Greenwich prime meridian, and projected easting/northing axes in a single linear unit. Unsupported axis order, prime meridian, angular unit, projection, or vertical transformation semantics return errors.
 
-## Supported Operations
+## Supported CRS
 
-| Operation family | Examples |
+| CRS or projection | EPSG examples |
 |---|---|
-| Geographic CRS and datum identity | WGS84, NAD83, NAD27, ETRS89 |
-| 3D geographic and compatible compound CRS | EPSG:4979, custom WKT/PROJJSON |
-| Vertical CRS metadata and same-reference unit conversion | EPSG:3855, 5702, 5703, 5773, 6360 |
+| Geographic CRS and datum identity | EPSG:4326, EPSG:4269, EPSG:4267, EPSG:4258 |
+| 3D geographic and compatible compound CRS | EPSG:4979 |
+| Vertical CRS metadata and same-reference unit conversion | EPSG:3855, EPSG:5702, EPSG:5703, EPSG:5773, EPSG:6360 |
 | Web Mercator | EPSG:3857 |
-| Transverse Mercator / UTM | EPSG:32601-32660, 32701-32760 |
-| Polar Stereographic | EPSG:3413, 3031, 3995, 32661, 32761 |
-| Lambert Conformal Conic | EPSG:2154, 3347 |
-| Albers Equal Area | EPSG:5070, 3005 |
-| Lambert Azimuthal Equal Area | EPSG:3035, 3408, 6931, 9311 |
-| Oblique Stereographic | EPSG:28992, 2953 |
-| Hotine Oblique Mercator / RSO | EPSG:2056, 3078, 3375 |
-| Cassini-Soldner | EPSG:30200, 3377 |
+| Transverse Mercator / UTM | EPSG:32601-32660, EPSG:32701-32760 |
+| Polar Stereographic | EPSG:3413, EPSG:3031, EPSG:3995, EPSG:32661, EPSG:32761 |
+| Lambert Conformal Conic | EPSG:2154, EPSG:3347 |
+| Albers Equal Area | EPSG:5070, EPSG:3005 |
+| Lambert Azimuthal Equal Area | EPSG:3035, EPSG:3408, EPSG:6931, EPSG:9311 |
+| Oblique Stereographic | EPSG:28992, EPSG:2953 |
+| Hotine Oblique Mercator / RSO | EPSG:2056, EPSG:3078, EPSG:3375 |
+| Cassini-Soldner | EPSG:30200, EPSG:3377 |
 | Mercator | EPSG:3395 |
 | Equidistant Cylindrical | EPSG:32662 |
 

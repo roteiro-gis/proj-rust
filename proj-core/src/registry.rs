@@ -404,16 +404,14 @@ mod tests {
             if in_supported_crs && trimmed.starts_with("## ") {
                 break;
             }
-            if !in_supported_crs || !trimmed.starts_with('|') {
+            if !in_supported_crs {
                 continue;
             }
 
-            let cells = trimmed.split('|').map(str::trim).collect::<Vec<_>>();
-            if cells.len() < 4 || cells[1] == "Projection" || cells[1] == "---" {
-                continue;
-            }
-
-            for token in cells[3].split(',') {
+            for token in trimmed.split(|value: char| {
+                value.is_whitespace()
+                    || matches!(value, ',' | '|' | '`' | '[' | ']' | '(' | ')' | '{' | '}')
+            }) {
                 add_readme_epsg_token(token, &mut codes);
             }
         }
@@ -422,14 +420,28 @@ mod tests {
     }
 
     fn add_readme_epsg_token(token: &str, codes: &mut BTreeSet<u32>) {
-        let token = token.trim();
+        let token = token.trim().trim_matches(|value: char| {
+            !value.is_ascii_alphanumeric() && value != ':' && value != '-'
+        });
+        let token = token
+            .strip_prefix("EPSG:")
+            .or_else(|| token.strip_prefix("epsg:"))
+            .unwrap_or(token);
         if token.is_empty() || token.contains("...") {
             return;
         }
 
         if let Some((start, end)) = token.split_once('-') {
-            let start = start.trim();
-            let end = end.trim();
+            let start = start
+                .trim()
+                .strip_prefix("EPSG:")
+                .or_else(|| start.trim().strip_prefix("epsg:"))
+                .unwrap_or_else(|| start.trim());
+            let end = end
+                .trim()
+                .strip_prefix("EPSG:")
+                .or_else(|| end.trim().strip_prefix("epsg:"))
+                .unwrap_or_else(|| end.trim());
             if start.chars().all(|value| value.is_ascii_digit())
                 && end.chars().all(|value| value.is_ascii_digit())
             {
