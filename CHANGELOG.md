@@ -2,23 +2,27 @@
 
 ## Unreleased
 
-## 0.6.0 - 2026-05-21
+## 0.6.0 - 2026-05-29
 
-- fix `Transform::inverse()` so inverse transforms preserve compiled fallback pipelines and diagnostics, including grid coverage miss reporting when an inverse falls back to another operation
-- reject invalid source coordinates on identity/same-datum transform paths instead of allowing non-finite or out-of-range values to bypass projection validation
-- fix GTX vertical grid sampling at tolerated lower grid edges so negative cell indices cannot panic or wrap before coverage handling
-- fix PROJ-string projected unit handling so `+x_0` and `+y_0` remain PROJ-compatible meter parameters while `+units` controls output coordinates
-- make approximate Helmert fallback an explicit opt-in policy: `BestAvailable` no longer synthesizes approximate Helmert fallbacks, and selection errors explain how to enable them
+- add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
 - add `geo-types` geometry-level transform support for points, line strings, polygons with holes, multi-geometries, rectangles, geometry collections, and `Geometry` enum values
 - add antimeridian-aware geographic AOI and bounds support without weakening projected bounds validation
-- optimize grid loading with a single-flight parse/checksum cache so concurrent requests for the same grid avoid duplicated parse work
-- deduplicate WKT and PROJJSON semantic parsing helpers for datum candidates, unit normalization, parameter mapping, and vertical unit authority validation without intended behavior changes
-- add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
-
-- add EPSG:32662 Plate Carree registry lookup, operation selection, and reference-corpus coverage, with a regression test that every README-advertised EPSG code resolves
-- add fluent `SelectionOptions` builders and option-aware `proj-wkt::Proj` facade constructors for area-of-interest, grid policy, and explicit operation selection
+- add fluent `SelectionOptions` builders and option-aware `proj-wkt::Proj` facade constructors for area-of-interest, grid policy, approximate fallback, and explicit operation selection
+- add EPSG:32662 Plate Carree registry lookup, operation selection, and reference-corpus coverage
+- make approximate Helmert fallback an explicit opt-in policy: `BestAvailable` no longer synthesizes approximate Helmert fallbacks, and selection errors explain how to enable them
+- fix `Transform::inverse()` so inverse transforms preserve compiled fallback pipelines and diagnostics, including grid coverage miss reporting when an inverse falls back to another operation
 - fix 2D diagnostic conversion so XY-only callers do not sample vertical grids
+- reject invalid source coordinates on identity/same-datum transform paths instead of allowing non-finite or out-of-range values to bypass projection validation
+- normalize projection longitude deltas across implemented projection families so wrapped longitudes remain stable near projection centers and seams
 - optimize transform execution by compiling source/target XY unit conversion modes into the pipeline and reducing Rayon parallel batch temporary allocations
+- optimize grid loading with a single-flight parse/checksum cache and filesystem grid path caching so repeated lookups avoid duplicated parsing and filesystem traversal
+- harden grid parsing with NTv2 and GTX resource size limits, NTv2 cell-count and non-finite shift validation, GTX cell-count validation, and safer GTX edge/longitude handling
+- fix PROJ-string projected unit handling so `+x_0` and `+y_0` remain PROJ-compatible meter parameters while `+units` controls output coordinates
+- harden WKT and PROJJSON parsing by rejecting malformed projection parameter values and non-finite unit factors instead of silently ignoring invalid fields
+- fix WKT2 axis-unit handling so projected axis `LENGTHUNIT` declarations drive native linear units when no top-level unit exists, geographic axis angular units are validated, and inconsistent axis units are rejected
+- validate CRS URN structure and authority so only `urn:ogc:def:crs:EPSG:...` URNs resolve through the EPSG registry
+- harden CRS definition construction by validating ellipsoid dimensions and Helmert/datum parameters before transform construction
+- deduplicate WKT and PROJJSON semantic parsing helpers for datum candidates, unit normalization, parameter mapping, and vertical unit authority validation without intended behavior changes
 
 ## 0.5.0
 
