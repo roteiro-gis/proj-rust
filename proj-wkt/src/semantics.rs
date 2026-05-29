@@ -45,6 +45,8 @@ pub(crate) struct CoordinateSystemSpec {
     pub subtype: Option<String>,
     pub dimension: Option<usize>,
     pub axes: Vec<AxisDirection>,
+    pub axis_linear_units: Vec<Option<LinearUnit>>,
+    pub axis_angle_unit_to_degree: Vec<Option<f64>>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

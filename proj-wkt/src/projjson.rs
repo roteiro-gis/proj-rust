@@ -701,22 +701,27 @@ fn coordinate_system_from_json(value: &Value) -> CoordinateSystemSpec {
         .and_then(|cs| cs.get("subtype"))
         .and_then(Value::as_str)
         .map(str::to_string);
-    let axes = value
+    let axis_values = value
         .get("coordinate_system")
         .and_then(|cs| cs.get("axis"))
-        .and_then(Value::as_array)
+        .and_then(Value::as_array);
+    let axes = axis_values
         .map(|axes| axes.iter().map(axis_direction_from_json).collect())
         .unwrap_or_default();
-    let dimension = value
-        .get("coordinate_system")
-        .and_then(|cs| cs.get("axis"))
-        .and_then(Value::as_array)
-        .map(Vec::len);
+    let axis_linear_units = axis_values
+        .map(|axes| axes.iter().map(axis_linear_unit).collect())
+        .unwrap_or_default();
+    let axis_angle_unit_to_degree = axis_values
+        .map(|axes| axes.iter().map(axis_angle_unit_to_degree).collect())
+        .unwrap_or_default();
+    let dimension = axis_values.map(Vec::len);
 
     CoordinateSystemSpec {
         subtype,
         dimension,
         axes,
+        axis_linear_units,
+        axis_angle_unit_to_degree,
     }
 }
 
