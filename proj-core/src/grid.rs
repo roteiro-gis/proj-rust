@@ -2,6 +2,7 @@ use crate::operation::{AreaOfUse, GridId, GridInterpolation, GridShiftDirection}
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use thiserror::Error;
@@ -268,8 +269,18 @@ impl GridProvider for EmbeddedGridProvider {
 }
 
 pub struct FilesystemGridProvider {
-    roots: Vec<PathBuf>,
+    roots: Mutex<Vec<FilesystemGridRoot>>,
+    path_cache: Mutex<HashMap<String, PathBuf>>,
     data_cache: GridDataCache,
+    #[cfg(test)]
+    locate_searches: std::sync::atomic::AtomicUsize,
+}
+
+enum FilesystemGridRoot {
+    Canonical(PathBuf),
+    // Retain roots that do not exist yet so callers can construct a provider
+    // before mounting or creating the grid directory.
+    Unresolved(PathBuf),
 }
 
 impl FilesystemGridProvider {
@@ -278,20 +289,58 @@ impl FilesystemGridProvider {
         I: IntoIterator<Item = PathBuf>,
     {
         Self {
-            roots: roots.into_iter().collect(),
+            roots: Mutex::new(
+                roots
+                    .into_iter()
+                    .map(|root| match root.canonicalize() {
+                        Ok(canonical_root) => FilesystemGridRoot::Canonical(canonical_root),
+                        Err(_) => FilesystemGridRoot::Unresolved(root),
+                    })
+                    .collect(),
+            ),
+            path_cache: Mutex::new(HashMap::new()),
             data_cache: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            locate_searches: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
     fn locate(&self, grid: &GridDefinition) -> Option<PathBuf> {
-        for root in &self.roots {
-            let Ok(root) = root.canonicalize() else {
-                continue;
-            };
-            for name in &grid.resource_names {
-                if !is_safe_grid_resource_name(name) {
-                    continue;
-                }
+        let cache_key = grid_runtime_cache_key(grid);
+        if let Some(path) = self
+            .path_cache
+            .lock()
+            .expect("filesystem grid path cache poisoned")
+            .get(&cache_key)
+            .cloned()
+        {
+            return Some(path);
+        }
+
+        let path = self.locate_uncached(grid)?;
+        self.path_cache
+            .lock()
+            .expect("filesystem grid path cache poisoned")
+            .insert(cache_key, path.clone());
+        Some(path)
+    }
+
+    fn locate_uncached(&self, grid: &GridDefinition) -> Option<PathBuf> {
+        #[cfg(test)]
+        self.locate_searches
+            .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+
+        let safe_resource_names = grid
+            .resource_names
+            .iter()
+            .filter(|name| is_safe_grid_resource_name(name))
+            .collect::<Vec<_>>();
+        if safe_resource_names.is_empty() {
+            return None;
+        }
+
+        for root in self.canonical_roots_for_lookup() {
+            for name in &safe_resource_names {
                 let candidate = root.join(name);
                 let Ok(canonical_candidate) = candidate.canonicalize() else {
                     continue;
@@ -302,6 +351,26 @@ impl FilesystemGridProvider {
             }
         }
         None
+    }
+
+    fn canonical_roots_for_lookup(&self) -> Vec<PathBuf> {
+        let mut roots = self.roots.lock().expect("filesystem grid roots poisoned");
+        let mut canonical_roots = Vec::with_capacity(roots.len());
+        for root in roots.iter_mut() {
+            match root {
+                FilesystemGridRoot::Canonical(canonical_root) => {
+                    canonical_roots.push(canonical_root.clone());
+                }
+                FilesystemGridRoot::Unresolved(unresolved_root) => {
+                    let Ok(canonical_root) = unresolved_root.canonicalize() else {
+                        continue;
+                    };
+                    *root = FilesystemGridRoot::Canonical(canonical_root.clone());
+                    canonical_roots.push(canonical_root);
+                }
+            }
+        }
+        canonical_roots
     }
 }
 
@@ -321,8 +390,7 @@ impl GridProvider for FilesystemGridProvider {
             return Ok(None);
         };
 
-        let cache_path = path.canonicalize().unwrap_or_else(|_| path.clone());
-        let key = GridDataCacheKey::new(grid.format, cache_path.to_string_lossy());
+        let key = GridDataCacheKey::new(grid.format, path.to_string_lossy());
         let data = cached_grid_data(&self.data_cache, key, || {
             let bytes = read_grid_resource_bytes(&path, grid.format)?;
             parse_cached_grid_data(grid.format, &grid.name, &bytes)
@@ -348,14 +416,37 @@ fn read_grid_resource_bytes(
     path: &Path,
     format: GridFormat,
 ) -> std::result::Result<Vec<u8>, GridError> {
-    if max_grid_resource_bytes(format).is_some() {
-        let len = std::fs::metadata(path)
-            .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?
-            .len();
-        validate_grid_resource_size(path.display(), format, len)?;
+    if let Some(max_bytes) = max_grid_resource_bytes(format) {
+        return read_bounded_grid_resource_bytes(path, format, max_bytes);
     }
 
     std::fs::read(path).map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))
+}
+
+fn read_bounded_grid_resource_bytes(
+    path: &Path,
+    format: GridFormat,
+    max_bytes: usize,
+) -> std::result::Result<Vec<u8>, GridError> {
+    let file = std::fs::File::open(path)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut reader = file.take(read_limit);
+    let mut bytes = Vec::with_capacity(max_bytes.min(8192));
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+
+    if bytes.len() > max_bytes {
+        return Err(GridError::Parse(format!(
+            "{} exceeds maximum {format:?} grid size of {max_bytes} bytes",
+            path.display()
+        )));
+    }
+
+    Ok(bytes)
 }
 
 fn validate_grid_resource_size(
@@ -1534,6 +1625,19 @@ mod tests {
         }
     }
 
+    fn test_temp_grid_root(name: &str) -> PathBuf {
+        static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
+
+        let root = std::env::temp_dir().join(format!(
+            "proj-core-{name}-{}-{}",
+            std::process::id(),
+            NEXT_ROOT.fetch_add(1, Ordering::SeqCst)
+        ));
+        let _ = std::fs::remove_dir_all(&root);
+        std::fs::create_dir_all(&root).unwrap();
+        root
+    }
+
     #[test]
     fn ntv2_rejects_oversized_resource_length_before_reading() {
         let message = match validate_grid_resource_size(
@@ -1637,8 +1741,7 @@ mod tests {
 
     #[test]
     fn filesystem_provider_rejects_unsafe_resource_names() {
-        let root = std::env::temp_dir().join(format!("proj-core-grid-root-{}", std::process::id()));
-        std::fs::create_dir_all(&root).unwrap();
+        let root = test_temp_grid_root("unsafe-resource");
         std::fs::write(root.join("safe.gtx"), []).unwrap();
 
         let provider = FilesystemGridProvider::new(vec![root.clone()]);
@@ -1653,6 +1756,69 @@ mod tests {
 
         definition.resource_names = SmallVec::from_vec(vec!["safe.gtx".into()]);
         assert!(provider.definition(&definition).unwrap().is_some());
+    }
+
+    #[test]
+    fn filesystem_provider_loads_grid_from_canonical_root() {
+        let root = test_temp_grid_root("canonical-root");
+        std::fs::write(
+            root.join("safe.gtx"),
+            test_gtx_bytes(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        )
+        .unwrap();
+
+        let provider = FilesystemGridProvider::new(vec![root]);
+        let mut definition = test_grid_definition();
+        definition.name = "safe.gtx".into();
+        definition.format = GridFormat::Gtx;
+        definition.resource_names = SmallVec::from_vec(vec!["safe.gtx".into()]);
+
+        assert!(provider.definition(&definition).unwrap().is_some());
+        let handle = provider.load(&definition).unwrap().unwrap();
+        let sample = handle
+            .sample_vertical_offset_meters(20.5f64.to_radians(), 10.5f64.to_radians())
+            .unwrap();
+
+        assert!((sample.offset_meters - 2.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn filesystem_provider_reuses_located_path_between_definition_and_load() {
+        let root = test_temp_grid_root("path-cache");
+        std::fs::write(
+            root.join("cached.gtx"),
+            test_gtx_bytes(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        )
+        .unwrap();
+
+        let provider = FilesystemGridProvider::new(vec![root]);
+        let mut definition = test_grid_definition();
+        definition.name = "cached.gtx".into();
+        definition.format = GridFormat::Gtx;
+        definition.resource_names = SmallVec::from_vec(vec!["cached.gtx".into()]);
+
+        assert!(provider.definition(&definition).unwrap().is_some());
+        assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+
+        assert!(provider.load(&definition).unwrap().is_some());
+        assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn filesystem_grid_read_enforces_cap_on_bytes_read() {
+        let root = test_temp_grid_root("bounded-read");
+        let path = root.join("oversized.gtx");
+        std::fs::write(&path, [0u8; 4]).unwrap();
+
+        let err = read_bounded_grid_resource_bytes(&path, GridFormat::Gtx, 3).unwrap_err();
+
+        let GridError::Parse(message) = err else {
+            panic!("expected parse error");
+        };
+        assert!(
+            message.contains("maximum Gtx grid size of 3 bytes"),
+            "{message}"
+        );
     }
 
     fn test_gtx_bytes(values: &[f32]) -> Vec<u8> {
