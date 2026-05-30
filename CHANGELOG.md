@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-## 0.6.0 - 2026-05-29
+## 0.6.0 - 2026-05-30
 
 - add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
 - add `geo-types` geometry-level transform support for points, line strings, polygons with holes, multi-geometries, rectangles, geometry collections, and `Geometry` enum values
@@ -16,7 +16,7 @@
 - normalize projection longitude deltas across implemented projection families so wrapped longitudes remain stable near projection centers and seams
 - optimize transform execution by compiling source/target XY unit conversion modes into the pipeline and reducing Rayon parallel batch temporary allocations
 - optimize grid loading with a single-flight parse/checksum cache and filesystem grid path caching so repeated lookups avoid duplicated parsing and filesystem traversal
-- harden grid parsing with NTv2 and GTX resource size limits, NTv2 cell-count and non-finite shift validation, GTX cell-count validation, and safer GTX edge/longitude handling
+- harden grid loading and parsing with bounded filesystem reads, NTv2 and GTX resource size limits, NTv2 cell-count and non-finite shift validation, GTX cell-count validation, and safer GTX edge/longitude handling
 - fix PROJ-string projected unit handling so `+x_0` and `+y_0` remain PROJ-compatible meter parameters while `+units` controls output coordinates
 - harden WKT and PROJJSON parsing by rejecting malformed projection parameter values and non-finite unit factors instead of silently ignoring invalid fields
 - fix WKT2 axis-unit handling so projected axis `LENGTHUNIT` declarations drive native linear units when no top-level unit exists, geographic axis angular units are validated, and inconsistent axis units are rejected

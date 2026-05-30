@@ -2,6 +2,7 @@ use crate::operation::{AreaOfUse, GridId, GridInterpolation, GridShiftDirection}
 use smallvec::SmallVec;
 use std::collections::HashMap;
 use std::f64::consts::PI;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use thiserror::Error;
@@ -415,14 +416,37 @@ fn read_grid_resource_bytes(
     path: &Path,
     format: GridFormat,
 ) -> std::result::Result<Vec<u8>, GridError> {
-    if max_grid_resource_bytes(format).is_some() {
-        let len = std::fs::metadata(path)
-            .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?
-            .len();
-        validate_grid_resource_size(path.display(), format, len)?;
+    if let Some(max_bytes) = max_grid_resource_bytes(format) {
+        return read_bounded_grid_resource_bytes(path, format, max_bytes);
     }
 
     std::fs::read(path).map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))
+}
+
+fn read_bounded_grid_resource_bytes(
+    path: &Path,
+    format: GridFormat,
+    max_bytes: usize,
+) -> std::result::Result<Vec<u8>, GridError> {
+    let file = std::fs::File::open(path)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+    let read_limit = u64::try_from(max_bytes)
+        .unwrap_or(u64::MAX)
+        .saturating_add(1);
+    let mut reader = file.take(read_limit);
+    let mut bytes = Vec::with_capacity(max_bytes.min(8192));
+    reader
+        .read_to_end(&mut bytes)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+
+    if bytes.len() > max_bytes {
+        return Err(GridError::Parse(format!(
+            "{} exceeds maximum {format:?} grid size of {max_bytes} bytes",
+            path.display()
+        )));
+    }
+
+    Ok(bytes)
 }
 
 fn validate_grid_resource_size(
@@ -1778,6 +1802,23 @@ mod tests {
 
         assert!(provider.load(&definition).unwrap().is_some());
         assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn filesystem_grid_read_enforces_cap_on_bytes_read() {
+        let root = test_temp_grid_root("bounded-read");
+        let path = root.join("oversized.gtx");
+        std::fs::write(&path, [0u8; 4]).unwrap();
+
+        let err = read_bounded_grid_resource_bytes(&path, GridFormat::Gtx, 3).unwrap_err();
+
+        let GridError::Parse(message) = err else {
+            panic!("expected parse error");
+        };
+        assert!(
+            message.contains("maximum Gtx grid size of 3 bytes"),
+            "{message}"
+        );
     }
 
     fn test_gtx_bytes(values: &[f32]) -> Vec<u8> {
