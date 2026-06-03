@@ -20,81 +20,81 @@ env:
 jobs:
   check:
     name: Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --all -- --check
 
       - name: Clippy
-        run: cargo clippy --workspace --all-targets -- -D warnings
+        run: cargo clippy --workspace --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --workspace
+        run: cargo test --workspace --locked
 
   gen-reference:
     name: Registry Generator
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: rustfmt, clippy
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
 
       - name: Format
         run: cargo fmt --manifest-path gen-reference/Cargo.toml -- --check
 
       - name: Clippy
-        run: cargo clippy --manifest-path gen-reference/Cargo.toml --all-targets -- -D warnings
+        run: cargo clippy --manifest-path gen-reference/Cargo.toml --all-targets --locked -- -D warnings
 
       - name: Test
-        run: cargo test --manifest-path gen-reference/Cargo.toml --all-targets
+        run: cargo test --manifest-path gen-reference/Cargo.toml --all-targets --locked
 
       - name: Registry reproducibility
         run: ./scripts/check-registry-generation.sh
 
   no-default-features:
     name: No Default Features
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
-      - run: cargo test -p proj-core --no-default-features
+      - run: cargo test -p proj-core --no-default-features --locked
 
   doc:
     name: Documentation
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
-      - run: cargo doc --workspace --no-deps
+      - run: cargo doc --workspace --no-deps --locked
         env:
           RUSTDOCFLAGS: -D warnings
 
   wasm:
     name: WASM Check
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: wasm32-unknown-unknown
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --target wasm32-unknown-unknown --no-self-update
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check --target wasm32-unknown-unknown --no-default-features
+      - run: cargo check --target wasm32-unknown-unknown --no-default-features --locked
 
   package:
     name: Packaging
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
       - run: ./scripts/verify-release-packaging.sh
