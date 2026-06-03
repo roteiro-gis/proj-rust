@@ -27,24 +27,26 @@ env:
 jobs:
   parity:
     name: Live C PROJ Parity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
       - name: Run live parity test against bundled C PROJ
         run: ./scripts/run-reference-parity.sh
 
   benchmark:
     name: C PROJ Comparison Bench
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: parity
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.run_benchmarks }}
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - name: Install Rust
+        run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
       - name: Run Criterion comparison bench
         run: ./scripts/run-reference-benchmarks.sh
