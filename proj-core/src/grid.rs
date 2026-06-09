@@ -19,6 +19,9 @@ const GTX_HEADER_LEN: usize = 40;
 const GTX_RECORD_LEN: usize = 4;
 const MAX_GTX_CELLS: usize = 16_777_216;
 const MAX_GTX_GRID_BYTES: usize = GTX_HEADER_LEN + MAX_GTX_CELLS * GTX_RECORD_LEN;
+/// Upper bound on an accepted GeoTIFF grid resource. Compressed PROJ grids are
+/// well under this; the cap simply bounds untrusted input before decoding.
+const MAX_GEOTIFF_GRID_BYTES: usize = 256 * 1024 * 1024;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GridFormat {
@@ -26,6 +29,13 @@ pub enum GridFormat {
     Ntv2,
     /// NOAA/VDatum binary GTX vertical offset grid (`.gtx`).
     Gtx,
+    /// PROJ-format GeoTIFF/COG grid (`.tif`), as distributed on the PROJ CDN.
+    ///
+    /// The `TYPE` GDAL metadata item selects horizontal (NTv2-equivalent
+    /// latitude/longitude offsets) or vertical (geoid undulation) semantics;
+    /// both are decoded into the same internal representation as the binary
+    /// NTv2/GTX formats. Requires the `geotiff` crate feature.
+    GeoTiff,
     Unsupported,
 }
 
@@ -469,6 +479,7 @@ fn max_grid_resource_bytes(format: GridFormat) -> Option<usize> {
     match format {
         GridFormat::Ntv2 => Some(MAX_NTV2_GRID_BYTES),
         GridFormat::Gtx => Some(MAX_GTX_GRID_BYTES),
+        GridFormat::GeoTiff => Some(MAX_GEOTIFF_GRID_BYTES),
         GridFormat::Unsupported => None,
     }
 }
@@ -588,7 +599,303 @@ fn parse_grid_data(
     match format {
         GridFormat::Ntv2 => Ok(GridData::Ntv2(Ntv2GridSet::parse(bytes)?)),
         GridFormat::Gtx => Ok(GridData::Gtx(GtxGrid::parse(bytes)?)),
+        GridFormat::GeoTiff => parse_geotiff_grid_data(name, bytes),
         GridFormat::Unsupported => Err(GridError::UnsupportedFormat(name.into())),
+    }
+}
+
+#[cfg(not(feature = "geotiff"))]
+fn parse_geotiff_grid_data(name: &str, _bytes: &[u8]) -> std::result::Result<GridData, GridError> {
+    Err(GridError::UnsupportedFormat(format!(
+        "{name}: GeoTIFF grid support requires the `geotiff` crate feature"
+    )))
+}
+
+#[cfg(feature = "geotiff")]
+fn parse_geotiff_grid_data(name: &str, bytes: &[u8]) -> std::result::Result<GridData, GridError> {
+    geotiff::parse(name, bytes)
+}
+
+/// Decode PROJ-format GeoTIFF grids into the same internal representation as the
+/// binary NTv2 (`Ntv2GridSet`) and GTX (`GtxGrid`) formats, so all sampling,
+/// bilinear interpolation, nested-grid selection, and inverse iteration is
+/// shared with those code paths.
+///
+/// PROJ stores its grids as cloud-optimized GeoTIFFs: a horizontal datum-shift
+/// grid carries `latitude_offset`/`longitude_offset` bands in arc-seconds (with
+/// nested finer subgrids as additional IFDs), and a geoid grid carries a single
+/// `geoid_undulation` band in metres. The grid role is taken from the `TYPE`
+/// item of the `GDAL_METADATA` tag.
+#[cfg(feature = "geotiff")]
+mod geotiff {
+    use super::{GridData, GridError, GridExtent, GtxGrid, Ntv2Grid, Ntv2GridSet};
+    use geotiff_reader::GeoTiffFile;
+    use std::f64::consts::PI;
+    use tiff_core::TagValue;
+
+    const TIFFTAG_MODEL_PIXEL_SCALE: u16 = 33550;
+    const TIFFTAG_MODEL_TIEPOINT: u16 = 33922;
+    const TIFFTAG_GDAL_METADATA: u16 = 42112;
+    const ARCSEC_TO_RAD: f64 = PI / 180.0 / 3600.0;
+    const DEG_TO_RAD: f64 = PI / 180.0;
+
+    enum Kind {
+        Horizontal,
+        Vertical,
+    }
+
+    /// One decoded image (IFD): node-origin georeferencing plus per-band values
+    /// laid out row-major, north-to-south (TIFF raster order).
+    struct Image {
+        west_node_deg: f64,
+        north_node_deg: f64,
+        scale_lon_deg: f64,
+        scale_lat_deg: f64,
+        width: usize,
+        height: usize,
+        bands: Vec<Vec<f64>>,
+    }
+
+    pub(super) fn parse(name: &str, bytes: &[u8]) -> Result<GridData, GridError> {
+        let file = GeoTiffFile::from_bytes(bytes.to_vec())
+            .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
+        let tiff = file.tiff();
+        let ifd_count = tiff.ifd_count();
+        if ifd_count == 0 {
+            return Err(GridError::Parse(format!("{name}: no images in GeoTIFF")));
+        }
+
+        let base_index = file.base_ifd_index();
+        let base_ifd = tiff
+            .ifd(base_index)
+            .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
+        let kind = grid_kind(base_ifd.tag(TIFFTAG_GDAL_METADATA).map(|tag| &tag.value), name)?;
+
+        match kind {
+            Kind::Vertical => {
+                let image = read_image(&file, base_index, name)?;
+                Ok(GridData::Gtx(build_gtx(&image)))
+            }
+            Kind::Horizontal => {
+                let mut images = Vec::with_capacity(ifd_count);
+                for index in 0..ifd_count {
+                    images.push(read_image(&file, index, name)?);
+                }
+                Ok(GridData::Ntv2(build_ntv2(&images, name)?))
+            }
+        }
+    }
+
+    fn grid_kind(metadata: Option<&TagValue>, name: &str) -> Result<Kind, GridError> {
+        let text = match metadata {
+            Some(TagValue::Ascii(text)) => text.to_ascii_uppercase(),
+            _ => String::new(),
+        };
+        if text.contains("VERTICAL") {
+            Ok(Kind::Vertical)
+        } else if text.contains("HORIZONTAL") {
+            Ok(Kind::Horizontal)
+        } else {
+            Err(GridError::Parse(format!(
+                "{name}: GeoTIFF grid is missing a recognised GDAL `TYPE` (HORIZONTAL_OFFSET / VERTICAL_OFFSET)"
+            )))
+        }
+    }
+
+    fn read_image(file: &GeoTiffFile, index: usize, name: &str) -> Result<Image, GridError> {
+        let tiff = file.tiff();
+        let ifd = tiff
+            .ifd(index)
+            .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
+        let width = ifd.width() as usize;
+        let height = ifd.height() as usize;
+        if width < 2 || height < 2 {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} is smaller than 2x2"
+            )));
+        }
+
+        let scale = doubles(ifd.tag(TIFFTAG_MODEL_PIXEL_SCALE).map(|tag| &tag.value))
+            .ok_or_else(|| GridError::Parse(format!("{name}: missing ModelPixelScale")))?;
+        let tiepoint = doubles(ifd.tag(TIFFTAG_MODEL_TIEPOINT).map(|tag| &tag.value))
+            .ok_or_else(|| GridError::Parse(format!("{name}: missing ModelTiepoint")))?;
+        if scale.len() < 2 || tiepoint.len() < 6 {
+            return Err(GridError::Parse(format!(
+                "{name}: malformed GeoTIFF georeferencing tags"
+            )));
+        }
+        let scale_lon_deg = scale[0];
+        let scale_lat_deg = scale[1];
+        // Tiepoint maps raster (i, j) -> model (x, y). PROJ grids use a Point
+        // raster, so the (0, 0) tiepoint is the node coordinate directly.
+        let west_node_deg = tiepoint[3] - tiepoint[0] * scale_lon_deg;
+        let north_node_deg = tiepoint[4] + tiepoint[1] * scale_lat_deg;
+        if !(scale_lon_deg.is_finite()
+            && scale_lat_deg.is_finite()
+            && scale_lon_deg > 0.0
+            && scale_lat_deg > 0.0
+            && west_node_deg.is_finite()
+            && north_node_deg.is_finite())
+        {
+            return Err(GridError::Parse(format!(
+                "{name}: invalid GeoTIFF georeferencing"
+            )));
+        }
+
+        let band_count = ifd.samples_per_pixel() as usize;
+        let mut bands = Vec::with_capacity(band_count.min(2));
+        // Horizontal grids need bands 0 (latitude) and 1 (longitude); vertical
+        // grids need band 0. Reading at most two bands covers both.
+        for band_index in 0..band_count.min(2) {
+            let array = tiff
+                .read_band_from_ifd::<f32>(ifd, band_index)
+                .map_err(|err| GridError::Parse(format!("{name}: band {band_index}: {err}")))?;
+            let values: Vec<f64> = array.iter().map(|&value| value as f64).collect();
+            if values.len() != width * height {
+                return Err(GridError::Parse(format!(
+                    "{name}: band {band_index} has {} samples, expected {}",
+                    values.len(),
+                    width * height
+                )));
+            }
+            bands.push(values);
+        }
+        if bands.is_empty() {
+            return Err(GridError::Parse(format!("{name}: GeoTIFF image has no bands")));
+        }
+
+        Ok(Image {
+            west_node_deg,
+            north_node_deg,
+            scale_lon_deg,
+            scale_lat_deg,
+            width,
+            height,
+            bands,
+        })
+    }
+
+    /// Sample value at output node (x from west, y from south), flipping the
+    /// row-major north-to-south raster into the south-to-north node order used
+    /// by `Ntv2Grid`/`GtxGrid`.
+    fn at(image: &Image, band: usize, x: usize, y: usize) -> f64 {
+        let row = image.height - 1 - y;
+        image.bands[band][row * image.width + x]
+    }
+
+    fn build_gtx(image: &Image) -> GtxGrid {
+        let width = image.width;
+        let height = image.height;
+        let mut offsets_meters = vec![0.0f64; width * height];
+        for y in 0..height {
+            for x in 0..width {
+                offsets_meters[y * width + x] = at(image, 0, x, y);
+            }
+        }
+        let west_degrees = image.west_node_deg;
+        let south_degrees = image.north_node_deg - image.scale_lat_deg * (height - 1) as f64;
+        GtxGrid {
+            west_degrees,
+            south_degrees,
+            east_degrees: west_degrees + image.scale_lon_deg * (width - 1) as f64,
+            north_degrees: image.north_node_deg,
+            delta_lon_degrees: image.scale_lon_deg,
+            delta_lat_degrees: image.scale_lat_deg,
+            width,
+            height,
+            offsets_meters,
+        }
+    }
+
+    fn build_ntv2(images: &[Image], name: &str) -> Result<Ntv2GridSet, GridError> {
+        let mut grids = Vec::with_capacity(images.len());
+        for image in images {
+            if image.bands.len() < 2 {
+                return Err(GridError::Parse(format!(
+                    "{name}: horizontal GeoTIFF grid needs latitude and longitude offset bands"
+                )));
+            }
+            let width = image.width;
+            let height = image.height;
+            let mut lat_shift = vec![0.0f64; width * height];
+            let mut lon_shift = vec![0.0f64; width * height];
+            for y in 0..height {
+                for x in 0..width {
+                    let dest = y * width + x;
+                    // Band 0: latitude offset (arc-sec, +north).
+                    // Band 1: longitude offset (arc-sec, +east).
+                    lat_shift[dest] = at(image, 0, x, y) * ARCSEC_TO_RAD;
+                    lon_shift[dest] = at(image, 1, x, y) * ARCSEC_TO_RAD;
+                }
+            }
+            let west = image.west_node_deg * DEG_TO_RAD;
+            let north = image.north_node_deg * DEG_TO_RAD;
+            let res_x = image.scale_lon_deg * DEG_TO_RAD;
+            let res_y = image.scale_lat_deg * DEG_TO_RAD;
+            let extent = GridExtent {
+                west,
+                south: north - res_y * (height - 1) as f64,
+                east: west + res_x * (width - 1) as f64,
+                north,
+                res_x,
+                res_y,
+            };
+            grids.push(Ntv2Grid {
+                name: name.into(),
+                extent,
+                width,
+                height,
+                lat_shift,
+                lon_shift,
+                children: Vec::new(),
+            });
+        }
+
+        // Establish nesting: a grid's parent is the smallest other grid that
+        // fully contains it. Grids without a parent are roots. PROJ stores
+        // coarse parent grids before their finer nested children.
+        let mut roots = Vec::new();
+        for child in 0..grids.len() {
+            let mut parent: Option<usize> = None;
+            for candidate in 0..grids.len() {
+                if candidate == child || !extent_contains(&grids[candidate], &grids[child]) {
+                    continue;
+                }
+                match parent {
+                    Some(current) if !extent_contains(&grids[current], &grids[candidate]) => {}
+                    _ => parent = Some(candidate),
+                }
+            }
+            match parent {
+                Some(parent_index) => grids[parent_index].children.push(child),
+                None => roots.push(child),
+            }
+        }
+        if roots.is_empty() {
+            return Err(GridError::Parse(format!(
+                "{name}: horizontal GeoTIFF grid has no root subgrid"
+            )));
+        }
+
+        Ok(Ntv2GridSet { grids, roots })
+    }
+
+    fn extent_contains(outer: &Ntv2Grid, inner: &Ntv2Grid) -> bool {
+        let tol = (outer.extent.res_x + outer.extent.res_y) * 1e-9;
+        outer.extent.west <= inner.extent.west + tol
+            && outer.extent.east >= inner.extent.east - tol
+            && outer.extent.south <= inner.extent.south + tol
+            && outer.extent.north >= inner.extent.north - tol
+            // A strictly larger cell is a coarser (parent) grid.
+            && outer.extent.res_x > inner.extent.res_x * (1.0 + 1e-9)
+    }
+
+    fn doubles(value: Option<&TagValue>) -> Option<Vec<f64>> {
+        match value? {
+            TagValue::Double(values) => Some(values.clone()),
+            TagValue::Float(values) => Some(values.iter().map(|&v| v as f64).collect()),
+            _ => None,
+        }
     }
 }
 

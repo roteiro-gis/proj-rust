@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- add optional `geotiff` feature decoding PROJ-format GeoTIFF/COG grids (horizontal NTv2-equivalent offset grids with nested subgrids, and vertical geoid grids) into the existing NTv2/GTX sampling paths via the pure-Rust `geotiff-reader` crate
+- add RDNAPTRANS2018 support: register EPSG:5709 (NAP height) and EPSG:7415 (Amersfoort / RD New + NAP height), and select the grid-backed ETRS89/WGS 84 3D ↔ RD New + NAP operation (nested `nl_nsgi_rdtrans2018.tif` horizontal shift + `nl_nsgi_nlgeo2018.tif` geoid), matching PROJ 9.8 to sub-millimetre when grids are supplied through a `GridProvider`
+
 ## 0.6.0 - 2026-05-30
 
 - add registry-backed GTX vertical grid operation metadata and automatic ellipsoidal-to-gravity height selection while keeping geoid grid assets caller-supplied
