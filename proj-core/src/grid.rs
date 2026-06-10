@@ -669,7 +669,10 @@ mod geotiff {
         let base_ifd = tiff
             .ifd(base_index)
             .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
-        let kind = grid_kind(base_ifd.tag(TIFFTAG_GDAL_METADATA).map(|tag| &tag.value), name)?;
+        let kind = grid_kind(
+            base_ifd.tag(TIFFTAG_GDAL_METADATA).map(|tag| &tag.value),
+            name,
+        )?;
 
         match kind {
             Kind::Vertical => {
@@ -761,7 +764,9 @@ mod geotiff {
             bands.push(values);
         }
         if bands.is_empty() {
-            return Err(GridError::Parse(format!("{name}: GeoTIFF image has no bands")));
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image has no bands"
+            )));
         }
 
         Ok(Image {

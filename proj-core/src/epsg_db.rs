@@ -734,9 +734,12 @@ pub(crate) fn lookup(code: u32) -> Option<CrsDef> {
 // caller's `GridProvider` (e.g. a `FilesystemGridProvider`); see the `geotiff`
 // crate feature for decoding.
 
+// Internal (non-EPSG) grid identifiers used only to wire the hand-coded
+// GridShift to its GridDefinition via `lookup_grid`; they are not part of the
+// public EPSG registry namespace and will be replaced when `gen-registry`
+// learns to emit the RDNAP operations.
 const RDNAP_HORIZONTAL_GRID_ID: u32 = 990_001;
 const RDNAP_GEOID_GRID_ID: u32 = 990_002;
-const RDNAP_HORIZONTAL_OP_ID: u32 = 990_001;
 const NAP_VERTICAL_CRS: u32 = 5709;
 const NAP_VERTICAL_DATUM: u32 = 5109;
 const AMERSFOORT_GEOGRAPHIC_CRS: u32 = 4289;
@@ -795,7 +798,10 @@ fn rdnap_horizontal_operations() -> &'static [CoordinateOperation] {
         // Declared source->target is WGS 84 -> Amersfoort, so the grid is
         // applied in reverse (ETRF2000 -> Amersfoort) in the forward direction.
         vec![CoordinateOperation {
-            id: Some(CoordinateOperationId(RDNAP_HORIZONTAL_OP_ID)),
+            // Left un-id'd: this is an internal WGS 84/ETRS89 -> Amersfoort
+            // wrapper, not itself an EPSG operation. Generated registry support
+            // (proj.db ops 9282/9283) can replace it cleanly later.
+            id: None,
             name: "RD New (RDNAPTRANS2018), Netherlands".into(),
             source_crs_epsg: Some(WGS84_GEOGRAPHIC_CRS),
             target_crs_epsg: Some(AMERSFOORT_GEOGRAPHIC_CRS),

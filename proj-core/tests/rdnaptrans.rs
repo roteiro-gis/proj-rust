@@ -64,9 +64,18 @@ fn rdnaptrans_forward_matches_proj() {
 
     // Sub-millimetre agreement with PROJ (residual is float32 grid storage and
     // independent rounding in the inverse grid-shift iteration / projection).
-    assert!((x - PROJ_RD_X).abs() < 1e-3, "RD X {x:.6} vs PROJ {PROJ_RD_X:.6}");
-    assert!((y - PROJ_RD_Y).abs() < 1e-3, "RD Y {y:.6} vs PROJ {PROJ_RD_Y:.6}");
-    assert!((z - PROJ_NAP).abs() < 1e-3, "NAP height {z:.6} vs PROJ {PROJ_NAP:.6}");
+    assert!(
+        (x - PROJ_RD_X).abs() < 1e-3,
+        "RD X {x:.6} vs PROJ {PROJ_RD_X:.6}"
+    );
+    assert!(
+        (y - PROJ_RD_Y).abs() < 1e-3,
+        "RD Y {y:.6} vs PROJ {PROJ_RD_Y:.6}"
+    );
+    assert!(
+        (z - PROJ_NAP).abs() < 1e-3,
+        "NAP height {z:.6} vs PROJ {PROJ_NAP:.6}"
+    );
 }
 
 #[test]
