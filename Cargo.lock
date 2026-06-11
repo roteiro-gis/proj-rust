@@ -96,8 +96,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7a0dd1ca384932ff3641c8718a02769f1698e7563dc6974ffd03346116310423"
 dependencies = [
  "find-msvc-tools",
- "jobserver",
- "libc",
  "shlex",
 ]
 
@@ -330,15 +328,15 @@ dependencies = [
 
 [[package]]
 name = "geotiff-core"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0953a6b16831809521856d51e0c6e0e78bfd98245ef84b824d2e65e412b85abe"
+checksum = "cef56931c6f091ef55dae5cf62e8f7a5b33a05705183ea65ba8bc67083d40a8e"
 
 [[package]]
 name = "geotiff-reader"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9101916d831c8c438091de92bc41ea1598e237e52bf52ade9e6d83a6d9f76d2a"
+checksum = "4d6046f0a9e6101a55abf3bfed3df3d411b65e06de721d2dc5934aa81b8a4b27"
 dependencies = [
  "geotiff-core",
  "lru",
@@ -460,16 +458,6 @@ name = "itoa"
 version = "1.0.18"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f42a60cbdf9a97f5d2305f08a87dc4e09308d1276d28c869c684d7777685682"
-
-[[package]]
-name = "jobserver"
-version = "0.1.34"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9afb3de4395d6b3e67a780b6de64b51c978ecf11cb9a462c66be7d4ca9039d33"
-dependencies = [
- "getrandom 0.3.4",
- "libc",
-]
 
 [[package]]
 name = "jpeg-decoder"
@@ -1032,6 +1020,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "ruzstd"
+version = "0.8.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7c1c839d570d835527c9a5e4db7cb2198683a988cb9d7293fc8674e6bd58fc8"
+dependencies = [
+ "twox-hash",
+]
+
+[[package]]
 name = "same-file"
 version = "1.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1170,18 +1167,18 @@ dependencies = [
 
 [[package]]
 name = "tiff-core"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ce86ebc6c8690479fa4e5bf2ab288452341e29378c728beee5f296976cc3694a"
+checksum = "53503ab434f5bacdaf931599aee27c59bd912db1da8302dfd28fcc1b26291008"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "tiff-reader"
-version = "0.6.0"
+version = "0.6.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7dc5d146a70f7fc1d147460e8af885644a75b9572b50c60fe717e2e00a1b830b"
+checksum = "bdf2e12627094e03f791232b3aa5966087b4614e8c7e9e55891ef97a5409393a"
 dependencies = [
  "flate2",
  "jpeg-decoder",
@@ -1192,11 +1189,11 @@ dependencies = [
  "ndarray",
  "parking_lot",
  "rayon",
+ "ruzstd",
  "smallvec",
  "thiserror",
  "tiff-core",
  "weezl",
- "zstd",
 ]
 
 [[package]]
@@ -1208,6 +1205,12 @@ dependencies = [
  "serde",
  "serde_json",
 ]
+
+[[package]]
+name = "twox-hash"
+version = "2.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9ea3136b675547379c4bd395ca6b938e5ad3c3d20fad76e7fe85f9e0d011419c"
 
 [[package]]
 name = "unarray"
@@ -1512,31 +1515,3 @@ name = "zmij"
 version = "1.0.21"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b8848ee67ecc8aedbaf3e4122217aff892639231befc6a1b58d29fff4c2cabaa"
-
-[[package]]
-name = "zstd"
-version = "0.13.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a"
-dependencies = [
- "zstd-safe",
-]
-
-[[package]]
-name = "zstd-safe"
-version = "7.2.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d"
-dependencies = [
- "zstd-sys",
-]
-
-[[package]]
-name = "zstd-sys"
-version = "2.0.16+zstd.1.5.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748"
-dependencies = [
- "cc",
- "pkg-config",
-]
