@@ -5,7 +5,8 @@
 [![proj-wkt crates.io](https://img.shields.io/crates/v/proj-wkt.svg)](https://crates.io/crates/proj-wkt)
 [![proj-wkt docs.rs](https://docs.rs/proj-wkt/badge.svg)](https://docs.rs/proj-wkt)
 
-Pure-Rust coordinate transformation library. No C libraries, no build scripts, no unsafe code.
+Pure-Rust coordinate transformation library. The default library surface has no
+C libraries, no build scripts, and no unsafe code.
 
 ## Crates
 
@@ -114,6 +115,10 @@ cargo test --workspace
 cargo test -p proj-core --no-default-features
 cargo clippy --workspace --all-targets -- -D warnings
 ```
+
+The optional `c-proj-compat` feature and `gen-reference` tool intentionally use
+bundled C PROJ/sqlite for reference comparisons and registry generation; they
+are not part of the default library surface.
 
 The embedded EPSG registry is generated from the bundled PROJ `proj.db`:
 
