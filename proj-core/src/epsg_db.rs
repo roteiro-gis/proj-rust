@@ -635,6 +635,19 @@ pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
         ))));
     }
 
+    if code == 7415 {
+        // Amersfoort / RD New + NAP height (RDNAPTRANS2018 target CRS).
+        let CrsDef::Projected(rd_new) = lookup_projected(28992)? else {
+            return None;
+        };
+        return Some(CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            7415,
+            HorizontalCrsDef::Projected(rd_new),
+            nap_height_vertical_crs(),
+            "Amersfoort / RD New + NAP height",
+        ))));
+    }
+
     let record = db().geographic_crs.get(&code)?;
     let datum = db().datums.get(&record.datum_code)?;
     Some(CrsDef::Geographic(GeographicCrsDef::new(
@@ -701,12 +714,170 @@ pub(crate) fn lookup_vertical(code: u32) -> Option<VerticalCrsDef> {
             )
             .expect("hard-coded vertical CRS definition is valid"),
         ),
+        5709 => Some(nap_height_vertical_crs()),
         _ => None,
     }
 }
 
 pub(crate) fn lookup(code: u32) -> Option<CrsDef> {
     lookup_geographic(code).or_else(|| lookup_projected(code))
+}
+
+// --- RDNAPTRANS2018 (Netherlands) ------------------------------------------
+//
+// The official RD New + NAP transformation is grid-based and uses PROJ-format
+// GeoTIFF grids (`nl_nsgi_rdtrans2018.tif` horizontal, `nl_nsgi_nlgeo2018.tif`
+// geoid). The generated registry does not carry these GeoTIFF-backed
+// operations, so they are defined here by hand and surfaced through the same
+// `related_operations` / `vertical_grid_operations_between` / `lookup_grid`
+// paths the generated registry uses. Grid files themselves are supplied by the
+// caller's `GridProvider` (e.g. a `FilesystemGridProvider`); see the `geotiff`
+// crate feature for decoding.
+
+// Internal (non-EPSG) grid identifiers used only to wire the hand-coded
+// GridShift to its GridDefinition via `lookup_grid`; they are not part of the
+// public EPSG registry namespace and will be replaced when `gen-registry`
+// learns to emit the RDNAP operations.
+const RDNAP_HORIZONTAL_GRID_ID: u32 = 990_001;
+const RDNAP_GEOID_GRID_ID: u32 = 990_002;
+const NAP_VERTICAL_CRS: u32 = 5709;
+const NAP_VERTICAL_DATUM: u32 = 5109;
+const AMERSFOORT_GEOGRAPHIC_CRS: u32 = 4289;
+const AMERSFOORT_DATUM: u32 = 6289;
+const WGS84_GEOGRAPHIC_CRS: u32 = 4326;
+const WGS84_DATUM: u32 = 6326;
+
+fn rdnap_area_of_use() -> AreaOfUse {
+    AreaOfUse {
+        west: 1.95,
+        south: 49.95,
+        east: 8.05,
+        north: 56.05,
+        name: "Netherlands - onshore and offshore".into(),
+    }
+}
+
+fn nap_height_vertical_crs() -> VerticalCrsDef {
+    VerticalCrsDef::gravity_related_height(
+        NAP_VERTICAL_CRS,
+        NAP_VERTICAL_DATUM,
+        LinearUnit::metre(),
+        "NAP height",
+    )
+    .expect("hard-coded NAP vertical CRS definition is valid")
+}
+
+fn rdnap_horizontal_grid_definition() -> GridDefinition {
+    GridDefinition {
+        id: GridId(RDNAP_HORIZONTAL_GRID_ID),
+        name: "nl_nsgi_rdtrans2018.tif".into(),
+        format: GridFormat::GeoTiff,
+        interpolation: GridInterpolation::Bilinear,
+        area_of_use: Some(rdnap_area_of_use()),
+        resource_names: SmallVec::from_vec(vec!["nl_nsgi_rdtrans2018.tif".into()]),
+    }
+}
+
+fn rdnap_geoid_grid_definition() -> GridDefinition {
+    GridDefinition {
+        id: GridId(RDNAP_GEOID_GRID_ID),
+        name: "nl_nsgi_nlgeo2018.tif".into(),
+        format: GridFormat::GeoTiff,
+        interpolation: GridInterpolation::Bilinear,
+        area_of_use: Some(rdnap_area_of_use()),
+        resource_names: SmallVec::from_vec(vec!["nl_nsgi_nlgeo2018.tif".into()]),
+    }
+}
+
+/// Hand-coded RDNAPTRANS2018 horizontal operations, owned for `'static` lifetime
+/// so they can be returned alongside generated `related_operations` results.
+fn rdnap_horizontal_operations() -> &'static [CoordinateOperation] {
+    static OPS: OnceLock<Vec<CoordinateOperation>> = OnceLock::new();
+    OPS.get_or_init(|| {
+        // The grid maps Amersfoort (Bessel, EPSG:4289) -> ETRF2000 (~WGS 84).
+        // Declared source->target is WGS 84 -> Amersfoort, so the grid is
+        // applied in reverse (ETRF2000 -> Amersfoort) in the forward direction.
+        vec![CoordinateOperation {
+            // Left un-id'd: this is an internal WGS 84/ETRS89 -> Amersfoort
+            // wrapper, not itself an EPSG operation. Generated registry support
+            // (proj.db ops 9282/9283) can replace it cleanly later.
+            id: None,
+            name: "RD New (RDNAPTRANS2018), Netherlands".into(),
+            source_crs_epsg: Some(WGS84_GEOGRAPHIC_CRS),
+            target_crs_epsg: Some(AMERSFOORT_GEOGRAPHIC_CRS),
+            source_datum_epsg: Some(WGS84_DATUM),
+            target_datum_epsg: Some(AMERSFOORT_DATUM),
+            accuracy: Some(OperationAccuracy { meters: 0.01 }),
+            areas_of_use: SmallVec::from_vec(vec![rdnap_area_of_use()]),
+            deprecated: false,
+            preferred: true,
+            approximate: false,
+            method: OperationMethod::GridShift {
+                grid_id: GridId(RDNAP_HORIZONTAL_GRID_ID),
+                interpolation: GridInterpolation::Bilinear,
+                direction: GridShiftDirection::Reverse,
+            },
+        }]
+    })
+}
+
+/// RDNAPTRANS2018 horizontal operations matching the given base-geographic CRS
+/// pair (in either direction).
+fn rdnap_related_operations(
+    source_geo: u32,
+    target_geo: u32,
+) -> impl Iterator<Item = &'static CoordinateOperation> {
+    let matches = (source_geo == WGS84_GEOGRAPHIC_CRS && target_geo == AMERSFOORT_GEOGRAPHIC_CRS)
+        || (source_geo == AMERSFOORT_GEOGRAPHIC_CRS && target_geo == WGS84_GEOGRAPHIC_CRS);
+    rdnap_horizontal_operations()
+        .iter()
+        .filter(move |_| matches)
+}
+
+fn rdnap_lookup_grid(code: u32) -> Option<GridDefinition> {
+    match code {
+        RDNAP_HORIZONTAL_GRID_ID => Some(rdnap_horizontal_grid_definition()),
+        RDNAP_GEOID_GRID_ID => Some(rdnap_geoid_grid_definition()),
+        _ => None,
+    }
+}
+
+/// RDNAPTRANS2018 geoid operation(s) for an ellipsoidal-height <-> NAP pair.
+fn rdnap_vertical_operations(
+    source: &VerticalCrsDef,
+    target: &VerticalCrsDef,
+) -> Vec<VerticalGridOperation> {
+    let geoid = VerticalGridOperation {
+        name: "NAP height (RDNAPTRANS2018)".into(),
+        grid: rdnap_geoid_grid_definition(),
+        // The geoid grid is georeferenced in ETRF2000 (~WGS 84 / ETRS89 at this
+        // accuracy). Sampling in that CRS keeps the geoid at the ellipsoidal
+        // position in both directions: forward it equals the source, and on the
+        // inverse it transforms RD back to geographic before sampling (matching
+        // PROJ's pipeline ordering) rather than sampling at the RD-derived
+        // Bessel position.
+        grid_horizontal_crs_epsg: Some(WGS84_GEOGRAPHIC_CRS),
+        source_vertical_crs_epsg: None,
+        target_vertical_crs_epsg: Some(NAP_VERTICAL_CRS),
+        source_vertical_datum_epsg: None,
+        target_vertical_datum_epsg: Some(NAP_VERTICAL_DATUM),
+        accuracy: Some(OperationAccuracy { meters: 0.01 }),
+        area_of_use: Some(rdnap_area_of_use()),
+        offset_convention: VerticalGridOffsetConvention::GeoidHeightMeters,
+    };
+
+    let is_nap = |vertical: &VerticalCrsDef| {
+        vertical.epsg() == NAP_VERTICAL_CRS
+            || vertical.vertical_datum_epsg() == Some(NAP_VERTICAL_DATUM)
+    };
+    if source.kind().is_ellipsoidal_height() && is_nap(target) {
+        return vec![geoid];
+    }
+    if target.kind().is_ellipsoidal_height() && is_nap(source) {
+        return vec![geoid.inverse()];
+    }
+
+    Vec::new()
 }
 
 pub(crate) fn lookup_datum_code_for_crs(code: u32) -> Option<u32> {
@@ -768,10 +939,12 @@ pub(crate) fn vertical_grid_operations_between(
     }
 
     matches.sort_by_key(|left| left.0);
-    matches
+    let mut operations: Vec<VerticalGridOperation> = matches
         .into_iter()
         .map(|(_, operation)| operation)
-        .collect()
+        .collect();
+    operations.extend(rdnap_vertical_operations(source_vertical, target_vertical));
+    operations
 }
 
 pub(crate) fn related_operations(
@@ -811,6 +984,7 @@ pub(crate) fn related_operations(
 
     ids.into_iter()
         .filter_map(|id| db().operations.get(&id))
+        .chain(rdnap_related_operations(source_geo, target_geo))
         .collect()
 }
 
@@ -844,7 +1018,7 @@ pub(crate) fn forward_operations(
 }
 
 pub(crate) fn lookup_grid(code: u32) -> Option<GridDefinition> {
-    db().grids.get(&code).cloned()
+    rdnap_lookup_grid(code).or_else(|| db().grids.get(&code).cloned())
 }
 
 fn vertical_operation_matches(

@@ -60,7 +60,8 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 |---|---|
 | Geographic CRS and datum identity | EPSG:4326, EPSG:4269, EPSG:4267, EPSG:4258 |
 | 3D geographic and compatible compound CRS | EPSG:4979 |
-| Vertical CRS metadata and same-reference unit conversion | EPSG:3855, EPSG:5702, EPSG:5703, EPSG:5773, EPSG:6360 |
+| Vertical CRS metadata and same-reference unit conversion | EPSG:3855, EPSG:5702, EPSG:5703, EPSG:5773, EPSG:6360, EPSG:5709 |
+| Grid-based 3D compound (with `geotiff`) | EPSG:7415 (RD New + NAP, RDNAPTRANS2018) |
 | Web Mercator | EPSG:3857 |
 | Transverse Mercator / UTM | EPSG:32601-32660, EPSG:32701-32760 |
 | Polar Stereographic | EPSG:3413, EPSG:3031, EPSG:3995, EPSG:32661, EPSG:32761 |
@@ -83,6 +84,18 @@ Horizontal NTv2 grid shifts are supported through embedded registry operations, 
 
 Vertical GTX geoid operations are supported for registry-backed ellipsoidal-to-gravity height pairs and explicit `VerticalGridOperation` values. Grid files are resolved through a caller-provided `FilesystemGridProvider` or custom `GridProvider`; geoid grid files are not bundled.
 
+With the `geotiff` feature, PROJ-format GeoTIFF/COG grids (`.tif`, as distributed on the PROJ CDN) are decoded for both horizontal (NTv2-equivalent latitude/longitude offsets, including nested subgrids) and vertical (geoid undulation) shifts. This enables grid-based transforms such as **RDNAPTRANS™2018** — ETRS89/WGS 84 3D (`EPSG:4979`) to RD New + NAP height (`EPSG:7415`) — matching PROJ to sub-millimetre. Supply the `nl_nsgi_rdtrans2018.tif` and `nl_nsgi_nlgeo2018.tif` grids through a `FilesystemGridProvider`:
+
+```rust
+use std::sync::Arc;
+use proj_core::{FilesystemGridProvider, SelectionOptions, Transform};
+
+let provider = Arc::new(FilesystemGridProvider::new(vec!["/path/to/grids".into()]));
+let options = SelectionOptions::new().with_grid_provider(provider);
+let t = Transform::with_selection_options("EPSG:4979", "EPSG:7415", options).unwrap();
+let (rd_x, rd_y, nap) = t.convert_3d((6.605585, 53.294378, 50.0)).unwrap();
+```
+
 Grid diagnostics expose selected operation metadata and resolved grid SHA-256 checksums.
 
 ## Feature Flags
@@ -91,6 +104,7 @@ Grid diagnostics expose selected operation metadata and resolved grid SHA-256 ch
 |---|---|---|
 | `rayon` | yes | Parallel batch transforms via `convert_batch_parallel()` |
 | `geo-types` | yes | `geo_types::Coord<f64>` conversions and geometry transforms |
+| `geotiff` | no | Decode PROJ-format GeoTIFF/COG datum-shift and geoid grids (e.g. RDNAPTRANS2018) via the pure-Rust `geotiff-reader` crate |
 | `c-proj-compat` | no | Reference-compatibility tests against bundled C PROJ |
 
 ## Development

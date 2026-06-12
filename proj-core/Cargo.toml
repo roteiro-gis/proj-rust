@@ -34,6 +34,21 @@ version = "0.27"
 features = ["bundled_proj"]
 optional = true
 
+# Pure-Rust GeoTIFF/COG grid reader (PROJ-format datum-shift and geoid grids).
+# default-features = false drops the mmap (`local`) and HTTP (`cog`) paths; we
+# only use the in-memory `from_bytes` decoder.
+# 0.6.1 replaced the C-backed `zstd-sys` with pure-Rust `ruzstd`, keeping the
+# `geotiff` feature free of C dependencies and build scripts.
+[dependencies.geotiff-reader]
+version = "0.6.1"
+default-features = false
+features = ["local"]
+optional = true
+
+[dependencies.tiff-core]
+version = "0.6.1"
+optional = true
+
 [dev-dependencies]
 criterion = { version = "0.5", features = ["html_reports"] }
 proptest = "1"
@@ -54,3 +69,7 @@ default = ["rayon", "geo-types"]
 rayon = ["dep:rayon"]
 geo-types = ["dep:geo-types"]
 c-proj-compat = ["dep:proj", "dep:proj-sys"]
+# Read PROJ-format GeoTIFF datum-shift/geoid grids (e.g. RDNAPTRANS2018). Pulls
+# in the geotiff-reader/tiff-core crates; off by default to keep the core build
+# dependency-free.
+geotiff = ["dep:geotiff-reader", "dep:tiff-core"]
