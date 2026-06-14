@@ -39,6 +39,21 @@ fn cross_datum_height_roundtrip() {
 }
 
 #[test]
+fn helmert_backed_projected_transform_uses_source_height_for_xy() {
+    let t = Transform::new("EPSG:4326", "EPSG:27700").unwrap();
+
+    let ground = t.convert_3d((-0.1278, 51.5074, 0.0)).unwrap();
+    let high = t.convert_3d((-0.1278, 51.5074, 10_000.0)).unwrap();
+    let de = high.0 - ground.0;
+    let dn = high.1 - ground.1;
+
+    assert!(de.abs() > 0.1, "easting delta = {de}");
+    assert!(dn.abs() > 0.05, "northing delta = {dn}");
+    assert!((ground.2 - 0.0).abs() < 1e-12);
+    assert!((high.2 - 10_000.0).abs() < 1e-12);
+}
+
+#[test]
 fn batch_transform_3d_preserves_heights() {
     let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
     let coords: Vec<(f64, f64, f64)> = (0..50)
