@@ -15,7 +15,7 @@ struct ReferencePoint3D {
     description: &'static str,
 }
 
-fn cases() -> [ReferencePoint3D; 5] {
+fn cases() -> [ReferencePoint3D; 6] {
     [
         ReferencePoint3D {
             from_epsg: 4326,
@@ -48,6 +48,14 @@ fn cases() -> [ReferencePoint3D; 5] {
             tolerance_xy: 1.0,
             tolerance_z: 0.05,
             description: "WGS84 3D to British National Grid",
+        },
+        ReferencePoint3D {
+            from_epsg: 4326,
+            to_epsg: 27700,
+            input: (-0.1278, 51.5074, 10_000.0),
+            tolerance_xy: 0.01,
+            tolerance_z: 0.05,
+            description: "WGS84 3D to British National Grid with high ellipsoidal height",
         },
         ReferencePoint3D {
             from_epsg: 27700,

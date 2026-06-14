@@ -61,18 +61,18 @@ impl PipelineSourceXyUnits {
                 let lon = coord.x.to_radians();
                 let lat = coord.y.to_radians();
                 validate_lon_lat(lon, lat)?;
-                Ok(Coord3D::new(lon, lat, 0.0))
+                Ok(Coord3D::new(lon, lat, coord.z))
             }
             Self::ProjectedMeters => {
                 validate_projected(coord.x, coord.y)?;
-                Ok(Coord3D::new(coord.x, coord.y, 0.0))
+                Ok(Coord3D::new(coord.x, coord.y, coord.z))
             }
             Self::ProjectedNativeToMeters(unit) => {
                 validate_projected(coord.x, coord.y)?;
                 let x = unit.to_meters(coord.x);
                 let y = unit.to_meters(coord.y);
                 validate_projected(x, y)?;
-                Ok(Coord3D::new(x, y, 0.0))
+                Ok(Coord3D::new(x, y, coord.z))
             }
         }
     }
