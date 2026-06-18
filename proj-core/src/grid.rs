@@ -288,7 +288,7 @@ impl GridProvider for EmbeddedGridProvider {
 
 pub struct FilesystemGridProvider {
     roots: Mutex<Vec<FilesystemGridRoot>>,
-    path_cache: Mutex<HashMap<String, PathBuf>>,
+    location_cache: Mutex<HashMap<String, FilesystemGridLocation>>,
     data_cache: GridDataCache,
     #[cfg(test)]
     locate_searches: std::sync::atomic::AtomicUsize,
@@ -299,6 +299,12 @@ enum FilesystemGridRoot {
     // Retain roots that do not exist yet so callers can construct a provider
     // before mounting or creating the grid directory.
     Unresolved(PathBuf),
+}
+
+#[derive(Clone)]
+struct FilesystemGridLocation {
+    root: PathBuf,
+    path: PathBuf,
 }
 
 impl FilesystemGridProvider {
@@ -316,34 +322,48 @@ impl FilesystemGridProvider {
                     })
                     .collect(),
             ),
-            path_cache: Mutex::new(HashMap::new()),
+            location_cache: Mutex::new(HashMap::new()),
             data_cache: Mutex::new(HashMap::new()),
             #[cfg(test)]
             locate_searches: std::sync::atomic::AtomicUsize::new(0),
         }
     }
 
-    fn locate(&self, grid: &GridDefinition) -> Option<PathBuf> {
+    fn locate(&self, grid: &GridDefinition) -> Option<FilesystemGridLocation> {
         let cache_key = grid_runtime_cache_key(grid);
-        if let Some(path) = self
-            .path_cache
-            .lock()
-            .expect("filesystem grid path cache poisoned")
-            .get(&cache_key)
-            .cloned()
-        {
-            return Some(path);
+        let cached_location = {
+            self.location_cache
+                .lock()
+                .expect("filesystem grid location cache poisoned")
+                .get(&cache_key)
+                .cloned()
+        };
+        if let Some(location) = cached_location {
+            if let Some(validated) = self.revalidate_location(&location) {
+                if validated.path != location.path {
+                    self.location_cache
+                        .lock()
+                        .expect("filesystem grid location cache poisoned")
+                        .insert(cache_key, validated.clone());
+                }
+                return Some(validated);
+            }
+
+            self.location_cache
+                .lock()
+                .expect("filesystem grid location cache poisoned")
+                .remove(&cache_key);
         }
 
-        let path = self.locate_uncached(grid)?;
-        self.path_cache
+        let location = self.locate_uncached(grid)?;
+        self.location_cache
             .lock()
-            .expect("filesystem grid path cache poisoned")
-            .insert(cache_key, path.clone());
-        Some(path)
+            .expect("filesystem grid location cache poisoned")
+            .insert(cache_key, location.clone());
+        Some(location)
     }
 
-    fn locate_uncached(&self, grid: &GridDefinition) -> Option<PathBuf> {
+    fn locate_uncached(&self, grid: &GridDefinition) -> Option<FilesystemGridLocation> {
         #[cfg(test)]
         self.locate_searches
             .fetch_add(1, std::sync::atomic::Ordering::SeqCst);
@@ -364,11 +384,30 @@ impl FilesystemGridProvider {
                     continue;
                 };
                 if canonical_candidate.starts_with(&root) && canonical_candidate.is_file() {
-                    return Some(canonical_candidate);
+                    return Some(FilesystemGridLocation {
+                        root,
+                        path: canonical_candidate,
+                    });
                 }
             }
         }
         None
+    }
+
+    fn revalidate_location(
+        &self,
+        location: &FilesystemGridLocation,
+    ) -> Option<FilesystemGridLocation> {
+        let Ok(canonical_path) = location.path.canonicalize() else {
+            return None;
+        };
+        if !canonical_path.starts_with(&location.root) || !canonical_path.is_file() {
+            return None;
+        }
+        Some(FilesystemGridLocation {
+            root: location.root.clone(),
+            path: canonical_path,
+        })
     }
 
     fn canonical_roots_for_lookup(&self) -> Vec<PathBuf> {
@@ -404,13 +443,13 @@ impl GridProvider for FilesystemGridProvider {
     }
 
     fn load(&self, grid: &GridDefinition) -> std::result::Result<Option<GridHandle>, GridError> {
-        let Some(path) = self.locate(grid) else {
+        let Some(location) = self.locate(grid) else {
             return Ok(None);
         };
 
-        let key = GridDataCacheKey::new(grid.format, path.to_string_lossy());
+        let key = GridDataCacheKey::new(grid.format, location.path.to_string_lossy());
         let data = cached_grid_data(&self.data_cache, key, || {
-            let bytes = read_grid_resource_bytes(&path, grid.format)?;
+            let bytes = read_filesystem_grid_resource_bytes(&location, grid.format)?;
             parse_cached_grid_data(grid.format, &grid.name, &bytes)
         })?;
 
@@ -430,17 +469,57 @@ fn is_safe_grid_resource_name(name: &str) -> bool {
         .all(|component| matches!(component, Component::Normal(_)))
 }
 
-fn read_grid_resource_bytes(
+fn read_filesystem_grid_resource_bytes(
+    location: &FilesystemGridLocation,
+    format: GridFormat,
+) -> std::result::Result<Vec<u8>, GridError> {
+    let canonical_path = location
+        .path
+        .canonicalize()
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", location.path.display())))?;
+    if canonical_path != location.path || !canonical_path.starts_with(&location.root) {
+        return Err(GridError::Unavailable(format!(
+            "{} is no longer contained by {}",
+            location.path.display(),
+            location.root.display()
+        )));
+    }
+
+    let metadata = std::fs::metadata(&canonical_path)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))?;
+    if !metadata.is_file() {
+        return Err(GridError::Unavailable(format!(
+            "{} is not a regular file",
+            canonical_path.display()
+        )));
+    }
+
+    let file = std::fs::File::open(&canonical_path)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))?;
+    let opened_metadata = file
+        .metadata()
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))?;
+    ensure_same_grid_resource_file(&canonical_path, &metadata, &opened_metadata)?;
+
+    read_grid_resource_file(file, &canonical_path, format)
+}
+
+fn read_grid_resource_file(
+    mut file: std::fs::File,
     path: &Path,
     format: GridFormat,
 ) -> std::result::Result<Vec<u8>, GridError> {
     if let Some(max_bytes) = max_grid_resource_bytes(format) {
-        return read_bounded_grid_resource_bytes(path, format, max_bytes);
+        return read_bounded_grid_resource_file(file, path, format, max_bytes);
     }
 
-    std::fs::read(path).map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+    Ok(bytes)
 }
 
+#[cfg(test)]
 fn read_bounded_grid_resource_bytes(
     path: &Path,
     format: GridFormat,
@@ -448,6 +527,15 @@ fn read_bounded_grid_resource_bytes(
 ) -> std::result::Result<Vec<u8>, GridError> {
     let file = std::fs::File::open(path)
         .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
+    read_bounded_grid_resource_file(file, path, format, max_bytes)
+}
+
+fn read_bounded_grid_resource_file(
+    file: std::fs::File,
+    path: &Path,
+    format: GridFormat,
+    max_bytes: usize,
+) -> std::result::Result<Vec<u8>, GridError> {
     let read_limit = u64::try_from(max_bytes)
         .unwrap_or(u64::MAX)
         .saturating_add(1);
@@ -465,6 +553,32 @@ fn read_bounded_grid_resource_bytes(
     }
 
     Ok(bytes)
+}
+
+#[cfg(unix)]
+fn ensure_same_grid_resource_file(
+    path: &Path,
+    expected: &std::fs::Metadata,
+    opened: &std::fs::Metadata,
+) -> std::result::Result<(), GridError> {
+    use std::os::unix::fs::MetadataExt;
+
+    if expected.dev() != opened.dev() || expected.ino() != opened.ino() {
+        return Err(GridError::Unavailable(format!(
+            "{} changed while opening",
+            path.display()
+        )));
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn ensure_same_grid_resource_file(
+    _path: &Path,
+    _expected: &std::fs::Metadata,
+    _opened: &std::fs::Metadata,
+) -> std::result::Result<(), GridError> {
+    Ok(())
 }
 
 fn validate_grid_resource_size(
@@ -2467,6 +2581,44 @@ mod tests {
 
         assert!(provider.load(&definition).unwrap().is_some());
         assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_provider_rejects_cached_path_swapped_to_symlink() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_temp_grid_root("stale-path-cache");
+        let outside = test_temp_grid_root("stale-path-outside");
+        let grid_path = root.join("cached.gtx");
+        let outside_path = outside.join("outside.gtx");
+        std::fs::write(
+            &grid_path,
+            test_gtx_bytes(&[0.0, 1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0]),
+        )
+        .unwrap();
+        std::fs::write(
+            &outside_path,
+            test_gtx_bytes(&[
+                100.0, 101.0, 102.0, 103.0, 104.0, 105.0, 106.0, 107.0, 108.0,
+            ]),
+        )
+        .unwrap();
+
+        let provider = FilesystemGridProvider::new(vec![root]);
+        let mut definition = test_grid_definition();
+        definition.name = "cached.gtx".into();
+        definition.format = GridFormat::Gtx;
+        definition.resource_names = SmallVec::from_vec(vec!["cached.gtx".into()]);
+
+        assert!(provider.definition(&definition).unwrap().is_some());
+        assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+
+        std::fs::remove_file(&grid_path).unwrap();
+        symlink(&outside_path, &grid_path).unwrap();
+
+        assert!(provider.load(&definition).unwrap().is_none());
+        assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 2);
     }
 
     #[test]
