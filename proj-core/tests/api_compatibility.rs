@@ -8,7 +8,7 @@
 //! Requires the `geo-types` feature (enabled by default).
 #![cfg(feature = "geo-types")]
 
-use proj_core::{Error, Transform};
+use proj_core::{Bounds, Error, Transform};
 
 const LIBERTY_LON: f64 = -74.0445;
 const LIBERTY_LAT: f64 = 40.6892;
@@ -203,6 +203,41 @@ fn geo_rect_geometry_transform_returns_axis_aligned_bounds() {
     assert!(result.min().y < result.max().y);
     assert!(result.min().x < -8_200_000.0);
     assert!(result.max().y > 4_900_000.0);
+}
+
+#[test]
+fn geo_rect_geometry_transform_densifies_edges() {
+    let t = Transform::new("EPSG:4326", "EPSG:3413").unwrap();
+
+    let rect = geo_types::Rect::new(
+        geo_types::Coord { x: -60.0, y: 70.0 },
+        geo_types::Coord { x: 60.0, y: 80.0 },
+    );
+    let result: geo_types::Rect<f64> = t.convert_geometry(rect).unwrap();
+
+    let corner_bounds = [(-60.0, 70.0), (60.0, 70.0), (60.0, 80.0), (-60.0, 80.0)]
+        .into_iter()
+        .map(|coord| t.convert(coord).unwrap())
+        .fold(None, |bounds: Option<Bounds>, (x, y)| {
+            Some(match bounds {
+                Some(mut bounds) => {
+                    bounds.min_x = bounds.min_x.min(x);
+                    bounds.min_y = bounds.min_y.min(y);
+                    bounds.max_x = bounds.max_x.max(x);
+                    bounds.max_y = bounds.max_y.max(y);
+                    bounds
+                }
+                None => Bounds::new(x, y, x, y),
+            })
+        })
+        .unwrap();
+
+    assert!(
+        result.max().x > corner_bounds.max_x + 1_000.0,
+        "densified max x {} should exceed corner-only max x {}",
+        result.max().x,
+        corner_bounds.max_x
+    );
 }
 
 #[test]

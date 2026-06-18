@@ -1,5 +1,9 @@
 use super::{Transform, TransformableGeometry};
+use crate::coord::Bounds;
 use crate::error::Result;
+
+#[cfg(feature = "geo-types")]
+const GEO_TYPES_RECT_DENSIFY_POINTS: usize = 21;
 
 #[cfg(feature = "geo-types")]
 fn transform_geo_coord(
@@ -27,32 +31,20 @@ fn transform_geo_rect(
 ) -> Result<geo_types::Rect<f64>> {
     let min = rect.min();
     let max = rect.max();
-    let corners = [
-        geo_types::Coord { x: min.x, y: min.y },
-        geo_types::Coord { x: max.x, y: min.y },
-        geo_types::Coord { x: max.x, y: max.y },
-        geo_types::Coord { x: min.x, y: max.y },
-    ];
-
-    let mut transformed = corners
-        .into_iter()
-        .map(|coord| transform_geo_coord(transform, coord));
-    let first = transformed.next().expect("rect has four corners")?;
-    let mut min_x = first.x;
-    let mut min_y = first.y;
-    let mut max_x = first.x;
-    let mut max_y = first.y;
-    for coord in transformed {
-        let coord = coord?;
-        min_x = min_x.min(coord.x);
-        min_y = min_y.min(coord.y);
-        max_x = max_x.max(coord.x);
-        max_y = max_y.max(coord.y);
-    }
+    let transformed = transform.transform_bounds(
+        Bounds::new(min.x, min.y, max.x, max.y),
+        GEO_TYPES_RECT_DENSIFY_POINTS,
+    )?;
 
     Ok(geo_types::Rect::new(
-        geo_types::Coord { x: min_x, y: min_y },
-        geo_types::Coord { x: max_x, y: max_y },
+        geo_types::Coord {
+            x: transformed.min_x,
+            y: transformed.min_y,
+        },
+        geo_types::Coord {
+            x: transformed.max_x,
+            y: transformed.max_y,
+        },
     ))
 }
 
