@@ -22,6 +22,14 @@ const MAX_GTX_GRID_BYTES: usize = GTX_HEADER_LEN + MAX_GTX_CELLS * GTX_RECORD_LE
 /// Upper bound on an accepted GeoTIFF grid resource. Compressed PROJ grids are
 /// well under this; the cap simply bounds untrusted input before decoding.
 const MAX_GEOTIFF_GRID_BYTES: usize = 256 * 1024 * 1024;
+#[cfg(feature = "geotiff")]
+const MAX_GEOTIFF_IFDS: usize = 4_096;
+#[cfg(feature = "geotiff")]
+const MAX_GEOTIFF_CELLS_PER_IMAGE: usize = 16_777_216;
+#[cfg(feature = "geotiff")]
+const MAX_GEOTIFF_TOTAL_CELLS: usize = 16_777_216;
+#[cfg(feature = "geotiff")]
+const MAX_GEOTIFF_BANDS: usize = 4;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum GridFormat {
@@ -628,8 +636,11 @@ fn parse_geotiff_grid_data(name: &str, bytes: &[u8]) -> std::result::Result<Grid
 /// item of the `GDAL_METADATA` tag.
 #[cfg(feature = "geotiff")]
 mod geotiff {
-    use super::{GridData, GridError, GridExtent, GtxGrid, Ntv2Grid, Ntv2GridSet};
-    use geotiff_reader::GeoTiffFile;
+    use super::{
+        GridData, GridError, GridExtent, GtxGrid, Ntv2Grid, Ntv2GridSet, MAX_GEOTIFF_BANDS,
+        MAX_GEOTIFF_CELLS_PER_IMAGE, MAX_GEOTIFF_IFDS, MAX_GEOTIFF_TOTAL_CELLS,
+    };
+    use geotiff_reader::{GeoTiffFile, GeoTiffOpenOptions};
     use std::f64::consts::PI;
     use tiff_core::TagValue;
 
@@ -639,9 +650,20 @@ mod geotiff {
     const ARCSEC_TO_RAD: f64 = PI / 180.0 / 3600.0;
     const DEG_TO_RAD: f64 = PI / 180.0;
 
+    #[derive(Clone, Copy)]
     enum Kind {
         Horizontal,
         Vertical,
+    }
+
+    struct ImageMetadata {
+        west_node_deg: f64,
+        north_node_deg: f64,
+        scale_lon_deg: f64,
+        scale_lat_deg: f64,
+        width: usize,
+        height: usize,
+        cell_count: usize,
     }
 
     /// One decoded image (IFD): node-origin georeferencing plus per-band values
@@ -657,12 +679,19 @@ mod geotiff {
     }
 
     pub(super) fn parse(name: &str, bytes: &[u8]) -> Result<GridData, GridError> {
-        let file = GeoTiffFile::from_bytes(bytes.to_vec())
+        let mut options = GeoTiffOpenOptions::default();
+        options.parse_budgets.max_ifds = MAX_GEOTIFF_IFDS;
+        let file = GeoTiffFile::from_bytes_with_options(bytes.to_vec(), options)
             .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
         let tiff = file.tiff();
         let ifd_count = tiff.ifd_count();
         if ifd_count == 0 {
             return Err(GridError::Parse(format!("{name}: no images in GeoTIFF")));
+        }
+        if ifd_count > MAX_GEOTIFF_IFDS {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF IFD count {ifd_count} exceeds limit {MAX_GEOTIFF_IFDS}"
+            )));
         }
 
         let base_index = file.base_ifd_index();
@@ -676,13 +705,31 @@ mod geotiff {
 
         match kind {
             Kind::Vertical => {
-                let image = read_image(&file, base_index, name)?;
+                let metadata = read_image_metadata(&file, base_index, kind, name)?;
+                let image = read_image(&file, base_index, kind, &metadata, name)?;
                 Ok(GridData::Gtx(build_gtx(&image)))
             }
             Kind::Horizontal => {
-                let mut images = Vec::with_capacity(ifd_count);
+                let mut metadata = Vec::with_capacity(ifd_count);
+                let mut total_cells = 0usize;
                 for index in 0..ifd_count {
-                    images.push(read_image(&file, index, name)?);
+                    let image_metadata = read_image_metadata(&file, index, kind, name)?;
+                    total_cells = total_cells
+                        .checked_add(image_metadata.cell_count)
+                        .ok_or_else(|| {
+                            GridError::Parse(format!("{name}: GeoTIFF total cell count overflow"))
+                        })?;
+                    if total_cells > MAX_GEOTIFF_TOTAL_CELLS {
+                        return Err(GridError::Parse(format!(
+                            "{name}: GeoTIFF total cell count {total_cells} exceeds limit {MAX_GEOTIFF_TOTAL_CELLS}"
+                        )));
+                    }
+                    metadata.push(image_metadata);
+                }
+
+                let mut images = Vec::with_capacity(metadata.len());
+                for (index, image_metadata) in metadata.iter().enumerate() {
+                    images.push(read_image(&file, index, kind, image_metadata, name)?);
                 }
                 Ok(GridData::Ntv2(build_ntv2(&images, name)?))
             }
@@ -705,7 +752,12 @@ mod geotiff {
         }
     }
 
-    fn read_image(file: &GeoTiffFile, index: usize, name: &str) -> Result<Image, GridError> {
+    fn read_image_metadata(
+        file: &GeoTiffFile,
+        index: usize,
+        kind: Kind,
+        name: &str,
+    ) -> Result<ImageMetadata, GridError> {
         let tiff = file.tiff();
         let ifd = tiff
             .ifd(index)
@@ -715,6 +767,24 @@ mod geotiff {
         if width < 2 || height < 2 {
             return Err(GridError::Parse(format!(
                 "{name}: GeoTIFF image {index} is smaller than 2x2"
+            )));
+        }
+        if width > MAX_GEOTIFF_CELLS_PER_IMAGE {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} width {width} exceeds limit {MAX_GEOTIFF_CELLS_PER_IMAGE}"
+            )));
+        }
+        if height > MAX_GEOTIFF_CELLS_PER_IMAGE {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} height {height} exceeds limit {MAX_GEOTIFF_CELLS_PER_IMAGE}"
+            )));
+        }
+        let cell_count = width.checked_mul(height).ok_or_else(|| {
+            GridError::Parse(format!("{name}: GeoTIFF image {index} cell count overflow"))
+        })?;
+        if cell_count > MAX_GEOTIFF_CELLS_PER_IMAGE {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} cell count {cell_count} exceeds limit {MAX_GEOTIFF_CELLS_PER_IMAGE}"
             )));
         }
 
@@ -746,38 +816,80 @@ mod geotiff {
         }
 
         let band_count = ifd.samples_per_pixel() as usize;
-        let mut bands = Vec::with_capacity(band_count.min(2));
-        // Horizontal grids need bands 0 (latitude) and 1 (longitude); vertical
-        // grids need band 0. Reading at most two bands covers both.
-        for band_index in 0..band_count.min(2) {
-            let array = tiff
-                .read_band_from_ifd::<f32>(ifd, band_index)
-                .map_err(|err| GridError::Parse(format!("{name}: band {band_index}: {err}")))?;
-            let values: Vec<f64> = array.iter().map(|&value| value as f64).collect();
-            if values.len() != width * height {
-                return Err(GridError::Parse(format!(
-                    "{name}: band {band_index} has {} samples, expected {}",
-                    values.len(),
-                    width * height
-                )));
-            }
-            bands.push(values);
-        }
-        if bands.is_empty() {
+        if band_count == 0 {
             return Err(GridError::Parse(format!(
-                "{name}: GeoTIFF image has no bands"
+                "{name}: GeoTIFF image {index} has no bands"
+            )));
+        }
+        if band_count > MAX_GEOTIFF_BANDS {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} band count {band_count} exceeds limit {MAX_GEOTIFF_BANDS}"
+            )));
+        }
+        let required_bands = required_band_count(kind);
+        if band_count < required_bands {
+            return Err(GridError::Parse(format!(
+                "{name}: GeoTIFF image {index} has {band_count} bands, needs at least {required_bands}"
             )));
         }
 
-        Ok(Image {
+        Ok(ImageMetadata {
             west_node_deg,
             north_node_deg,
             scale_lon_deg,
             scale_lat_deg,
             width,
             height,
+            cell_count,
+        })
+    }
+
+    fn read_image(
+        file: &GeoTiffFile,
+        index: usize,
+        kind: Kind,
+        metadata: &ImageMetadata,
+        name: &str,
+    ) -> Result<Image, GridError> {
+        let tiff = file.tiff();
+        let ifd = tiff
+            .ifd(index)
+            .map_err(|err| GridError::Parse(format!("{name}: {err}")))?;
+        let required_bands = required_band_count(kind);
+        let mut bands = Vec::with_capacity(required_bands);
+        // Horizontal grids need bands 0 (latitude) and 1 (longitude); vertical
+        // grids need band 0. Accuracy bands, if present, are ignored.
+        for band_index in 0..required_bands {
+            let array = tiff
+                .read_band_from_ifd::<f32>(ifd, band_index)
+                .map_err(|err| GridError::Parse(format!("{name}: band {band_index}: {err}")))?;
+            let values: Vec<f64> = array.iter().map(|&value| value as f64).collect();
+            if values.len() != metadata.cell_count {
+                return Err(GridError::Parse(format!(
+                    "{name}: band {band_index} has {} samples, expected {}",
+                    values.len(),
+                    metadata.cell_count
+                )));
+            }
+            bands.push(values);
+        }
+
+        Ok(Image {
+            west_node_deg: metadata.west_node_deg,
+            north_node_deg: metadata.north_node_deg,
+            scale_lon_deg: metadata.scale_lon_deg,
+            scale_lat_deg: metadata.scale_lat_deg,
+            width: metadata.width,
+            height: metadata.height,
             bands,
         })
+    }
+
+    fn required_band_count(kind: Kind) -> usize {
+        match kind {
+            Kind::Horizontal => 2,
+            Kind::Vertical => 1,
+        }
     }
 
     /// Sample value at output node (x from west, y from south), flipping the
@@ -1937,6 +2049,175 @@ mod tests {
         }
     }
 
+    #[cfg(feature = "geotiff")]
+    #[derive(Clone)]
+    struct TestTiffTag {
+        tag: u16,
+        field_type: u16,
+        count: u32,
+        value: Vec<u8>,
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn geotiff_parse_error(bytes: &[u8]) -> String {
+        match parse_grid_data(GridFormat::GeoTiff, "test.tif", bytes) {
+            Ok(_) => panic!("expected GeoTIFF parse failure"),
+            Err(GridError::Parse(message)) => message,
+            Err(error) => panic!("expected GeoTIFF parse error, got {error}"),
+        }
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn minimal_geotiff_bytes(width: u32, height: u32, bands: u16, grid_type: &str) -> Vec<u8> {
+        classic_tiff(vec![minimal_geotiff_tags(width, height, bands, grid_type)])
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn minimal_geotiff_tags(
+        width: u32,
+        height: u32,
+        bands: u16,
+        grid_type: &str,
+    ) -> Vec<TestTiffTag> {
+        vec![
+            test_tiff_long(256, width),
+            test_tiff_long(257, height),
+            test_tiff_short(258, 32),
+            test_tiff_short(259, 1),
+            test_tiff_short(262, 1),
+            test_tiff_short(277, bands),
+            test_tiff_short(284, 1),
+            test_tiff_short(339, 3),
+            test_tiff_doubles(33550, &[1.0, 1.0, 0.0]),
+            test_tiff_doubles(33922, &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]),
+            test_tiff_shorts(34735, &[1, 1, 1, 0]),
+            test_tiff_ascii(42112, grid_type),
+        ]
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn classic_tiff(mut ifds: Vec<Vec<TestTiffTag>>) -> Vec<u8> {
+        for tags in &mut ifds {
+            tags.sort_by_key(|tag| tag.tag);
+        }
+
+        let block_lens: Vec<usize> = ifds
+            .iter()
+            .map(|tags| {
+                let data_len = tags.iter().fold(0usize, |len, tag| {
+                    if tag.value.len() <= 4 {
+                        len
+                    } else {
+                        len + padded_tiff_value_len(tag.value.len())
+                    }
+                });
+                2 + tags.len() * 12 + 4 + data_len
+            })
+            .collect();
+        let mut starts = Vec::with_capacity(block_lens.len());
+        let mut next_start = 8usize;
+        for block_len in &block_lens {
+            starts.push(next_start);
+            next_start += block_len;
+        }
+
+        let mut bytes = Vec::with_capacity(next_start);
+        bytes.extend_from_slice(b"II");
+        bytes.extend_from_slice(&42u16.to_le_bytes());
+        bytes.extend_from_slice(&8u32.to_le_bytes());
+
+        for (ifd_index, tags) in ifds.iter().enumerate() {
+            assert_eq!(bytes.len(), starts[ifd_index]);
+            bytes.extend_from_slice(&(tags.len() as u16).to_le_bytes());
+
+            let data_start = starts[ifd_index] + 2 + tags.len() * 12 + 4;
+            let mut data = Vec::new();
+            for tag in tags {
+                bytes.extend_from_slice(&tag.tag.to_le_bytes());
+                bytes.extend_from_slice(&tag.field_type.to_le_bytes());
+                bytes.extend_from_slice(&tag.count.to_le_bytes());
+                if tag.value.len() <= 4 {
+                    let mut inline = [0u8; 4];
+                    inline[..tag.value.len()].copy_from_slice(&tag.value);
+                    bytes.extend_from_slice(&inline);
+                } else {
+                    let offset = data_start + data.len();
+                    bytes.extend_from_slice(&(offset as u32).to_le_bytes());
+                    data.extend_from_slice(&tag.value);
+                    if data.len() % 2 != 0 {
+                        data.push(0);
+                    }
+                }
+            }
+
+            let next_ifd = starts.get(ifd_index + 1).copied().unwrap_or(0);
+            bytes.extend_from_slice(&(next_ifd as u32).to_le_bytes());
+            bytes.extend_from_slice(&data);
+        }
+
+        bytes
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn padded_tiff_value_len(len: usize) -> usize {
+        len + (len % 2)
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn test_tiff_ascii(tag: u16, value: &str) -> TestTiffTag {
+        let mut bytes = value.as_bytes().to_vec();
+        if !bytes.ends_with(&[0]) {
+            bytes.push(0);
+        }
+        TestTiffTag {
+            tag,
+            field_type: 2,
+            count: bytes.len() as u32,
+            value: bytes,
+        }
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn test_tiff_short(tag: u16, value: u16) -> TestTiffTag {
+        test_tiff_shorts(tag, &[value])
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn test_tiff_shorts(tag: u16, values: &[u16]) -> TestTiffTag {
+        TestTiffTag {
+            tag,
+            field_type: 3,
+            count: values.len() as u32,
+            value: values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect(),
+        }
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn test_tiff_long(tag: u16, value: u32) -> TestTiffTag {
+        TestTiffTag {
+            tag,
+            field_type: 4,
+            count: 1,
+            value: value.to_le_bytes().to_vec(),
+        }
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn test_tiff_doubles(tag: u16, values: &[f64]) -> TestTiffTag {
+        TestTiffTag {
+            tag,
+            field_type: 12,
+            count: values.len() as u32,
+            value: values
+                .iter()
+                .flat_map(|value| value.to_le_bytes())
+                .collect(),
+        }
+    }
+
     fn test_temp_grid_root(name: &str) -> PathBuf {
         static NEXT_ROOT: AtomicUsize = AtomicUsize::new(0);
 
@@ -2013,6 +2294,78 @@ mod tests {
         let message = grid_handle_parse_error(&bytes);
 
         assert!(message.contains("non-finite NTv2 shift value"), "{message}");
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_excessive_ifd_count_before_decoding() {
+        let bytes = classic_tiff(vec![Vec::new(); MAX_GEOTIFF_IFDS + 1]);
+
+        let message = geotiff_parse_error(&bytes);
+
+        assert!(message.contains("IFD"), "{message}");
+        assert!(message.contains(&MAX_GEOTIFF_IFDS.to_string()), "{message}");
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_excessive_axis_dimensions_before_decoding() {
+        for (width, height, expected) in [
+            ((MAX_GEOTIFF_CELLS_PER_IMAGE + 1) as u32, 2, "width"),
+            (2, (MAX_GEOTIFF_CELLS_PER_IMAGE + 1) as u32, "height"),
+        ] {
+            let bytes = minimal_geotiff_bytes(width, height, 1, "TYPE=VERTICAL_OFFSET");
+
+            let message = geotiff_parse_error(&bytes);
+
+            assert!(message.contains(expected), "{message}");
+            assert!(message.contains("exceeds limit"), "{message}");
+        }
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_excessive_cell_count_before_decoding() {
+        let bytes = minimal_geotiff_bytes(4097, 4097, 1, "TYPE=VERTICAL_OFFSET");
+
+        let message = geotiff_parse_error(&bytes);
+
+        assert!(message.contains("cell count"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_excessive_band_count_before_decoding() {
+        let bytes =
+            minimal_geotiff_bytes(2, 2, (MAX_GEOTIFF_BANDS + 1) as u16, "TYPE=VERTICAL_OFFSET");
+
+        let message = geotiff_parse_error(&bytes);
+
+        assert!(message.contains("band count"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_horizontal_grid_with_too_few_bands_before_decoding() {
+        let bytes = minimal_geotiff_bytes(2, 2, 1, "TYPE=HORIZONTAL_OFFSET");
+
+        let message = geotiff_parse_error(&bytes);
+
+        assert!(message.contains("needs at least 2"), "{message}");
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_rejects_excessive_total_cell_count_before_decoding() {
+        let image = minimal_geotiff_tags(4096, 4096, 2, "TYPE=HORIZONTAL_OFFSET");
+        let bytes = classic_tiff(vec![image.clone(), image]);
+
+        let message = geotiff_parse_error(&bytes);
+
+        assert!(message.contains("total cell count"), "{message}");
+        assert!(message.contains("exceeds limit"), "{message}");
     }
 
     proptest! {
