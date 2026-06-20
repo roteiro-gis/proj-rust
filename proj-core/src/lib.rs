@@ -63,7 +63,9 @@ pub mod registry;
 mod selector;
 pub mod transform;
 
-pub use coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
+pub use coord::{
+    Bounds, Coord, Coord3D, Transformable, Transformable3D, MAX_BOUNDS_DENSIFY_POINTS,
+};
 pub use crs::{
     CompoundCrsDef, CrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
     ProjectionMethod, VerticalCrsDef, VerticalCrsKind,

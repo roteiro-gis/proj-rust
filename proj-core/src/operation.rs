@@ -417,6 +417,9 @@ pub struct SelectionOptions {
     pub area_of_interest: Option<AreaOfInterest>,
     /// Intermediate points sampled per edge when source/target CRS AOI bounds
     /// are normalized to geographic degrees for operation selection.
+    ///
+    /// Values above [`crate::MAX_BOUNDS_DENSIFY_POINTS`] are rejected during
+    /// transform construction.
     pub area_bounds_densify_points: usize,
     pub policy: SelectionPolicy,
     pub grid_provider: Option<Arc<dyn crate::grid::GridProvider>>,
@@ -449,6 +452,9 @@ impl SelectionOptions {
 
     /// Set how many intermediate points are sampled on each AOI bounds edge
     /// when source/target CRS bounds are converted to geographic degrees.
+    ///
+    /// Values above [`crate::MAX_BOUNDS_DENSIFY_POINTS`] are rejected during
+    /// transform construction.
     pub fn with_area_bounds_densify_points(mut self, densify_points: usize) -> Self {
         self.area_bounds_densify_points = densify_points;
         self

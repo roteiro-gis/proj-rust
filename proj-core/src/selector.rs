@@ -8,6 +8,7 @@ use crate::operation::{
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
+use crate::transform::bounds_densify_segments;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -477,9 +478,7 @@ fn resolve_area_bounds(
 
     validate_area_bounds_shape(bounds)?;
 
-    let segments = densify_points.checked_add(1).ok_or_else(|| {
-        Error::OutOfRange("area-of-interest bounds densify point count is too large".into())
-    })?;
+    let segments = bounds_densify_segments(densify_points)?;
     let mut transformed = GeographicBoundsAccumulator::new();
     for i in 0..=segments {
         let t = i as f64 / segments as f64;
@@ -770,5 +769,25 @@ mod tests {
         let dense = resolve_area_bounds(area, bounds, &source, &target, 21).unwrap();
 
         assert_ne!(coarse, dense);
+    }
+
+    #[test]
+    fn projected_area_bounds_reject_excessive_densification() {
+        let source = registry::lookup_epsg(3857).expect("EPSG:3857");
+        let target = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let bounds = Bounds::new(-1_000.0, -1_000.0, 1_000.0, 1_000.0);
+        let area = AreaOfInterest::source_crs_bounds(bounds);
+
+        let err = resolve_area_bounds(
+            area,
+            bounds,
+            &source,
+            &target,
+            crate::MAX_BOUNDS_DENSIFY_POINTS + 1,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, Error::OutOfRange(_)));
+        assert!(err.to_string().contains("exceeds maximum"));
     }
 }
