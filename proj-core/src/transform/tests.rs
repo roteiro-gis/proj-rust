@@ -1583,6 +1583,20 @@ fn transform_bounds_rejects_invalid_input() {
 }
 
 #[test]
+fn transform_bounds_rejects_excessive_densification() {
+    let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+    let err = t
+        .transform_bounds(
+            Bounds::new(-74.3, 40.45, -73.65, 40.95),
+            MAX_BOUNDS_DENSIFY_POINTS + 1,
+        )
+        .unwrap_err();
+
+    assert!(matches!(err, Error::OutOfRange(_)));
+    assert!(err.to_string().contains("exceeds maximum"));
+}
+
+#[test]
 fn transform_wrapped_geographic_bounds_crossing_antimeridian() {
     let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
 

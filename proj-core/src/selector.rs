@@ -8,6 +8,7 @@ use crate::operation::{
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
+use crate::transform::bounds_densify_segments;
 use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
@@ -357,7 +358,13 @@ pub(crate) fn resolve_area_of_interest(
         None => None,
     };
     let bounds = match area.bounds {
-        Some(bounds) => Some(resolve_area_bounds(area, bounds, source, target)?),
+        Some(bounds) => Some(resolve_area_bounds(
+            area,
+            bounds,
+            source,
+            target,
+            options.area_bounds_densify_points,
+        )?),
         None => None,
     };
     Ok(Some(ResolvedAreaOfInterest { point, bounds }))
@@ -449,6 +456,7 @@ fn resolve_area_bounds(
     bounds: Bounds,
     source: &CrsDef,
     target: &CrsDef,
+    densify_points: usize,
 ) -> Result<Bounds> {
     let crs = match area.crs {
         crate::operation::AreaOfInterestCrs::GeographicDegrees => {
@@ -470,8 +478,8 @@ fn resolve_area_bounds(
 
     validate_area_bounds_shape(bounds)?;
 
-    let segments = 8usize;
-    let mut transformed: Option<Bounds> = None;
+    let segments = bounds_densify_segments(densify_points)?;
+    let mut transformed = GeographicBoundsAccumulator::new();
     for i in 0..=segments {
         let t = i as f64 / segments as f64;
         let x = bounds.min_x + bounds.width() * t;
@@ -483,14 +491,80 @@ fn resolve_area_bounds(
             Coord::new(bounds.max_x, y),
         ] {
             let point = geographic_from_crs_point(crs, sample)?;
-            if let Some(accum) = &mut transformed {
-                accum.expand_to_include(point);
-            } else {
-                transformed = Some(Bounds::new(point.x, point.y, point.x, point.y));
-            }
+            transformed.include(point);
         }
     }
-    Ok(transformed.unwrap_or(bounds))
+    Ok(transformed.into_bounds().unwrap_or(bounds))
+}
+
+struct GeographicBoundsAccumulator {
+    longitudes: Vec<f64>,
+    min_lat: f64,
+    max_lat: f64,
+}
+
+impl GeographicBoundsAccumulator {
+    fn new() -> Self {
+        Self {
+            longitudes: Vec::new(),
+            min_lat: f64::INFINITY,
+            max_lat: f64::NEG_INFINITY,
+        }
+    }
+
+    fn include(&mut self, point: Coord) {
+        self.longitudes.push(point.x);
+        self.min_lat = self.min_lat.min(point.y);
+        self.max_lat = self.max_lat.max(point.y);
+    }
+
+    fn into_bounds(self) -> Option<Bounds> {
+        if self.longitudes.is_empty() {
+            return None;
+        }
+
+        let mut sorted = self
+            .longitudes
+            .into_iter()
+            .map(normalize_longitude_positive)
+            .collect::<Vec<_>>();
+        sorted.sort_by(|left, right| left.partial_cmp(right).unwrap_or(Ordering::Equal));
+
+        let first = sorted[0];
+        let last = sorted[sorted.len() - 1];
+        let mut largest_gap = first + 360.0 - last;
+        let mut west = first;
+        let mut east = last;
+
+        for pair in sorted.windows(2) {
+            let gap = pair[1] - pair[0];
+            if gap > largest_gap {
+                largest_gap = gap;
+                west = pair[1];
+                east = pair[0];
+            }
+        }
+
+        Some(Bounds::new(
+            normalize_longitude_signed(west),
+            self.min_lat,
+            normalize_longitude_signed(east),
+            self.max_lat,
+        ))
+    }
+}
+
+fn normalize_longitude_positive(longitude: f64) -> f64 {
+    longitude.rem_euclid(360.0)
+}
+
+fn normalize_longitude_signed(longitude: f64) -> f64 {
+    let normalized = normalize_longitude_positive(longitude);
+    if normalized > 180.0 {
+        normalized - 360.0
+    } else {
+        normalized
+    }
 }
 
 fn geographic_from_crs_point(crs: &CrsDef, point: Coord) -> Result<Coord> {
@@ -640,4 +714,80 @@ fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<Coordi
             target_to_wgs84: target.datum().to_wgs84().clone(),
         },
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn geographic_bounds_accumulator_preserves_antimeridian_wrap() {
+        let mut bounds = GeographicBoundsAccumulator::new();
+        bounds.include(Coord::new(170.0, -20.0));
+        bounds.include(Coord::new(-170.0, -10.0));
+        bounds.include(Coord::new(178.0, -15.0));
+
+        let bounds = bounds.into_bounds().unwrap();
+
+        assert_eq!(bounds, Bounds::new(170.0, -20.0, -170.0, -10.0));
+    }
+
+    #[test]
+    fn projected_area_bounds_use_configured_densification() {
+        let source = registry::lookup_epsg(3413).expect("EPSG:3413");
+        let target = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let projected = source.as_projected().expect("projected CRS");
+        let projection = make_projection(&projected.method(), projected.datum()).unwrap();
+        let unit = projected.linear_unit();
+
+        let bounds = [
+            (-60.0f64, 70.0f64),
+            (60.0, 70.0),
+            (60.0, 80.0),
+            (-60.0, 80.0),
+        ]
+        .into_iter()
+        .map(|(lon, lat)| {
+            let (x, y) = projection
+                .forward(lon.to_radians(), lat.to_radians())
+                .unwrap();
+            Coord::new(unit.from_meters(x), unit.from_meters(y))
+        })
+        .fold(None, |bounds: Option<Bounds>, point| {
+            Some(match bounds {
+                Some(mut bounds) => {
+                    bounds.expand_to_include(point);
+                    bounds
+                }
+                None => Bounds::new(point.x, point.y, point.x, point.y),
+            })
+        })
+        .unwrap();
+
+        let area = AreaOfInterest::source_crs_bounds(bounds);
+        let coarse = resolve_area_bounds(area, bounds, &source, &target, 0).unwrap();
+        let dense = resolve_area_bounds(area, bounds, &source, &target, 21).unwrap();
+
+        assert_ne!(coarse, dense);
+    }
+
+    #[test]
+    fn projected_area_bounds_reject_excessive_densification() {
+        let source = registry::lookup_epsg(3857).expect("EPSG:3857");
+        let target = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let bounds = Bounds::new(-1_000.0, -1_000.0, 1_000.0, 1_000.0);
+        let area = AreaOfInterest::source_crs_bounds(bounds);
+
+        let err = resolve_area_bounds(
+            area,
+            bounds,
+            &source,
+            &target,
+            crate::MAX_BOUNDS_DENSIFY_POINTS + 1,
+        )
+        .unwrap_err();
+
+        assert!(matches!(err, Error::OutOfRange(_)));
+        assert!(err.to_string().contains("exceeds maximum"));
+    }
 }

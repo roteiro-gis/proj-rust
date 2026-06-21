@@ -39,6 +39,9 @@ impl Coord3D {
 /// At the public API boundary, units match the CRS:
 /// - **Geographic CRS**: degrees
 /// - **Projected CRS**: the CRS's native linear unit
+///
+/// Bounds transformation APIs accept at most
+/// [`MAX_BOUNDS_DENSIFY_POINTS`] intermediate samples per edge.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Bounds {
     pub min_x: f64,
@@ -46,6 +49,12 @@ pub struct Bounds {
     pub max_x: f64,
     pub max_y: f64,
 }
+
+/// Maximum intermediate densification points accepted per bounds edge.
+///
+/// This caps CPU work for APIs such as [`crate::Transform::transform_bounds`]
+/// and AOI bounds normalization in [`crate::SelectionOptions`].
+pub const MAX_BOUNDS_DENSIFY_POINTS: usize = 10_000;
 
 impl Bounds {
     pub fn new(min_x: f64, min_y: f64, max_x: f64, max_y: f64) -> Self {

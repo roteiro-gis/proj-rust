@@ -5,6 +5,8 @@ use smallvec::SmallVec;
 use std::collections::HashSet;
 use std::sync::Arc;
 
+const DEFAULT_AREA_BOUNDS_DENSIFY_POINTS: usize = 21;
+
 /// Stable identifier for a registry-backed coordinate operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct CoordinateOperationId(pub u32);
@@ -413,6 +415,12 @@ impl VerticalGridOperation {
 #[derive(Clone)]
 pub struct SelectionOptions {
     pub area_of_interest: Option<AreaOfInterest>,
+    /// Intermediate points sampled per edge when source/target CRS AOI bounds
+    /// are normalized to geographic degrees for operation selection.
+    ///
+    /// Values above [`crate::MAX_BOUNDS_DENSIFY_POINTS`] are rejected during
+    /// transform construction.
+    pub area_bounds_densify_points: usize,
     pub policy: SelectionPolicy,
     pub grid_provider: Option<Arc<dyn crate::grid::GridProvider>>,
     pub vertical_grid_operations: Vec<VerticalGridOperation>,
@@ -422,6 +430,7 @@ impl Default for SelectionOptions {
     fn default() -> Self {
         Self {
             area_of_interest: None,
+            area_bounds_densify_points: DEFAULT_AREA_BOUNDS_DENSIFY_POINTS,
             policy: SelectionPolicy::BestAvailable,
             grid_provider: None,
             vertical_grid_operations: Vec::new(),
@@ -438,6 +447,16 @@ impl SelectionOptions {
     /// Set the area of interest used for operation ranking and filtering.
     pub fn with_area_of_interest(mut self, area_of_interest: AreaOfInterest) -> Self {
         self.area_of_interest = Some(area_of_interest);
+        self
+    }
+
+    /// Set how many intermediate points are sampled on each AOI bounds edge
+    /// when source/target CRS bounds are converted to geographic degrees.
+    ///
+    /// Values above [`crate::MAX_BOUNDS_DENSIFY_POINTS`] are rejected during
+    /// transform construction.
+    pub fn with_area_bounds_densify_points(mut self, densify_points: usize) -> Self {
+        self.area_bounds_densify_points = densify_points;
         self
     }
 
@@ -504,6 +523,7 @@ impl SelectionOptions {
     pub fn inverse(&self) -> Self {
         Self {
             area_of_interest: self.area_of_interest.map(AreaOfInterest::inverse),
+            area_bounds_densify_points: self.area_bounds_densify_points,
             policy: self.policy.clone(),
             grid_provider: self.grid_provider.clone(),
             vertical_grid_operations: self
@@ -646,12 +666,14 @@ mod tests {
 
         let options = SelectionOptions::new()
             .with_area_of_interest(area)
+            .with_area_bounds_densify_points(32)
             .require_grids()
             .with_grid_provider(provider.clone())
             .with_vertical_grid_operation(first.clone())
             .with_vertical_grid_operations([second.clone()]);
 
         assert_eq!(options.area_of_interest, Some(area));
+        assert_eq!(options.area_bounds_densify_points, 32);
         assert!(matches!(options.policy, SelectionPolicy::RequireGrids));
         assert!(Arc::ptr_eq(
             options.grid_provider.as_ref().unwrap(),
@@ -725,6 +747,7 @@ mod tests {
     fn selection_options_inverse_preserves_builder_values() {
         let options = SelectionOptions::new()
             .with_area_of_interest(AreaOfInterest::source_crs_point(Coord::new(1.0, 2.0)))
+            .with_area_bounds_densify_points(32)
             .with_policy(SelectionPolicy::RequireExactAreaMatch)
             .with_vertical_grid_operation(vertical_grid_operation("grid", Some(4979), Some(5703)));
 
@@ -742,6 +765,7 @@ mod tests {
             inverse.policy,
             SelectionPolicy::RequireExactAreaMatch
         ));
+        assert_eq!(inverse.area_bounds_densify_points, 32);
         assert_eq!(
             inverse.vertical_grid_operations[0].source_vertical_crs_epsg,
             Some(5703)

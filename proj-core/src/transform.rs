@@ -1,4 +1,6 @@
-use crate::coord::{Bounds, Coord, Coord3D, Transformable, Transformable3D};
+use crate::coord::{
+    Bounds, Coord, Coord3D, Transformable, Transformable3D, MAX_BOUNDS_DENSIFY_POINTS,
+};
 use crate::crs::CrsDef;
 use crate::error::{Error, Result};
 use crate::grid::{GridError, GridRuntime};
@@ -359,6 +361,9 @@ impl Transform {
     }
 
     /// Reproject a 2D bounding box by sampling its perimeter.
+    ///
+    /// `densify_points` is the number of intermediate samples added per edge
+    /// and must be no larger than [`MAX_BOUNDS_DENSIFY_POINTS`].
     pub fn transform_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
         if !bounds.is_valid() {
             return Err(Error::OutOfRange(
@@ -374,6 +379,9 @@ impl Transform {
     /// `bounds` is interpreted as west/south/east/north in source geographic
     /// degrees and must satisfy `west > east`. Projected and normal
     /// non-wrapped bounds should use [`Self::transform_bounds`].
+    ///
+    /// `densify_points` is the number of intermediate samples added per edge
+    /// and must be no larger than [`MAX_BOUNDS_DENSIFY_POINTS`].
     pub fn transform_geographic_wrapped_bounds(
         &self,
         bounds: Bounds,
@@ -396,9 +404,7 @@ impl Transform {
     }
 
     fn transform_valid_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
-        let segments = densify_points
-            .checked_add(1)
-            .ok_or_else(|| Error::OutOfRange("densify point count is too large".into()))?;
+        let segments = bounds_densify_segments(densify_points)?;
 
         let mut transformed: Option<Bounds> = None;
         for i in 0..=segments {
@@ -711,4 +717,15 @@ impl Transform {
             .map(|coord| self.convert_3d(coord.clone()))
             .collect()
     }
+}
+
+pub(crate) fn bounds_densify_segments(densify_points: usize) -> Result<usize> {
+    if densify_points > MAX_BOUNDS_DENSIFY_POINTS {
+        return Err(Error::OutOfRange(format!(
+            "densify point count {densify_points} exceeds maximum {MAX_BOUNDS_DENSIFY_POINTS}"
+        )));
+    }
+    densify_points
+        .checked_add(1)
+        .ok_or_else(|| Error::OutOfRange("densify point count is too large".into()))
 }
