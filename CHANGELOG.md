@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- breaking: bump the workspace crates to `0.8.0`; `SelectionOptions` now includes the public `area_bounds_densify_points` field for configurable AOI bounds sampling, so downstream struct-literal construction must set it or use `SelectionOptions::new()` / `Default`
+
 ## 0.7.0 - 2026-06-12
 
 - add optional `geotiff` feature decoding PROJ-format GeoTIFF/COG grids (horizontal NTv2-equivalent offset grids with nested subgrids, and vertical geoid grids) into the existing NTv2/GTX sampling paths via the pure-Rust `geotiff-reader` crate
