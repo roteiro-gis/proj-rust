@@ -494,14 +494,77 @@ fn read_filesystem_grid_resource_bytes(
         )));
     }
 
-    let file = std::fs::File::open(&canonical_path)
-        .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))?;
+    let file = open_filesystem_grid_resource_file(location, &canonical_path)?;
     let opened_metadata = file
         .metadata()
         .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))?;
     ensure_same_grid_resource_file(&canonical_path, &metadata, &opened_metadata)?;
 
     read_grid_resource_file(file, &canonical_path, format)
+}
+
+#[cfg(unix)]
+fn open_filesystem_grid_resource_file(
+    location: &FilesystemGridLocation,
+    canonical_path: &Path,
+) -> std::result::Result<std::fs::File, GridError> {
+    use rustix::fs::{open, openat, Mode, OFlags};
+
+    let relative_path = canonical_path.strip_prefix(&location.root).map_err(|_| {
+        GridError::Unavailable(format!(
+            "{} is no longer contained by {}",
+            canonical_path.display(),
+            location.root.display()
+        ))
+    })?;
+
+    let mut components = relative_path.components().peekable();
+    let Some(_) = components.peek() else {
+        return Err(GridError::Unavailable(format!(
+            "{} is not a grid file path",
+            canonical_path.display()
+        )));
+    };
+
+    let directory_flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let file_flags = OFlags::RDONLY | OFlags::NOFOLLOW | OFlags::CLOEXEC;
+    let empty_mode = Mode::empty();
+    let mut dir = open(&location.root, directory_flags, empty_mode)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", location.root.display())))?;
+
+    while let Some(component) = components.next() {
+        let Component::Normal(name) = component else {
+            return Err(GridError::Unavailable(format!(
+                "{} is not a normal relative grid path",
+                canonical_path.display()
+            )));
+        };
+
+        if components.peek().is_some() {
+            dir = openat(&dir, name, directory_flags, empty_mode).map_err(|err| {
+                GridError::Unavailable(format!("{}: {err}", canonical_path.display()))
+            })?;
+        } else {
+            let file = openat(&dir, name, file_flags, empty_mode).map_err(|err| {
+                GridError::Unavailable(format!("{}: {err}", canonical_path.display()))
+            })?;
+            return Ok(std::fs::File::from(file));
+        }
+    }
+
+    Err(GridError::Unavailable(format!(
+        "{} is not a grid file path",
+        canonical_path.display()
+    )))
+}
+
+#[cfg(not(unix))]
+fn open_filesystem_grid_resource_file(
+    _location: &FilesystemGridLocation,
+    canonical_path: &Path,
+) -> std::result::Result<std::fs::File, GridError> {
+    std::fs::File::open(canonical_path)
+        .map_err(|err| GridError::Unavailable(format!("{}: {err}", canonical_path.display())))
 }
 
 fn read_grid_resource_file(
@@ -2619,6 +2682,31 @@ mod tests {
 
         assert!(provider.load(&definition).unwrap().is_none());
         assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 2);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn filesystem_grid_open_rejects_symlink_after_canonicalization() {
+        use std::os::unix::fs::symlink;
+
+        let root = test_temp_grid_root("nofollow-open");
+        let outside = test_temp_grid_root("nofollow-open-outside");
+        let grid_path = root.join("cached.gtx");
+        let outside_path = outside.join("outside.gtx");
+        std::fs::write(&grid_path, test_gtx_bytes(&[0.0; 9])).unwrap();
+        std::fs::write(&outside_path, test_gtx_bytes(&[100.0; 9])).unwrap();
+
+        let location = FilesystemGridLocation {
+            root: root.canonicalize().unwrap(),
+            path: grid_path.canonicalize().unwrap(),
+        };
+        let canonical_path = location.path.clone();
+
+        std::fs::remove_file(&grid_path).unwrap();
+        symlink(&outside_path, &grid_path).unwrap();
+
+        let err = open_filesystem_grid_resource_file(&location, &canonical_path).unwrap_err();
+        assert!(matches!(err, GridError::Unavailable(_)));
     }
 
     #[test]

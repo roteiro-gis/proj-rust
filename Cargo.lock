@@ -791,7 +791,7 @@ dependencies = [
 
 [[package]]
 name = "proj-core"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "criterion",
  "geo-types",
@@ -800,6 +800,7 @@ dependencies = [
  "proj-sys",
  "proptest",
  "rayon",
+ "rustix",
  "serde",
  "serde_json",
  "smallvec",
@@ -823,7 +824,7 @@ dependencies = [
 
 [[package]]
 name = "proj-wkt"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "proj-core",
  "serde_json",

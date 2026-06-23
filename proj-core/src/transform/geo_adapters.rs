@@ -3,7 +3,7 @@ use crate::coord::Bounds;
 use crate::error::Result;
 
 #[cfg(feature = "geo-types")]
-const GEO_TYPES_RECT_DENSIFY_POINTS: usize = 21;
+pub(super) const DEFAULT_GEO_TYPES_RECT_DENSIFY_POINTS: usize = 21;
 
 #[cfg(feature = "geo-types")]
 fn transform_geo_coord(
@@ -25,16 +25,15 @@ fn transform_geo_coords(
 }
 
 #[cfg(feature = "geo-types")]
-fn transform_geo_rect(
+pub(super) fn transform_geo_rect_with_densification(
     transform: &Transform,
     rect: geo_types::Rect<f64>,
+    densify_points: usize,
 ) -> Result<geo_types::Rect<f64>> {
     let min = rect.min();
     let max = rect.max();
-    let transformed = transform.transform_bounds(
-        Bounds::new(min.x, min.y, max.x, max.y),
-        GEO_TYPES_RECT_DENSIFY_POINTS,
-    )?;
+    let transformed =
+        transform.transform_bounds(Bounds::new(min.x, min.y, max.x, max.y), densify_points)?;
 
     Ok(geo_types::Rect::new(
         geo_types::Coord {
@@ -46,6 +45,14 @@ fn transform_geo_rect(
             y: transformed.max_y,
         },
     ))
+}
+
+#[cfg(feature = "geo-types")]
+fn transform_geo_rect(
+    transform: &Transform,
+    rect: geo_types::Rect<f64>,
+) -> Result<geo_types::Rect<f64>> {
+    transform_geo_rect_with_densification(transform, rect, DEFAULT_GEO_TYPES_RECT_DENSIFY_POINTS)
 }
 
 #[cfg(feature = "geo-types")]

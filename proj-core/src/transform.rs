@@ -211,9 +211,34 @@ impl Transform {
     /// This method is available only with the `geo-types` feature. It
     /// transforms coordinates in geometry storage order and returns the first
     /// coordinate error without producing a partial result.
+    ///
+    /// `geo_types::Rect` is treated as a source bounds envelope and converted
+    /// to sampled axis-aligned target bounds with 21 intermediate points per
+    /// edge. This is an approximation for nonlinear projections: extrema can
+    /// occur between samples. Use [`Self::convert_rect`] when the rect sampling
+    /// density should be chosen by the caller.
     #[cfg(feature = "geo-types")]
     pub fn convert_geometry<T: TransformableGeometry>(&self, geometry: T) -> Result<T> {
         geometry.transform_geometry(self)
+    }
+
+    /// Transform a `geo_types::Rect` to sampled axis-aligned target bounds.
+    ///
+    /// This method is available only with the `geo-types` feature. A rect
+    /// represents an envelope, not a true geometry, so nonlinear projections can
+    /// have edge extrema between samples. Increase `densify_points` to sample
+    /// edges more finely for higher-fidelity bounds, or use
+    /// [`Self::transform_bounds`] directly when working with [`Bounds`].
+    ///
+    /// `densify_points` is the number of intermediate samples added per edge
+    /// and must be no larger than [`MAX_BOUNDS_DENSIFY_POINTS`].
+    #[cfg(feature = "geo-types")]
+    pub fn convert_rect(
+        &self,
+        rect: geo_types::Rect<f64>,
+        densify_points: usize,
+    ) -> Result<geo_types::Rect<f64>> {
+        geo_adapters::transform_geo_rect_with_densification(self, rect, densify_points)
     }
 
     /// Transform a single 3D coordinate.

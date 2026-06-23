@@ -8,7 +8,7 @@
 //! Requires the `geo-types` feature (enabled by default).
 #![cfg(feature = "geo-types")]
 
-use proj_core::{Bounds, Error, Transform};
+use proj_core::{Bounds, Error, Transform, MAX_BOUNDS_DENSIFY_POINTS};
 
 const LIBERTY_LON: f64 = -74.0445;
 const LIBERTY_LAT: f64 = 40.6892;
@@ -238,6 +238,40 @@ fn geo_rect_geometry_transform_densifies_edges() {
         result.max().x,
         corner_bounds.max_x
     );
+}
+
+#[test]
+fn geo_rect_transform_accepts_custom_densification() {
+    let t = Transform::new("EPSG:4326", "EPSG:3413").unwrap();
+
+    let rect = geo_types::Rect::new(
+        geo_types::Coord { x: -60.0, y: 70.0 },
+        geo_types::Coord { x: 60.0, y: 80.0 },
+    );
+    let coarse = t.convert_rect(rect, 0).unwrap();
+    let finer = t.convert_rect(rect, 64).unwrap();
+
+    assert!(
+        finer.max().x > coarse.max().x + 1_000.0,
+        "finer rect max x {} should exceed coarse max x {}",
+        finer.max().x,
+        coarse.max().x
+    );
+}
+
+#[test]
+fn geo_rect_transform_rejects_excessive_densification() {
+    let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+
+    let rect = geo_types::Rect::new(
+        geo_types::Coord { x: -74.1, y: 40.6 },
+        geo_types::Coord { x: -73.9, y: 40.8 },
+    );
+    let err = t
+        .convert_rect(rect, MAX_BOUNDS_DENSIFY_POINTS + 1)
+        .unwrap_err();
+
+    assert!(matches!(err, Error::OutOfRange(_)));
 }
 
 #[test]
