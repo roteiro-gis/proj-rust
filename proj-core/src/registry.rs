@@ -192,9 +192,11 @@ mod tests {
 
         let ngvd29_ft = lookup_vertical_epsg(5702).expect("should find NGVD29 ftUS height");
         assert_eq!(ngvd29_ft.vertical_datum_epsg(), Some(5102));
-        assert_eq!(
-            ngvd29_ft.linear_unit_to_meter(),
-            crate::crs::LinearUnit::us_survey_foot().meters_per_unit()
+        assert!(
+            (ngvd29_ft.linear_unit_to_meter()
+                - crate::crs::LinearUnit::us_survey_foot().meters_per_unit())
+            .abs()
+                < 1e-14
         );
 
         let egm96 = lookup_vertical_epsg(5773).expect("should find EGM96 height");
@@ -202,10 +204,45 @@ mod tests {
 
         let navd88_ft = lookup_vertical_epsg(6360).expect("should find NAVD88 ftUS height");
         assert_eq!(navd88_ft.vertical_datum_epsg(), Some(5103));
-        assert_eq!(
-            navd88_ft.linear_unit_to_meter(),
-            crate::crs::LinearUnit::us_survey_foot().meters_per_unit()
+        assert!(
+            (navd88_ft.linear_unit_to_meter()
+                - crate::crs::LinearUnit::us_survey_foot().meters_per_unit())
+            .abs()
+                < 1e-14
         );
+    }
+
+    #[test]
+    fn lookup_rdnap_compound_crs() {
+        let crs = lookup_epsg(7415).expect("should find RD New + NAP height");
+        assert!(crs.is_compound());
+        assert!(crs.is_projected());
+        assert_eq!(crs.epsg(), 7415);
+        assert_eq!(crs.base_geographic_crs_epsg(), Some(4289));
+        let vertical = crs.vertical_crs().expect("compound vertical CRS");
+        assert_eq!(vertical.epsg(), 5709);
+        assert_eq!(vertical.vertical_datum_epsg(), Some(5109));
+    }
+
+    #[test]
+    fn rdnap_candidates_are_registry_generated() {
+        let source = lookup_epsg(4979).expect("should find WGS 84 3D");
+        let target = lookup_epsg(7415).expect("should find RD New + NAP height");
+
+        let candidates = operation_candidates_between(&source, &target).unwrap();
+        assert!(candidates.iter().any(|candidate| {
+            candidate.name == "WGS 84 to Amersfoort via RDNAPTRANS2018" && candidate.uses_grids
+        }));
+
+        let vertical_operations = vertical_grid_operations_between(&source, &target);
+        assert!(vertical_operations.iter().any(|operation| {
+            operation.grid.format == crate::grid::GridFormat::GeoTiff
+                && operation
+                    .grid
+                    .resource_names
+                    .iter()
+                    .any(|name| name == "nl_nsgi_nlgeo2018.tif")
+        }));
     }
 
     #[test]
@@ -258,7 +295,8 @@ mod tests {
     fn embedded_registry_provenance_reports_source_database() {
         let value: serde_json::Value =
             serde_json::from_str(embedded_registry_provenance_json()).unwrap();
-        assert_eq!(value["schema_version"], 3);
+        assert_eq!(value["schema_version"], 4);
+        assert_eq!(value["registry_format"]["version"], 8);
         assert_eq!(
             value["source_database"]["metadata"]["PROJ.VERSION"],
             "9.6.2"
@@ -271,8 +309,10 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 887960);
-        assert_eq!(value["counts"]["vertical_operations"], 25);
+        assert_eq!(value["output"]["byte_len"], 946181);
+        assert_eq!(value["counts"]["vertical_crs"], 293);
+        assert_eq!(value["counts"]["compound_crs"], 684);
+        assert_eq!(value["counts"]["vertical_operations"], 26);
         assert!(value["output"]["sha256"]
             .as_str()
             .unwrap()

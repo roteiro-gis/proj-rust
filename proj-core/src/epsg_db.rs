@@ -17,13 +17,15 @@ static EPSG_DATA: &[u8] = include_bytes!("../data/epsg.bin");
 pub(crate) const PROVENANCE_JSON: &str = include_str!("../data/epsg.provenance.json");
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 7;
-const HEADER_SIZE: usize = 40;
+const VERSION: u16 = 8;
+const HEADER_SIZE: usize = 48;
 
 const ELLIPSOID_RECORD_SIZE: usize = 20;
 const DATUM_RECORD_SIZE: usize = 72;
 const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
 const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
+const VERTICAL_CRS_RECORD_BASE_SIZE: usize = 16;
+const COMPOUND_CRS_RECORD_BASE_SIZE: usize = 28;
 
 const DATUM_SHIFT_UNKNOWN: u8 = 0;
 const DATUM_SHIFT_IDENTITY: u8 = 1;
@@ -54,8 +56,14 @@ const FLAG_APPROXIMATE: u8 = 1 << 2;
 
 const GRID_FORMAT_NTV2: u8 = 1;
 const GRID_FORMAT_GTX: u8 = 2;
+const GRID_FORMAT_GEOTIFF: u8 = 3;
 const GRID_INTERPOLATION_BILINEAR: u8 = 1;
 const VERTICAL_OFFSET_GEOID_HEIGHT_METERS: u8 = 1;
+
+const HORIZONTAL_CRS_GEOGRAPHIC: u8 = 1;
+const HORIZONTAL_CRS_PROJECTED: u8 = 2;
+const VERTICAL_COMPONENT_ELLIPSOIDAL: u8 = 1;
+const VERTICAL_COMPONENT_REGISTRY_CRS: u8 = 2;
 
 #[derive(Clone)]
 struct GeographicRecord {
@@ -73,10 +81,31 @@ struct ProjectedRecord {
 }
 
 #[derive(Clone)]
+struct VerticalRecord {
+    datum_code: u32,
+    linear_unit: LinearUnit,
+    name: &'static str,
+}
+
+#[derive(Clone)]
+struct CompoundRecord {
+    horizontal_kind: u8,
+    horizontal_crs_epsg: u32,
+    vertical_kind: u8,
+    vertical_crs_epsg: u32,
+    vertical_datum_epsg: u32,
+    vertical_unit: LinearUnit,
+    name: &'static str,
+    vertical_name: &'static str,
+}
+
+#[derive(Clone)]
 struct RegistryDb {
     datums: BTreeMap<u32, Datum>,
     geographic_crs: BTreeMap<u32, GeographicRecord>,
     projected_crs: BTreeMap<u32, ProjectedRecord>,
+    vertical_crs: BTreeMap<u32, VerticalRecord>,
+    compound_crs: BTreeMap<u32, CompoundRecord>,
     grids: BTreeMap<u32, GridDefinition>,
     operations: BTreeMap<u32, CoordinateOperation>,
     vertical_grid_operations: BTreeMap<u32, RegistryVerticalGridOperation>,
@@ -110,10 +139,12 @@ fn parse_db() -> RegistryDb {
     let num_datums = read_u32(EPSG_DATA, 12) as usize;
     let num_geo = read_u32(EPSG_DATA, 16) as usize;
     let num_proj = read_u32(EPSG_DATA, 20) as usize;
-    let num_extents = read_u32(EPSG_DATA, 24) as usize;
-    let num_grids = read_u32(EPSG_DATA, 28) as usize;
-    let num_operations = read_u32(EPSG_DATA, 32) as usize;
-    let num_vertical_operations = read_u32(EPSG_DATA, 36) as usize;
+    let num_vertical_crs = read_u32(EPSG_DATA, 24) as usize;
+    let num_compound_crs = read_u32(EPSG_DATA, 28) as usize;
+    let num_extents = read_u32(EPSG_DATA, 32) as usize;
+    let num_grids = read_u32(EPSG_DATA, 36) as usize;
+    let num_operations = read_u32(EPSG_DATA, 40) as usize;
+    let num_vertical_operations = read_u32(EPSG_DATA, 44) as usize;
 
     let mut offset = HEADER_SIZE;
 
@@ -207,6 +238,63 @@ fn parse_db() -> RegistryDb {
         offset += PROJ_CRS_RECORD_BASE_SIZE + 2 + name_len;
     }
 
+    let mut vertical_crs = BTreeMap::new();
+    for _ in 0..num_vertical_crs {
+        let code = read_u32(EPSG_DATA, offset);
+        let datum_code = read_u32(EPSG_DATA, offset + 4);
+        let linear_unit = LinearUnit::from_meters_per_unit(read_f64(EPSG_DATA, offset + 8))
+            .expect("valid vertical linear unit in embedded registry");
+        let name_len = read_u16(EPSG_DATA, offset + VERTICAL_CRS_RECORD_BASE_SIZE) as usize;
+        let name = read_static_string(
+            EPSG_DATA,
+            offset + VERTICAL_CRS_RECORD_BASE_SIZE + 2,
+            name_len,
+        );
+        vertical_crs.insert(
+            code,
+            VerticalRecord {
+                datum_code,
+                linear_unit,
+                name,
+            },
+        );
+        offset += VERTICAL_CRS_RECORD_BASE_SIZE + 2 + name_len;
+    }
+
+    let mut compound_crs = BTreeMap::new();
+    for _ in 0..num_compound_crs {
+        let code = read_u32(EPSG_DATA, offset);
+        let horizontal_kind = EPSG_DATA[offset + 4];
+        let vertical_kind = EPSG_DATA[offset + 5];
+        let horizontal_crs_epsg = read_u32(EPSG_DATA, offset + 8);
+        let vertical_crs_epsg = read_u32(EPSG_DATA, offset + 12);
+        let vertical_datum_epsg = read_u32(EPSG_DATA, offset + 16);
+        let vertical_unit = LinearUnit::from_meters_per_unit(read_f64(EPSG_DATA, offset + 20))
+            .unwrap_or_else(|_| LinearUnit::metre());
+        let name_len = read_u16(EPSG_DATA, offset + COMPOUND_CRS_RECORD_BASE_SIZE) as usize;
+        let mut cursor = offset + COMPOUND_CRS_RECORD_BASE_SIZE + 2;
+        let name = read_static_string(EPSG_DATA, cursor, name_len);
+        cursor += name_len;
+        let vertical_name_len = read_u16(EPSG_DATA, cursor) as usize;
+        cursor += 2;
+        let vertical_name = read_static_string(EPSG_DATA, cursor, vertical_name_len);
+        cursor += vertical_name_len;
+        compound_crs.insert(
+            code,
+            CompoundRecord {
+                horizontal_kind,
+                horizontal_crs_epsg,
+                vertical_kind,
+                vertical_crs_epsg,
+                vertical_datum_epsg,
+                vertical_unit,
+                name,
+                vertical_name,
+            },
+        );
+        offset = cursor;
+    }
+
     let mut extents = BTreeMap::new();
     for _ in 0..num_extents {
         let code = read_u32(EPSG_DATA, offset);
@@ -235,6 +323,7 @@ fn parse_db() -> RegistryDb {
         let format = match EPSG_DATA[offset + 4] {
             GRID_FORMAT_NTV2 => GridFormat::Ntv2,
             GRID_FORMAT_GTX => GridFormat::Gtx,
+            GRID_FORMAT_GEOTIFF => GridFormat::GeoTiff,
             _ => GridFormat::Unsupported,
         };
         let interpolation = match EPSG_DATA[offset + 5] {
@@ -464,6 +553,8 @@ fn parse_db() -> RegistryDb {
         datums,
         geographic_crs,
         projected_crs,
+        vertical_crs,
+        compound_crs,
         grids,
         operations,
         vertical_grid_operations,
@@ -619,35 +710,6 @@ pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
 }
 
 pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
-    if code == 4979 {
-        let horizontal = GeographicCrsDef::new(4326, crate::datum::WGS84, "WGS 84");
-        let vertical = VerticalCrsDef::ellipsoidal_height(
-            0,
-            crate::datum::WGS84,
-            LinearUnit::metre(),
-            "WGS 84 ellipsoidal height",
-        );
-        return Some(CrsDef::Compound(Box::new(CompoundCrsDef::new(
-            4979,
-            HorizontalCrsDef::Geographic(horizontal),
-            vertical,
-            "WGS 84",
-        ))));
-    }
-
-    if code == 7415 {
-        // Amersfoort / RD New + NAP height (RDNAPTRANS2018 target CRS).
-        let CrsDef::Projected(rd_new) = lookup_projected(28992)? else {
-            return None;
-        };
-        return Some(CrsDef::Compound(Box::new(CompoundCrsDef::new(
-            7415,
-            HorizontalCrsDef::Projected(rd_new),
-            nap_height_vertical_crs(),
-            "Amersfoort / RD New + NAP height",
-        ))));
-    }
-
     let record = db().geographic_crs.get(&code)?;
     let datum = db().datums.get(&record.datum_code)?;
     Some(CrsDef::Geographic(GeographicCrsDef::new(
@@ -673,211 +735,61 @@ pub(crate) fn lookup_projected(code: u32) -> Option<CrsDef> {
 }
 
 pub(crate) fn lookup_vertical(code: u32) -> Option<VerticalCrsDef> {
-    match code {
-        3855 => Some(
-            VerticalCrsDef::gravity_related_height(
-                3855,
-                1027,
-                LinearUnit::metre(),
-                "EGM2008 height",
-            )
-            .expect("hard-coded vertical CRS definition is valid"),
-        ),
-        5702 => Some(
-            VerticalCrsDef::gravity_related_height(
-                5702,
-                5102,
-                LinearUnit::us_survey_foot(),
-                "NGVD29 height (ftUS)",
-            )
-            .expect("hard-coded vertical CRS definition is valid"),
-        ),
-        5703 => Some(
-            VerticalCrsDef::gravity_related_height(
-                5703,
-                5103,
-                LinearUnit::metre(),
-                "NAVD88 height",
-            )
-            .expect("hard-coded vertical CRS definition is valid"),
-        ),
-        5773 => Some(
-            VerticalCrsDef::gravity_related_height(5773, 5171, LinearUnit::metre(), "EGM96 height")
-                .expect("hard-coded vertical CRS definition is valid"),
-        ),
-        6360 => Some(
-            VerticalCrsDef::gravity_related_height(
-                6360,
-                5103,
-                LinearUnit::us_survey_foot(),
-                "NAVD88 height (ftUS)",
-            )
-            .expect("hard-coded vertical CRS definition is valid"),
-        ),
-        5709 => Some(nap_height_vertical_crs()),
+    let record = db().vertical_crs.get(&code)?;
+    VerticalCrsDef::gravity_related_height(code, record.datum_code, record.linear_unit, record.name)
+        .ok()
+}
+
+fn lookup_horizontal(kind: u8, code: u32) -> Option<HorizontalCrsDef> {
+    match kind {
+        HORIZONTAL_CRS_GEOGRAPHIC => {
+            let CrsDef::Geographic(crs) = lookup_geographic(code)? else {
+                return None;
+            };
+            Some(HorizontalCrsDef::Geographic(crs))
+        }
+        HORIZONTAL_CRS_PROJECTED => {
+            let CrsDef::Projected(crs) = lookup_projected(code)? else {
+                return None;
+            };
+            Some(HorizontalCrsDef::Projected(crs))
+        }
         _ => None,
     }
+}
+
+fn lookup_compound_vertical(record: &CompoundRecord) -> Option<VerticalCrsDef> {
+    match record.vertical_kind {
+        VERTICAL_COMPONENT_ELLIPSOIDAL => {
+            let datum = db().datums.get(&record.vertical_datum_epsg)?;
+            Some(VerticalCrsDef::ellipsoidal_height(
+                0,
+                datum.clone(),
+                record.vertical_unit,
+                record.vertical_name,
+            ))
+        }
+        VERTICAL_COMPONENT_REGISTRY_CRS => lookup_vertical(record.vertical_crs_epsg),
+        _ => None,
+    }
+}
+
+fn lookup_compound(code: u32) -> Option<CrsDef> {
+    let record = db().compound_crs.get(&code)?;
+    let horizontal = lookup_horizontal(record.horizontal_kind, record.horizontal_crs_epsg)?;
+    let vertical = lookup_compound_vertical(record)?;
+    Some(CrsDef::Compound(Box::new(CompoundCrsDef::new(
+        code,
+        horizontal,
+        vertical,
+        record.name,
+    ))))
 }
 
 pub(crate) fn lookup(code: u32) -> Option<CrsDef> {
-    lookup_geographic(code).or_else(|| lookup_projected(code))
-}
-
-// --- RDNAPTRANS2018 (Netherlands) ------------------------------------------
-//
-// The official RD New + NAP transformation is grid-based and uses PROJ-format
-// GeoTIFF grids (`nl_nsgi_rdtrans2018.tif` horizontal, `nl_nsgi_nlgeo2018.tif`
-// geoid). The generated registry does not carry these GeoTIFF-backed
-// operations, so they are defined here by hand and surfaced through the same
-// `related_operations` / `vertical_grid_operations_between` / `lookup_grid`
-// paths the generated registry uses. Grid files themselves are supplied by the
-// caller's `GridProvider` (e.g. a `FilesystemGridProvider`); see the `geotiff`
-// crate feature for decoding.
-
-// Internal (non-EPSG) grid identifiers used only to wire the hand-coded
-// GridShift to its GridDefinition via `lookup_grid`; they are not part of the
-// public EPSG registry namespace and will be replaced when `gen-registry`
-// learns to emit the RDNAP operations.
-const RDNAP_HORIZONTAL_GRID_ID: u32 = 990_001;
-const RDNAP_GEOID_GRID_ID: u32 = 990_002;
-const NAP_VERTICAL_CRS: u32 = 5709;
-const NAP_VERTICAL_DATUM: u32 = 5109;
-const AMERSFOORT_GEOGRAPHIC_CRS: u32 = 4289;
-const AMERSFOORT_DATUM: u32 = 6289;
-const WGS84_GEOGRAPHIC_CRS: u32 = 4326;
-const WGS84_DATUM: u32 = 6326;
-
-fn rdnap_area_of_use() -> AreaOfUse {
-    AreaOfUse {
-        west: 1.95,
-        south: 49.95,
-        east: 8.05,
-        north: 56.05,
-        name: "Netherlands - onshore and offshore".into(),
-    }
-}
-
-fn nap_height_vertical_crs() -> VerticalCrsDef {
-    VerticalCrsDef::gravity_related_height(
-        NAP_VERTICAL_CRS,
-        NAP_VERTICAL_DATUM,
-        LinearUnit::metre(),
-        "NAP height",
-    )
-    .expect("hard-coded NAP vertical CRS definition is valid")
-}
-
-fn rdnap_horizontal_grid_definition() -> GridDefinition {
-    GridDefinition {
-        id: GridId(RDNAP_HORIZONTAL_GRID_ID),
-        name: "nl_nsgi_rdtrans2018.tif".into(),
-        format: GridFormat::GeoTiff,
-        interpolation: GridInterpolation::Bilinear,
-        area_of_use: Some(rdnap_area_of_use()),
-        resource_names: SmallVec::from_vec(vec!["nl_nsgi_rdtrans2018.tif".into()]),
-    }
-}
-
-fn rdnap_geoid_grid_definition() -> GridDefinition {
-    GridDefinition {
-        id: GridId(RDNAP_GEOID_GRID_ID),
-        name: "nl_nsgi_nlgeo2018.tif".into(),
-        format: GridFormat::GeoTiff,
-        interpolation: GridInterpolation::Bilinear,
-        area_of_use: Some(rdnap_area_of_use()),
-        resource_names: SmallVec::from_vec(vec!["nl_nsgi_nlgeo2018.tif".into()]),
-    }
-}
-
-/// Hand-coded RDNAPTRANS2018 horizontal operations, owned for `'static` lifetime
-/// so they can be returned alongside generated `related_operations` results.
-fn rdnap_horizontal_operations() -> &'static [CoordinateOperation] {
-    static OPS: OnceLock<Vec<CoordinateOperation>> = OnceLock::new();
-    OPS.get_or_init(|| {
-        // The grid maps Amersfoort (Bessel, EPSG:4289) -> ETRF2000 (~WGS 84).
-        // Declared source->target is WGS 84 -> Amersfoort, so the grid is
-        // applied in reverse (ETRF2000 -> Amersfoort) in the forward direction.
-        vec![CoordinateOperation {
-            // Left un-id'd: this is an internal WGS 84/ETRS89 -> Amersfoort
-            // wrapper, not itself an EPSG operation. Generated registry support
-            // (proj.db ops 9282/9283) can replace it cleanly later.
-            id: None,
-            name: "RD New (RDNAPTRANS2018), Netherlands".into(),
-            source_crs_epsg: Some(WGS84_GEOGRAPHIC_CRS),
-            target_crs_epsg: Some(AMERSFOORT_GEOGRAPHIC_CRS),
-            source_datum_epsg: Some(WGS84_DATUM),
-            target_datum_epsg: Some(AMERSFOORT_DATUM),
-            accuracy: Some(OperationAccuracy { meters: 0.01 }),
-            areas_of_use: SmallVec::from_vec(vec![rdnap_area_of_use()]),
-            deprecated: false,
-            preferred: true,
-            approximate: false,
-            method: OperationMethod::GridShift {
-                grid_id: GridId(RDNAP_HORIZONTAL_GRID_ID),
-                interpolation: GridInterpolation::Bilinear,
-                direction: GridShiftDirection::Reverse,
-            },
-        }]
-    })
-}
-
-/// RDNAPTRANS2018 horizontal operations matching the given base-geographic CRS
-/// pair (in either direction).
-fn rdnap_related_operations(
-    source_geo: u32,
-    target_geo: u32,
-) -> impl Iterator<Item = &'static CoordinateOperation> {
-    let matches = (source_geo == WGS84_GEOGRAPHIC_CRS && target_geo == AMERSFOORT_GEOGRAPHIC_CRS)
-        || (source_geo == AMERSFOORT_GEOGRAPHIC_CRS && target_geo == WGS84_GEOGRAPHIC_CRS);
-    rdnap_horizontal_operations()
-        .iter()
-        .filter(move |_| matches)
-}
-
-fn rdnap_lookup_grid(code: u32) -> Option<GridDefinition> {
-    match code {
-        RDNAP_HORIZONTAL_GRID_ID => Some(rdnap_horizontal_grid_definition()),
-        RDNAP_GEOID_GRID_ID => Some(rdnap_geoid_grid_definition()),
-        _ => None,
-    }
-}
-
-/// RDNAPTRANS2018 geoid operation(s) for an ellipsoidal-height <-> NAP pair.
-fn rdnap_vertical_operations(
-    source: &VerticalCrsDef,
-    target: &VerticalCrsDef,
-) -> Vec<VerticalGridOperation> {
-    let geoid = VerticalGridOperation {
-        name: "NAP height (RDNAPTRANS2018)".into(),
-        grid: rdnap_geoid_grid_definition(),
-        // The geoid grid is georeferenced in ETRF2000 (~WGS 84 / ETRS89 at this
-        // accuracy). Sampling in that CRS keeps the geoid at the ellipsoidal
-        // position in both directions: forward it equals the source, and on the
-        // inverse it transforms RD back to geographic before sampling (matching
-        // PROJ's pipeline ordering) rather than sampling at the RD-derived
-        // Bessel position.
-        grid_horizontal_crs_epsg: Some(WGS84_GEOGRAPHIC_CRS),
-        source_vertical_crs_epsg: None,
-        target_vertical_crs_epsg: Some(NAP_VERTICAL_CRS),
-        source_vertical_datum_epsg: None,
-        target_vertical_datum_epsg: Some(NAP_VERTICAL_DATUM),
-        accuracy: Some(OperationAccuracy { meters: 0.01 }),
-        area_of_use: Some(rdnap_area_of_use()),
-        offset_convention: VerticalGridOffsetConvention::GeoidHeightMeters,
-    };
-
-    let is_nap = |vertical: &VerticalCrsDef| {
-        vertical.epsg() == NAP_VERTICAL_CRS
-            || vertical.vertical_datum_epsg() == Some(NAP_VERTICAL_DATUM)
-    };
-    if source.kind().is_ellipsoidal_height() && is_nap(target) {
-        return vec![geoid];
-    }
-    if target.kind().is_ellipsoidal_height() && is_nap(source) {
-        return vec![geoid.inverse()];
-    }
-
-    Vec::new()
+    lookup_geographic(code)
+        .or_else(|| lookup_projected(code))
+        .or_else(|| lookup_compound(code))
 }
 
 pub(crate) fn lookup_datum_code_for_crs(code: u32) -> Option<u32> {
@@ -888,6 +800,11 @@ pub(crate) fn lookup_datum_code_for_crs(code: u32) -> Option<u32> {
             db().projected_crs
                 .get(&code)
                 .map(|record| record.datum_code)
+        })
+        .or_else(|| {
+            db().compound_crs
+                .get(&code)
+                .and_then(|record| lookup_datum_code_for_crs(record.horizontal_crs_epsg))
         })
 }
 
@@ -939,12 +856,10 @@ pub(crate) fn vertical_grid_operations_between(
     }
 
     matches.sort_by_key(|left| left.0);
-    let mut operations: Vec<VerticalGridOperation> = matches
+    matches
         .into_iter()
         .map(|(_, operation)| operation)
-        .collect();
-    operations.extend(rdnap_vertical_operations(source_vertical, target_vertical));
-    operations
+        .collect()
 }
 
 pub(crate) fn related_operations(
@@ -984,7 +899,6 @@ pub(crate) fn related_operations(
 
     ids.into_iter()
         .filter_map(|id| db().operations.get(&id))
-        .chain(rdnap_related_operations(source_geo, target_geo))
         .collect()
 }
 
@@ -1018,7 +932,7 @@ pub(crate) fn forward_operations(
 }
 
 pub(crate) fn lookup_grid(code: u32) -> Option<GridDefinition> {
-    rdnap_lookup_grid(code).or_else(|| db().grids.get(&code).cloned())
+    db().grids.get(&code).cloned()
 }
 
 fn vertical_operation_matches(
