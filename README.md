@@ -61,7 +61,7 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 |---|---|
 | Geographic CRS and datum identity | EPSG:4326, EPSG:4269, EPSG:4267, EPSG:4258 |
 | 3D geographic and compatible compound CRS | EPSG:4979 |
-| Vertical CRS metadata and same-reference unit conversion | EPSG:3855, EPSG:5702, EPSG:5703, EPSG:5773, EPSG:6360, EPSG:5709 |
+| Generated vertical CRS metadata and same-reference unit conversion | EPSG:3855, EPSG:5702, EPSG:5703, EPSG:5773, EPSG:6360, EPSG:5709, and other supported EPSG vertical CRS records |
 | Grid-based 3D compound (with `geotiff`) | EPSG:7415 (RD New + NAP, RDNAPTRANS2018) |
 | Web Mercator | EPSG:3857 |
 | Transverse Mercator / UTM | EPSG:32601-32660, EPSG:32701-32760 |

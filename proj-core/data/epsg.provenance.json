@@ -1,9 +1,9 @@
 {
-  "schema_version": 3,
+  "schema_version": 4,
   "generator": "gen-reference gen-registry",
   "registry_format": {
     "magic": "0x45505347",
-    "version": 7
+    "version": 8
   },
   "source_database": {
     "kind": "PROJ proj.db",
@@ -28,18 +28,20 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 887960,
-    "sha256": "sha256:3b7e27c870f9162b9a84e44ab72bf26072184b3ecb93d653daa37c3bfffe1fbd"
+    "byte_len": 946181,
+    "sha256": "sha256:1942847d5feb98c0f3222216b19c35731c39527cd77b9d7aa84b12371416f7f8"
   },
   "counts": {
     "ellipsoids": 44,
     "datums": 585,
     "geographic_crs": 598,
     "projected_crs": 5171,
+    "vertical_crs": 293,
+    "compound_crs": 684,
     "extents": 756,
-    "grid_resources": 253,
-    "operations": 1825,
-    "vertical_operations": 25
+    "grid_resources": 255,
+    "operations": 1827,
+    "vertical_operations": 26
   },
   "supported_projection_methods": {
     "Albers Equal Area": 5,
@@ -58,6 +60,7 @@
   },
   "supported_grid_formats": {
     "GTX": 2,
+    "GeoTIFF": 3,
     "NTv2": 1,
     "Unsupported": 255
   },

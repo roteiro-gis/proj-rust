@@ -132,8 +132,8 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
 }
 
 const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 7;
-const PROVENANCE_SCHEMA_VERSION: u16 = 3;
+const VERSION: u16 = 8;
+const PROVENANCE_SCHEMA_VERSION: u16 = 4;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 const CANONICAL_FLOAT_DECIMAL_PLACES: usize = 13;
 
@@ -141,6 +141,8 @@ const ELLIPSOID_RECORD_SIZE: usize = 20;
 const DATUM_RECORD_SIZE: usize = 72;
 const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
 const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
+const VERTICAL_CRS_RECORD_BASE_SIZE: usize = 16;
+const COMPOUND_CRS_RECORD_BASE_SIZE: usize = 28;
 
 const METHOD_WEB_MERCATOR: u8 = 1;
 const METHOD_TRANSVERSE_MERCATOR: u8 = 2;
@@ -172,9 +174,26 @@ const FLAG_APPROXIMATE: u8 = 1 << 2;
 
 const GRID_FORMAT_NTV2: u8 = 1;
 const GRID_FORMAT_GTX: u8 = 2;
+const GRID_FORMAT_GEOTIFF: u8 = 3;
 const GRID_FORMAT_UNSUPPORTED: u8 = 255;
 
 const GRID_INTERPOLATION_BILINEAR: u8 = 1;
+
+const HORIZONTAL_CRS_GEOGRAPHIC: u8 = 1;
+const HORIZONTAL_CRS_PROJECTED: u8 = 2;
+const VERTICAL_COMPONENT_ELLIPSOIDAL: u8 = 1;
+const VERTICAL_COMPONENT_REGISTRY_CRS: u8 = 2;
+
+const GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION: u32 = 9_909_282;
+const GENERATED_RDNAP_WGS84_TO_AMERSFOORT_OPERATION: u32 = 9_900_001;
+const GENERATED_RDNAP_GEOTIFF_VERTICAL_OPERATION: u32 = 9_909_283;
+const EPSG_ETRS89_TO_WGS84_OPERATION: u32 = 1149;
+const EPSG_RDNAP_HORIZONTAL_OPERATION: u32 = 9282;
+const EPSG_RDNAP_VERTICAL_OPERATION: u32 = 9283;
+const EPSG_WGS84_GEOGRAPHIC_2D: u32 = 4326;
+const EPSG_WGS84_DATUM: u32 = 6326;
+const EPSG_AMERSFOORT_GEOGRAPHIC_2D: u32 = 4289;
+const EPSG_AMERSFOORT_DATUM: u32 = 6289;
 
 // EPSG:32662 is deprecated upstream but remains part of this crate's documented
 // public support set.
@@ -220,6 +239,8 @@ struct RegistryCounts {
     datums: usize,
     geographic_crs: usize,
     projected_crs: usize,
+    vertical_crs: usize,
+    compound_crs: usize,
     extents: usize,
     grid_resources: usize,
     operations: usize,
@@ -274,6 +295,25 @@ struct ProjCrs {
     linear_unit_to_meter: f64,
     params: [f64; 7],
     name: String,
+}
+
+struct VerticalCrs {
+    code: u32,
+    datum_code: u32,
+    linear_unit_to_meter: f64,
+    name: String,
+}
+
+struct CompoundCrs {
+    code: u32,
+    horizontal_kind: u8,
+    horizontal_crs_code: u32,
+    vertical_kind: u8,
+    vertical_crs_code: u32,
+    vertical_datum_code: u32,
+    vertical_unit_to_meter: f64,
+    name: String,
+    vertical_name: String,
 }
 
 #[derive(Clone)]
@@ -559,6 +599,201 @@ fn grid_format_from_method(method_name: &str) -> u8 {
     }
 }
 
+fn grid_format_from_proj_grid_format(format: &str) -> u8 {
+    match format {
+        "GTiff" => GRID_FORMAT_GEOTIFF,
+        "GTX" => GRID_FORMAT_GTX,
+        "NTv2" => GRID_FORMAT_NTV2,
+        _ => GRID_FORMAT_UNSUPPORTED,
+    }
+}
+
+fn intern_grid_resource(
+    grid_resources: &mut Vec<GridRecord>,
+    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+    method_name: &str,
+    grid_name: &str,
+    grid2_name: &str,
+    format: u8,
+) -> u32 {
+    let grid_key = (
+        method_name.to_string(),
+        grid_name.to_string(),
+        grid2_name.to_string(),
+    );
+    if let Some(id) = grid_resource_ids.get(&grid_key).copied() {
+        return id;
+    }
+
+    let id = grid_resources.len() as u32 + 1;
+    let mut resource_names = vec![grid_name.to_string()];
+    if !grid2_name.is_empty() {
+        resource_names.push(grid2_name.to_string());
+    }
+    grid_resources.push(GridRecord {
+        id,
+        name: grid_name.to_string(),
+        format,
+        interpolation: GRID_INTERPOLATION_BILINEAR,
+        area_code: 0,
+        resource_names,
+    });
+    grid_resource_ids.insert(grid_key, id);
+    id
+}
+
+fn grid_alternative(
+    conn: &Connection,
+    original_grid_name: &str,
+    proj_method: &str,
+) -> Option<(String, u8, bool)> {
+    conn.query_row(
+        "SELECT proj_grid_name, proj_grid_format, inverse_direction
+         FROM grid_alternatives
+         WHERE original_grid_name=?1
+           AND proj_method=?2
+           AND proj_grid_name IS NOT NULL
+           AND proj_grid_name != ''
+         ORDER BY open_license DESC, direct_download DESC, proj_grid_name
+         LIMIT 1",
+        params![original_grid_name, proj_method],
+        |row| {
+            let name: String = row.get(0)?;
+            let format_name: String = row.get(1)?;
+            let inverse_direction: bool = row.get(2)?;
+            Ok((
+                name,
+                grid_format_from_proj_grid_format(&format_name),
+                inverse_direction,
+            ))
+        },
+    )
+    .ok()
+    .filter(|(_, format, _)| *format != GRID_FORMAT_UNSUPPORTED)
+}
+
+fn add_generated_rdnap_aliases(
+    conn: &Connection,
+    grid_resources: &mut Vec<GridRecord>,
+    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+    operations: &mut Vec<OperationRecord>,
+    vertical_operations: &mut Vec<VerticalOperationRecord>,
+) {
+    let Some(horizontal_operation) = operations
+        .iter()
+        .find(|operation| operation.code == EPSG_RDNAP_HORIZONTAL_OPERATION)
+        .cloned()
+    else {
+        return;
+    };
+    let Some(etrs89_to_wgs84_accuracy) = operations
+        .iter()
+        .find(|operation| operation.code == EPSG_ETRS89_TO_WGS84_OPERATION)
+        .map(|operation| operation.accuracy)
+    else {
+        return;
+    };
+    let Some((rdtrans_grid_name, rdtrans_format, rdtrans_inverse)) =
+        grid_alternative(conn, "rdtrans2018.gsb", "hgridshift")
+    else {
+        return;
+    };
+
+    let rdtrans_grid_id = intern_grid_resource(
+        grid_resources,
+        grid_resource_ids,
+        "GTiff hgridshift",
+        &rdtrans_grid_name,
+        "",
+        rdtrans_format,
+    );
+    let rdtrans_direction = if rdtrans_inverse { 1 } else { 0 };
+    operations.push(OperationRecord {
+        table_name: "generated_operation",
+        code: GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION,
+        name: format!("{} (PROJ GeoTIFF grid)", horizontal_operation.name),
+        source_crs_code: horizontal_operation.source_crs_code,
+        target_crs_code: horizontal_operation.target_crs_code,
+        source_datum_code: horizontal_operation.source_datum_code,
+        target_datum_code: horizontal_operation.target_datum_code,
+        accuracy: horizontal_operation.accuracy,
+        deprecated: horizontal_operation.deprecated,
+        preferred: horizontal_operation.preferred,
+        approximate: horizontal_operation.approximate,
+        area_codes: horizontal_operation.area_codes.clone(),
+        payload: OperationPayload::GridShift {
+            grid_id: rdtrans_grid_id,
+            direction: rdtrans_direction,
+            interpolation: GRID_INTERPOLATION_BILINEAR,
+        },
+    });
+
+    operations.push(OperationRecord {
+        table_name: "generated_operation",
+        code: GENERATED_RDNAP_WGS84_TO_AMERSFOORT_OPERATION,
+        name: "WGS 84 to Amersfoort via RDNAPTRANS2018".to_string(),
+        source_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
+        target_crs_code: EPSG_AMERSFOORT_GEOGRAPHIC_2D,
+        source_datum_code: EPSG_WGS84_DATUM,
+        target_datum_code: EPSG_AMERSFOORT_DATUM,
+        accuracy: etrs89_to_wgs84_accuracy.or(horizontal_operation.accuracy),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        area_codes: horizontal_operation.area_codes.clone(),
+        payload: OperationPayload::Concatenated {
+            steps: vec![
+                (
+                    EPSG_ETRS89_TO_WGS84_OPERATION,
+                    1, // WGS 84 -> ETRS89.
+                ),
+                (
+                    GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION,
+                    1, // ETRS89 -> Amersfoort.
+                ),
+            ],
+        },
+    });
+
+    let Some(vertical_operation) = vertical_operations
+        .iter()
+        .find(|operation| operation.code == EPSG_RDNAP_VERTICAL_OPERATION)
+        .cloned()
+    else {
+        return;
+    };
+    let Some((nlgeo_grid_name, nlgeo_format, _)) =
+        grid_alternative(conn, "nlgeo2018.gtx", "geoid_like")
+    else {
+        return;
+    };
+
+    let nlgeo_grid_id = intern_grid_resource(
+        grid_resources,
+        grid_resource_ids,
+        "GTiff geoid_like",
+        &nlgeo_grid_name,
+        "",
+        nlgeo_format,
+    );
+    vertical_operations.push(VerticalOperationRecord {
+        table_name: "generated_operation",
+        code: GENERATED_RDNAP_GEOTIFF_VERTICAL_OPERATION,
+        name: format!("{} (PROJ GeoTIFF grid)", vertical_operation.name),
+        source_horizontal_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
+        target_horizontal_crs_code: EPSG_AMERSFOORT_GEOGRAPHIC_2D,
+        grid_horizontal_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
+        source_vertical_crs_code: vertical_operation.source_vertical_crs_code,
+        target_vertical_crs_code: vertical_operation.target_vertical_crs_code,
+        source_vertical_datum_code: vertical_operation.source_vertical_datum_code,
+        target_vertical_datum_code: vertical_operation.target_vertical_datum_code,
+        grid_id: nlgeo_grid_id,
+        accuracy: vertical_operation.accuracy,
+        deprecated: vertical_operation.deprecated,
+        area_codes: vertical_operation.area_codes,
+    });
+}
+
 fn read_proj_db_metadata(conn: &Connection) -> BTreeMap<String, String> {
     let mut stmt = conn
         .prepare("SELECT key, value FROM metadata ORDER BY key")
@@ -709,6 +944,7 @@ fn supported_projection_methods() -> BTreeMap<String, u8> {
 
 fn supported_grid_formats() -> BTreeMap<String, u8> {
     named_codes(&[
+        ("GeoTIFF", GRID_FORMAT_GEOTIFF),
         ("GTX", GRID_FORMAT_GTX),
         ("NTv2", GRID_FORMAT_NTV2),
         ("Unsupported", GRID_FORMAT_UNSUPPORTED),
@@ -1115,6 +1351,165 @@ fn main() {
         }
     }
 
+    let proj_codes: BTreeSet<u32> = proj_crs.iter().map(|crs| crs.code).collect();
+
+    let vertical_crs: Vec<VerticalCrs> = {
+        let mut stmt = conn
+            .prepare(
+                "SELECT vc.code,
+                        vc.datum_code,
+                        vc.name,
+                        u.conv_factor
+                 FROM vertical_crs vc
+                 JOIN axis a
+                   ON a.coordinate_system_auth_name = vc.coordinate_system_auth_name
+                  AND a.coordinate_system_code = vc.coordinate_system_code
+                  AND a.coordinate_system_order = 1
+                 JOIN unit_of_measure u
+                   ON u.auth_name = a.uom_auth_name
+                  AND u.code = a.uom_code
+                 WHERE vc.auth_name='EPSG'
+                   AND vc.deprecated=0
+                   AND u.type='length'
+                   AND u.conv_factor IS NOT NULL
+                 ORDER BY CAST(vc.code AS INTEGER)",
+            )
+            .unwrap();
+        stmt.query_map([], |row| {
+            Ok(VerticalCrs {
+                code: row.get(0)?,
+                datum_code: row.get(1)?,
+                name: row.get(2)?,
+                linear_unit_to_meter: row.get(3)?,
+            })
+        })
+        .unwrap()
+        .filter_map(|row| row.ok())
+        .collect()
+    };
+    let vertical_codes: BTreeSet<u32> = vertical_crs.iter().map(|crs| crs.code).collect();
+
+    let mut compound_crs: Vec<CompoundCrs> = Vec::new();
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT gc.code,
+                        gc.name,
+                        gc.datum_code,
+                        a.uom_code,
+                        u.conv_factor
+                 FROM geodetic_crs gc
+                 LEFT JOIN axis a
+                   ON a.coordinate_system_auth_name = gc.coordinate_system_auth_name
+                  AND a.coordinate_system_code = gc.coordinate_system_code
+                  AND a.coordinate_system_order = 3
+                 LEFT JOIN unit_of_measure u
+                   ON u.auth_name = a.uom_auth_name
+                  AND u.code = a.uom_code
+                 WHERE gc.auth_name='EPSG'
+                   AND gc.type='geographic 3D'
+                   AND gc.deprecated=0
+                 ORDER BY CAST(gc.code AS INTEGER)",
+            )
+            .unwrap();
+        for row in stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, u32>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, u32>(2)?,
+                    row.get::<_, Option<i64>>(3)?,
+                    row.get::<_, Option<f64>>(4)?,
+                ))
+            })
+            .unwrap()
+            .flatten()
+        {
+            let Some(horizontal_code) = geo_2d_by_datum.get(&row.2).copied() else {
+                continue;
+            };
+            if !geo_codes.contains(&horizontal_code) {
+                continue;
+            }
+            let linear_unit_to_meter = match (row.3, row.4) {
+                (Some(_), Some(factor)) => factor,
+                _ => continue,
+            };
+            compound_crs.push(CompoundCrs {
+                code: row.0,
+                horizontal_kind: HORIZONTAL_CRS_GEOGRAPHIC,
+                horizontal_crs_code: horizontal_code,
+                vertical_kind: VERTICAL_COMPONENT_ELLIPSOIDAL,
+                vertical_crs_code: 0,
+                vertical_datum_code: row.2,
+                vertical_unit_to_meter: linear_unit_to_meter,
+                name: row.1.clone(),
+                vertical_name: format!("{} ellipsoidal height", row.1),
+            });
+        }
+    }
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT cc.code,
+                        cc.name,
+                        CAST(cc.horiz_crs_code AS TEXT),
+                        hv.table_name,
+                        CAST(cc.vertical_crs_code AS TEXT)
+                 FROM compound_crs cc
+                 JOIN crs_view hv
+                   ON hv.auth_name = cc.horiz_crs_auth_name
+                  AND hv.code = cc.horiz_crs_code
+                 WHERE cc.auth_name='EPSG'
+                   AND cc.horiz_crs_auth_name='EPSG'
+                   AND cc.vertical_crs_auth_name='EPSG'
+                   AND cc.deprecated=0
+                 ORDER BY CAST(cc.code AS INTEGER)",
+            )
+            .unwrap();
+        for row in stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, u32>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })
+            .unwrap()
+            .flatten()
+        {
+            let Some(horizontal_code) = parse_u32_code(&row.2) else {
+                continue;
+            };
+            let horizontal_kind = match row.3.as_str() {
+                "geodetic_crs" if geo_codes.contains(&horizontal_code) => HORIZONTAL_CRS_GEOGRAPHIC,
+                "projected_crs" if proj_codes.contains(&horizontal_code) => {
+                    HORIZONTAL_CRS_PROJECTED
+                }
+                _ => continue,
+            };
+            let Some(vertical_crs_code) = parse_u32_code(&row.4) else {
+                continue;
+            };
+            if !vertical_codes.contains(&vertical_crs_code) {
+                continue;
+            }
+            compound_crs.push(CompoundCrs {
+                code: row.0,
+                horizontal_kind,
+                horizontal_crs_code: horizontal_code,
+                vertical_kind: VERTICAL_COMPONENT_REGISTRY_CRS,
+                vertical_crs_code,
+                vertical_datum_code: 0,
+                vertical_unit_to_meter: 0.0,
+                name: row.1,
+                vertical_name: String::new(),
+            });
+        }
+    }
+
     let used_datum_codes: BTreeSet<u32> = geo_crs
         .iter()
         .map(|crs| crs.datum_code)
@@ -1200,26 +1595,14 @@ fn main() {
                 continue;
             }
 
-            let grid_key = (row.7.clone(), row.8.clone(), row.9.clone());
-            let grid_id = if let Some(id) = grid_resource_ids.get(&grid_key).copied() {
-                id
-            } else {
-                let id = grid_resources.len() as u32 + 1;
-                let mut resource_names = vec![row.8.clone()];
-                if !row.9.is_empty() {
-                    resource_names.push(row.9.clone());
-                }
-                grid_resources.push(GridRecord {
-                    id,
-                    name: row.8.clone(),
-                    format: grid_format_from_method(&row.7),
-                    interpolation: GRID_INTERPOLATION_BILINEAR,
-                    area_code: 0,
-                    resource_names,
-                });
-                grid_resource_ids.insert(grid_key, id);
-                id
-            };
+            let grid_id = intern_grid_resource(
+                &mut grid_resources,
+                &mut grid_resource_ids,
+                &row.7,
+                &row.8,
+                &row.9,
+                grid_format_from_method(&row.7),
+            );
 
             operations.push(OperationRecord {
                 table_name: "grid_transformation",
@@ -1337,26 +1720,14 @@ fn main() {
             let grid_horizontal_crs_code =
                 parse_u32_code(&row.12).unwrap_or(default_grid_horizontal_crs_code);
 
-            let grid_key = (row.9.clone(), row.10.clone(), row.11.clone());
-            let grid_id = if let Some(id) = grid_resource_ids.get(&grid_key).copied() {
-                id
-            } else {
-                let id = grid_resources.len() as u32 + 1;
-                let mut resource_names = vec![row.10.clone()];
-                if !row.11.is_empty() {
-                    resource_names.push(row.11.clone());
-                }
-                grid_resources.push(GridRecord {
-                    id,
-                    name: row.10.clone(),
-                    format,
-                    interpolation: GRID_INTERPOLATION_BILINEAR,
-                    area_code: 0,
-                    resource_names,
-                });
-                grid_resource_ids.insert(grid_key, id);
-                id
-            };
+            let grid_id = intern_grid_resource(
+                &mut grid_resources,
+                &mut grid_resource_ids,
+                &row.9,
+                &row.10,
+                &row.11,
+                format,
+            );
 
             vertical_operations.push(VerticalOperationRecord {
                 table_name: "grid_transformation",
@@ -1696,6 +2067,13 @@ fn main() {
         operation.area_codes.sort_unstable();
         operation.area_codes.dedup();
     }
+    add_generated_rdnap_aliases(
+        &conn,
+        &mut grid_resources,
+        &mut grid_resource_ids,
+        &mut operations,
+        &mut vertical_operations,
+    );
 
     let mut grid_area_by_id: BTreeMap<u32, u32> = BTreeMap::new();
     for operation in &operations {
@@ -1722,6 +2100,8 @@ fn main() {
     eprintln!("Datums: {}", used_datums.len());
     eprintln!("Geographic CRS: {}", geo_crs.len());
     eprintln!("Projected CRS: {}", proj_crs.len());
+    eprintln!("Vertical CRS: {}", vertical_crs.len());
+    eprintln!("Compound CRS: {}", compound_crs.len());
     eprintln!("Extents: {}", extent_list.len());
     eprintln!("Grid resources: {}", grid_resources.len());
     eprintln!("Operations: {}", operations.len());
@@ -1732,6 +2112,8 @@ fn main() {
         datums: used_datums.len(),
         geographic_crs: geo_crs.len(),
         projected_crs: proj_crs.len(),
+        vertical_crs: vertical_crs.len(),
+        compound_crs: compound_crs.len(),
         extents: extent_list.len(),
         grid_resources: grid_resources.len(),
         operations: operations.len(),
@@ -1746,6 +2128,8 @@ fn main() {
     buf.extend_from_slice(&(used_datums.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(geo_crs.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(proj_crs.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(vertical_crs.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(compound_crs.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(extent_list.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(grid_resources.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(operations.len() as u32).to_le_bytes());
@@ -1796,6 +2180,29 @@ fn main() {
         }
         buf.extend_from_slice(&rec);
         write_string_u16(&mut buf, &crs.name);
+    }
+
+    for crs in &vertical_crs {
+        let mut rec = [0u8; VERTICAL_CRS_RECORD_BASE_SIZE];
+        rec[0..4].copy_from_slice(&crs.code.to_le_bytes());
+        rec[4..8].copy_from_slice(&crs.datum_code.to_le_bytes());
+        rec[8..16].copy_from_slice(&canonical_f64(crs.linear_unit_to_meter).to_le_bytes());
+        buf.extend_from_slice(&rec);
+        write_string_u16(&mut buf, &crs.name);
+    }
+
+    for crs in &compound_crs {
+        let mut rec = [0u8; COMPOUND_CRS_RECORD_BASE_SIZE];
+        rec[0..4].copy_from_slice(&crs.code.to_le_bytes());
+        rec[4] = crs.horizontal_kind;
+        rec[5] = crs.vertical_kind;
+        rec[8..12].copy_from_slice(&crs.horizontal_crs_code.to_le_bytes());
+        rec[12..16].copy_from_slice(&crs.vertical_crs_code.to_le_bytes());
+        rec[16..20].copy_from_slice(&crs.vertical_datum_code.to_le_bytes());
+        rec[20..28].copy_from_slice(&canonical_f64(crs.vertical_unit_to_meter).to_le_bytes());
+        buf.extend_from_slice(&rec);
+        write_string_u16(&mut buf, &crs.name);
+        write_string_u16(&mut buf, &crs.vertical_name);
     }
 
     for extent in &extent_list {
