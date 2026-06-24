@@ -2,7 +2,16 @@
 
 ## Unreleased
 
+## 0.8.0 - 2026-06-24
+
 - breaking: bump the workspace crates to `0.8.0`; `SelectionOptions` now includes the public `area_bounds_densify_points` field for configurable AOI bounds sampling, so downstream struct-literal construction must set it or use `SelectionOptions::new()` / `Default`
+- add generated EPSG vertical CRS and compound CRS records, including generated registry metadata for RDNAPTRANS2018 compound CRS/grid operations instead of hand-coded RDNAP entries
+- add configurable AOI bounds densification through `SelectionOptions::with_area_bounds_densify_points`, with `MAX_BOUNDS_DENSIFY_POINTS` bounding CPU work for AOI and bounds sampling APIs
+- add `Transform::convert_rect` so `geo_types::Rect` callers can choose bounds sampling density; default `convert_geometry` rectangle conversion now densifies edges instead of using corners only
+- fix 3D horizontal transforms so Helmert/geocentric coordinate math uses the source height while horizontal-only transforms continue to preserve the caller's `z`
+- revalidate cached filesystem grid paths before reuse and open grid files without following symlinks on Unix to reject stale path and symlink swaps
+- bound GeoTIFF grid parsing with IFD, dimension, total-cell, and band-count limits before decoding untrusted grid data
+- add CodeQL analysis coverage
 
 ## 0.7.0 - 2026-06-12
 
