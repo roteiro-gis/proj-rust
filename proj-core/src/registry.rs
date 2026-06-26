@@ -116,15 +116,7 @@ pub fn operation_candidates_between_with_selection_options(
     Ok(candidates
         .ranked
         .into_iter()
-        .map(|candidate| {
-            let mut metadata = candidate
-                .operation
-                .metadata_for_direction(candidate.direction);
-            metadata.area_of_use = candidate
-                .matched_area_of_use
-                .or_else(|| candidate.operation.areas_of_use.first().cloned());
-            metadata
-        })
+        .map(|candidate| candidate.metadata(source, target))
         .collect())
 }
 

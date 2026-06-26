@@ -5,11 +5,12 @@ use crate::crs::CrsDef;
 use crate::error::{Error, Result};
 use crate::grid::{GridError, GridRuntime};
 use crate::operation::{
-    CoordinateOperation, CoordinateOperationId, CoordinateOperationMetadata, GridCoverageMiss,
+    CoordinateOperationId, CoordinateOperationMetadata, GridCoverageMiss,
     OperationSelectionDiagnostics, OperationStepDirection, SelectionOptions, TransformOutcome,
     VerticalTransformAction, VerticalTransformDiagnostics,
 };
 use crate::registry;
+use crate::selector::SelectedOperationKind;
 
 #[cfg(feature = "geo-types")]
 mod geo_adapters;
@@ -41,7 +42,7 @@ use pipeline::{PipelineSourceXyUnits, PipelineTargetXyUnits};
 pub struct Transform {
     source: CrsDef,
     target: CrsDef,
-    selected_operation_definition: CoordinateOperation,
+    selected_operation_kind: SelectedOperationKind,
     selected_direction: OperationStepDirection,
     selected_operation: CoordinateOperationMetadata,
     diagnostics: OperationSelectionDiagnostics,
@@ -188,7 +189,7 @@ impl Transform {
         Ok(Self {
             source: from.clone(),
             target: to.clone(),
-            selected_operation_definition: selected.operation,
+            selected_operation_kind: selected.operation,
             selected_direction: selected.direction,
             selected_operation: selected.metadata,
             diagnostics: selected.diagnostics,
@@ -325,15 +326,18 @@ impl Transform {
             &grid_runtime,
         )?;
         let selected_direction = self.selected_direction.inverse();
+        let selected_operation_kind = self.selected_operation_kind.clone().into_owned();
         let pipeline = compile_pipeline(
             &self.target,
             &self.source,
-            &self.selected_operation_definition,
+            &selected_operation_kind,
             selected_direction,
             &grid_runtime,
         )?;
         let selected_operation = selected_metadata(
-            &self.selected_operation_definition,
+            &selected_operation_kind,
+            &self.source,
+            &self.target,
             selected_direction,
             self.selected_operation.area_of_use.clone(),
         );
@@ -349,6 +353,8 @@ impl Transform {
             )?;
             let metadata = selected_metadata(
                 &fallback.operation,
+                &self.source,
+                &self.target,
                 direction,
                 fallback.metadata.area_of_use.clone(),
             );
@@ -374,7 +380,7 @@ impl Transform {
         Ok(Self {
             source: self.target.clone(),
             target: self.source.clone(),
-            selected_operation_definition: self.selected_operation_definition.clone(),
+            selected_operation_kind,
             selected_direction,
             selected_operation,
             diagnostics,

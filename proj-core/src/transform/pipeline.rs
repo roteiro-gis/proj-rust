@@ -11,6 +11,7 @@ use crate::operation::{
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected, Projection};
 use crate::registry;
+use crate::selector::SelectedOperationKind;
 use crate::{ellipsoid, geocentric};
 use smallvec::SmallVec;
 
@@ -26,7 +27,7 @@ pub(super) struct CompiledOperationPipeline {
 }
 
 pub(super) struct CompiledOperationFallback {
-    pub(super) operation: CoordinateOperation,
+    pub(super) operation: SelectedOperationKind,
     pub(super) direction: OperationStepDirection,
     pub(super) metadata: CoordinateOperationMetadata,
     pub(super) pipeline: CompiledOperationPipeline,
@@ -266,7 +267,7 @@ pub(super) fn validate_transform_crs_definition(crs: &CrsDef) -> Result<()> {
 pub(super) fn compile_pipeline(
     source: &CrsDef,
     target: &CrsDef,
-    operation: &CoordinateOperation,
+    operation: &SelectedOperationKind,
     direction: OperationStepDirection,
     grid_runtime: &GridRuntime,
 ) -> Result<CompiledOperationPipeline> {
@@ -278,16 +279,17 @@ pub(super) fn compile_pipeline(
         });
     }
 
-    if operation.id.is_none() && matches!(operation.method, OperationMethod::Identity) {
-        // Synthetic identity between semantically equivalent CRS.
-    } else {
-        compile_operation(
-            operation,
-            direction,
-            Some((source, target)),
-            grid_runtime,
-            &mut steps,
-        )?;
+    match operation {
+        SelectedOperationKind::Identity => {}
+        SelectedOperationKind::Registry(operation) => {
+            compile_operation(
+                operation.as_ref(),
+                direction,
+                Some((source, target)),
+                grid_runtime,
+                &mut steps,
+            )?;
+        }
     }
 
     if let Some(projected) = target.as_projected() {

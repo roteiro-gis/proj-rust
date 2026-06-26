@@ -10,6 +10,7 @@ use crate::operation::{
     SelectionPolicy, SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention,
     VerticalGridOperation, VerticalTransformAction,
 };
+use crate::selector::SelectedOperationKind;
 use smallvec::SmallVec;
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -371,6 +372,10 @@ fn geographic_to_geographic_same_datum_is_identity() {
     assert_eq!(lon, -74.006);
     assert_eq!(lat, 40.7128);
     assert_eq!(t.selected_operation().name, "Identity");
+    assert!(matches!(
+        t.selected_operation_kind,
+        SelectedOperationKind::Identity
+    ));
 }
 
 #[test]
@@ -1468,6 +1473,10 @@ fn identical_custom_projected_crs_is_identity() {
 
     let t = Transform::from_crs_defs(&from, &to).unwrap();
     assert_eq!(t.selected_operation().name, "Identity");
+    assert!(matches!(
+        t.selected_operation_kind,
+        SelectedOperationKind::Identity
+    ));
 }
 
 #[test]
@@ -1524,10 +1533,10 @@ fn approximate_helmert_fallback_requires_explicit_opt_in() {
         t.selection_diagnostics().selected_match_kind,
         OperationMatchKind::ApproximateFallback
     );
-    assert!(matches!(
-        t.selected_operation_definition.method,
-        OperationMethod::Helmert { .. }
-    ));
+    let Some(operation) = t.selected_operation_kind.as_operation() else {
+        panic!("approximate fallback should select a registry operation kind");
+    };
+    assert!(matches!(operation.method, OperationMethod::Helmert { .. }));
 }
 
 #[test]
