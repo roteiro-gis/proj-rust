@@ -2,7 +2,7 @@ use crate::coord::{Bounds, Coord};
 use crate::crs::CrsDef;
 use crate::error::{Error, Result};
 use crate::operation::{
-    AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata,
+    AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata, OperationAccuracy,
     OperationMatchKind, OperationMethod, OperationStepDirection, SelectionOptions, SelectionPolicy,
     SelectionReason, SkippedOperation, SkippedOperationReason,
 };
@@ -16,12 +16,104 @@ use std::cmp::Ordering;
 pub(crate) const APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL: &str =
     "approximate Helmert fallback is available but disabled by SelectionPolicy::BestAvailable; opt in with SelectionOptions::allow_approximate_helmert_fallback()";
 
+#[derive(Debug, Clone)]
+pub(crate) enum SelectedOperationKind {
+    Identity,
+    Registry(Box<Cow<'static, CoordinateOperation>>),
+}
+
+impl SelectedOperationKind {
+    pub(crate) fn registry_owned(operation: CoordinateOperation) -> Self {
+        Self::Registry(Box::new(Cow::Owned(operation)))
+    }
+
+    pub(crate) fn registry_borrowed(operation: &'static CoordinateOperation) -> Self {
+        Self::Registry(Box::new(Cow::Borrowed(operation)))
+    }
+
+    pub(crate) fn into_owned(self) -> Self {
+        match self {
+            Self::Identity => Self::Identity,
+            Self::Registry(operation) => {
+                Self::Registry(Box::new(Cow::Owned((*operation).into_owned())))
+            }
+        }
+    }
+
+    pub(crate) fn as_operation(&self) -> Option<&CoordinateOperation> {
+        match self {
+            Self::Identity => None,
+            Self::Registry(operation) => Some(operation.as_ref().as_ref()),
+        }
+    }
+
+    pub(crate) fn metadata_for_direction(
+        &self,
+        source: &CrsDef,
+        target: &CrsDef,
+        direction: OperationStepDirection,
+        matched_area_of_use: Option<AreaOfUse>,
+    ) -> CoordinateOperationMetadata {
+        match self {
+            Self::Identity => identity_metadata(source, target, direction),
+            Self::Registry(operation) => {
+                let mut metadata = operation.metadata_for_direction(direction);
+                metadata.area_of_use =
+                    matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
+                metadata
+            }
+        }
+    }
+
+    pub(crate) fn uses_grids(&self) -> bool {
+        self.as_operation()
+            .map(CoordinateOperation::uses_grids)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn deprecated(&self) -> bool {
+        self.as_operation()
+            .map(|operation| operation.deprecated)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn preferred(&self) -> bool {
+        self.as_operation()
+            .map(|operation| operation.preferred)
+            .unwrap_or(true)
+    }
+
+    pub(crate) fn approximate(&self) -> bool {
+        self.as_operation()
+            .map(|operation| operation.approximate)
+            .unwrap_or(false)
+    }
+
+    pub(crate) fn accuracy(&self) -> Option<OperationAccuracy> {
+        match self {
+            Self::Identity => Some(OperationAccuracy { meters: 0.0 }),
+            Self::Registry(operation) => operation.accuracy,
+        }
+    }
+}
+
 pub(crate) struct RankedOperationCandidate {
-    pub(crate) operation: Cow<'static, CoordinateOperation>,
+    pub(crate) operation: SelectedOperationKind,
     pub(crate) direction: OperationStepDirection,
     pub(crate) match_kind: OperationMatchKind,
     pub(crate) matched_area_of_use: Option<AreaOfUse>,
     pub(crate) reasons: SmallVec<[SelectionReason; 4]>,
+}
+
+impl RankedOperationCandidate {
+    pub(crate) fn metadata(&self, source: &CrsDef, target: &CrsDef) -> CoordinateOperationMetadata {
+        self.operation.metadata_for_direction(
+            source,
+            target,
+            self.direction,
+            self.matched_area_of_use.clone(),
+        )
+    }
 }
 
 pub(crate) struct OperationCandidateSet {
@@ -52,7 +144,7 @@ pub(crate) fn rank_operation_candidates(
         let reasons = explicit_selection_reasons(matched_area_of_use.is_some(), &operation);
         return Ok(OperationCandidateSet {
             ranked: vec![RankedOperationCandidate {
-                operation: Cow::Owned(operation),
+                operation: SelectedOperationKind::registry_owned(operation),
                 direction,
                 match_kind: OperationMatchKind::Explicit,
                 matched_area_of_use,
@@ -67,20 +159,7 @@ pub(crate) fn rank_operation_candidates(
 
     if requires_no_datum_operation(source, target) {
         candidates.push(RankedOperationCandidate {
-            operation: Cow::Owned(CoordinateOperation {
-                id: None,
-                name: "Identity".into(),
-                source_crs_epsg: source.base_geographic_crs_epsg(),
-                target_crs_epsg: target.base_geographic_crs_epsg(),
-                source_datum_epsg: None,
-                target_datum_epsg: None,
-                accuracy: Some(crate::operation::OperationAccuracy { meters: 0.0 }),
-                areas_of_use: SmallVec::new(),
-                deprecated: false,
-                preferred: true,
-                approximate: false,
-                method: OperationMethod::Identity,
-            }),
+            operation: SelectedOperationKind::Identity,
             direction: OperationStepDirection::Forward,
             match_kind: OperationMatchKind::ExactSourceTarget,
             matched_area_of_use: None,
@@ -139,7 +218,7 @@ pub(crate) fn rank_operation_candidates(
                 reasons.push(SelectionReason::PreferredOperation);
             }
             candidates.push(RankedOperationCandidate {
-                operation: Cow::Borrowed(operation),
+                operation: SelectedOperationKind::registry_borrowed(operation),
                 direction,
                 match_kind,
                 matched_area_of_use,
@@ -150,7 +229,7 @@ pub(crate) fn rank_operation_candidates(
 
     if let Some(operation) = synthetic_grid_datum_shift(source, target) {
         candidates.push(RankedOperationCandidate {
-            operation: Cow::Owned(operation),
+            operation: SelectedOperationKind::registry_owned(operation),
             direction: OperationStepDirection::Forward,
             match_kind: OperationMatchKind::DatumCompatible,
             matched_area_of_use: None,
@@ -162,7 +241,7 @@ pub(crate) fn rank_operation_candidates(
         SelectionPolicy::AllowApproximateHelmertFallback => {
             if let Some(operation) = synthetic_helmert_fallback(source, target) {
                 candidates.push(RankedOperationCandidate {
-                    operation: Cow::Owned(operation),
+                    operation: SelectedOperationKind::registry_owned(operation),
                     direction: OperationStepDirection::Forward,
                     match_kind: OperationMatchKind::ApproximateFallback,
                     matched_area_of_use: None,
@@ -339,6 +418,34 @@ fn selection_metadata(
     metadata
 }
 
+fn identity_metadata(
+    source: &CrsDef,
+    target: &CrsDef,
+    direction: OperationStepDirection,
+) -> CoordinateOperationMetadata {
+    let mut source_crs_epsg = source.base_geographic_crs_epsg();
+    let mut target_crs_epsg = target.base_geographic_crs_epsg();
+    if matches!(direction, OperationStepDirection::Reverse) {
+        std::mem::swap(&mut source_crs_epsg, &mut target_crs_epsg);
+    }
+
+    CoordinateOperationMetadata {
+        id: None,
+        name: "Identity".into(),
+        direction,
+        source_crs_epsg,
+        target_crs_epsg,
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: Some(OperationAccuracy { meters: 0.0 }),
+        area_of_use: None,
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        uses_grids: false,
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct ResolvedAreaOfInterest {
     pub(crate) point: Option<Coord>,
@@ -408,20 +515,24 @@ fn compare_candidates(
         .then_with(|| {
             let left_accuracy = left
                 .operation
-                .accuracy
+                .accuracy()
                 .map(|accuracy| accuracy.meters)
                 .unwrap_or(f64::MAX);
             let right_accuracy = right
                 .operation
-                .accuracy
+                .accuracy()
                 .map(|accuracy| accuracy.meters)
                 .unwrap_or(f64::MAX);
             left_accuracy
                 .partial_cmp(&right_accuracy)
                 .unwrap_or(Ordering::Equal)
         })
-        .then_with(|| left.operation.deprecated.cmp(&right.operation.deprecated))
-        .then_with(|| right.operation.preferred.cmp(&left.operation.preferred))
+        .then_with(|| {
+            left.operation
+                .deprecated()
+                .cmp(&right.operation.deprecated())
+        })
+        .then_with(|| right.operation.preferred().cmp(&left.operation.preferred()))
 }
 
 fn match_kind_rank(kind: OperationMatchKind) -> u8 {

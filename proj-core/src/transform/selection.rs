@@ -3,16 +3,15 @@ use crate::crs::CrsDef;
 use crate::error::{Error, Result};
 use crate::grid::{GridError, GridRuntime};
 use crate::operation::{
-    CoordinateOperation, CoordinateOperationMetadata, OperationSelectionDiagnostics,
-    OperationStepDirection, SelectionOptions, SelectionPolicy, SkippedOperation,
-    SkippedOperationReason,
+    CoordinateOperationMetadata, OperationSelectionDiagnostics, OperationStepDirection,
+    SelectionOptions, SelectionPolicy, SkippedOperation, SkippedOperationReason,
 };
 use crate::registry;
 use crate::selector;
 use smallvec::SmallVec;
 
 pub(super) struct SelectedOperationPipelines {
-    pub(super) operation: CoordinateOperation,
+    pub(super) operation: selector::SelectedOperationKind,
     pub(super) direction: OperationStepDirection,
     pub(super) metadata: CoordinateOperationMetadata,
     pub(super) diagnostics: OperationSelectionDiagnostics,
@@ -50,8 +49,10 @@ pub(super) fn compile_selected_pipelines(
         if let Some((_, selected_candidate, ..)) = &selected {
             if !selected_candidate.operation.uses_grids() {
                 skipped_operations.push(skipped_for_unselected_candidate(
+                    from,
+                    to,
                     candidate,
-                    !selected_candidate.operation.deprecated,
+                    !selected_candidate.operation.deprecated(),
                 ));
                 continue;
             }
@@ -60,20 +61,18 @@ pub(super) fn compile_selected_pipelines(
         match compile_pipeline(
             from,
             to,
-            candidate.operation.as_ref(),
+            &candidate.operation,
             candidate.direction,
             grid_runtime,
         ) {
             Ok(pipeline) => {
-                let metadata = selected_metadata(
-                    candidate.operation.as_ref(),
-                    candidate.direction,
-                    candidate.matched_area_of_use.clone(),
-                );
+                let metadata = candidate.metadata(from, to);
                 if let Some((_, selected_candidate, ..)) = &selected {
                     skipped_operations.push(skipped_for_unselected_candidate(
+                        from,
+                        to,
                         candidate,
-                        !selected_candidate.operation.deprecated,
+                        !selected_candidate.operation.deprecated(),
                     ));
                     fallback_pipelines.push(CompiledOperationFallback {
                         operation: candidate.operation.clone().into_owned(),
@@ -90,11 +89,7 @@ pub(super) fn compile_selected_pipelines(
                     missing_required_grid = Some(error.to_string());
                 }
                 skipped_operations.push(SkippedOperation {
-                    metadata: selected_metadata(
-                        candidate.operation.as_ref(),
-                        candidate.direction,
-                        candidate.matched_area_of_use.clone(),
-                    ),
+                    metadata: candidate.metadata(from, to),
                     reason: match error {
                         crate::grid::GridError::UnsupportedFormat(_) => {
                             SkippedOperationReason::UnsupportedGridFormat
@@ -106,11 +101,7 @@ pub(super) fn compile_selected_pipelines(
             }
             Err(error) => {
                 skipped_operations.push(SkippedOperation {
-                    metadata: selected_metadata(
-                        candidate.operation.as_ref(),
-                        candidate.direction,
-                        candidate.matched_area_of_use.clone(),
-                    ),
+                    metadata: candidate.metadata(from, to),
                     reason: SkippedOperationReason::LessPreferred,
                     detail: error.to_string(),
                 });
@@ -129,7 +120,7 @@ pub(super) fn compile_selected_pipelines(
                 .map(|fallback| fallback.metadata.clone())
                 .collect(),
             skipped_operations,
-            approximate: candidate.operation.approximate,
+            approximate: candidate.operation.approximate(),
             missing_required_grid,
         };
         return Ok(SelectedOperationPipelines {
@@ -190,13 +181,13 @@ fn no_ranked_operation_error(
 }
 
 pub(super) fn selected_metadata(
-    operation: &CoordinateOperation,
+    operation: &selector::SelectedOperationKind,
+    source: &CrsDef,
+    target: &CrsDef,
     direction: OperationStepDirection,
     matched_area_of_use: Option<crate::operation::AreaOfUse>,
 ) -> CoordinateOperationMetadata {
-    let mut metadata = operation.metadata_for_direction(direction);
-    metadata.area_of_use = matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
-    metadata
+    operation.metadata_for_direction(source, target, direction, matched_area_of_use)
 }
 
 pub(super) fn is_grid_coverage_miss(error: &Error) -> bool {
@@ -227,7 +218,7 @@ fn selected_accuracy_preferred(
     selected: &selector::RankedOperationCandidate,
     alternatives: &[selector::RankedOperationCandidate],
 ) -> bool {
-    let Some(selected_accuracy) = selected.operation.accuracy.map(|value| value.meters) else {
+    let Some(selected_accuracy) = selected.operation.accuracy().map(|value| value.meters) else {
         return false;
     };
 
@@ -235,7 +226,7 @@ fn selected_accuracy_preferred(
         same_pre_accuracy_priority(selected, alternative)
             && alternative
                 .operation
-                .accuracy
+                .accuracy()
                 .map(|value| selected_accuracy < value.meters)
                 .unwrap_or(false)
     })
@@ -260,10 +251,12 @@ fn match_kind_priority(kind: crate::operation::OperationMatchKind) -> u8 {
 }
 
 fn skipped_for_unselected_candidate(
+    source: &CrsDef,
+    target: &CrsDef,
     candidate: &selector::RankedOperationCandidate,
     prefer_non_deprecated: bool,
 ) -> SkippedOperation {
-    let reason = if prefer_non_deprecated && candidate.operation.deprecated {
+    let reason = if prefer_non_deprecated && candidate.operation.deprecated() {
         SkippedOperationReason::Deprecated
     } else {
         SkippedOperationReason::LessPreferred
@@ -276,11 +269,7 @@ fn skipped_for_unselected_candidate(
         _ => "not selected because a higher-ranked operation compiled successfully".into(),
     };
     SkippedOperation {
-        metadata: selected_metadata(
-            candidate.operation.as_ref(),
-            candidate.direction,
-            candidate.matched_area_of_use.clone(),
-        ),
+        metadata: candidate.metadata(source, target),
         reason,
         detail,
     }
