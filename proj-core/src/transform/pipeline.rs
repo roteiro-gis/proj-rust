@@ -283,7 +283,7 @@ pub(super) fn compile_pipeline(
         SelectedOperationKind::Identity => {}
         SelectedOperationKind::Registry(operation) => {
             compile_operation(
-                operation.as_ref(),
+                operation.as_ref().as_ref(),
                 direction,
                 Some((source, target)),
                 grid_runtime,

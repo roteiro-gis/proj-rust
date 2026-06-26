@@ -19,29 +19,31 @@ pub(crate) const APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL: &str =
 #[derive(Debug, Clone)]
 pub(crate) enum SelectedOperationKind {
     Identity,
-    Registry(Cow<'static, CoordinateOperation>),
+    Registry(Box<Cow<'static, CoordinateOperation>>),
 }
 
 impl SelectedOperationKind {
     pub(crate) fn registry_owned(operation: CoordinateOperation) -> Self {
-        Self::Registry(Cow::Owned(operation))
+        Self::Registry(Box::new(Cow::Owned(operation)))
     }
 
     pub(crate) fn registry_borrowed(operation: &'static CoordinateOperation) -> Self {
-        Self::Registry(Cow::Borrowed(operation))
+        Self::Registry(Box::new(Cow::Borrowed(operation)))
     }
 
     pub(crate) fn into_owned(self) -> Self {
         match self {
             Self::Identity => Self::Identity,
-            Self::Registry(operation) => Self::Registry(Cow::Owned(operation.into_owned())),
+            Self::Registry(operation) => {
+                Self::Registry(Box::new(Cow::Owned((*operation).into_owned())))
+            }
         }
     }
 
     pub(crate) fn as_operation(&self) -> Option<&CoordinateOperation> {
         match self {
             Self::Identity => None,
-            Self::Registry(operation) => Some(operation.as_ref()),
+            Self::Registry(operation) => Some(operation.as_ref().as_ref()),
         }
     }
 
