@@ -27,12 +27,7 @@ pub(super) fn compile_selected_pipelines(
 ) -> Result<SelectedOperationPipelines> {
     let candidate_set = selector::rank_operation_candidates(from, to, options)?;
     if candidate_set.ranked.is_empty() {
-        return Err(no_ranked_operation_error(
-            from,
-            to,
-            options,
-            &candidate_set.skipped,
-        ));
+        return Err(no_ranked_operation_error(from, to, options));
     }
 
     let mut skipped_operations = candidate_set.skipped;
@@ -146,16 +141,7 @@ pub(super) fn compile_selected_pipelines(
     )))
 }
 
-fn no_ranked_operation_error(
-    from: &CrsDef,
-    to: &CrsDef,
-    options: &SelectionOptions,
-    skipped_operations: &[SkippedOperation],
-) -> Error {
-    let approximate_fallback_disabled = skipped_operations
-        .iter()
-        .any(|skipped| skipped.detail == selector::APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL);
-
+fn no_ranked_operation_error(from: &CrsDef, to: &CrsDef, options: &SelectionOptions) -> Error {
     match options.policy {
         SelectionPolicy::Operation(id) => match registry::lookup_operation(id) {
             Some(_) => Error::OperationSelection(format!(
@@ -166,14 +152,8 @@ fn no_ranked_operation_error(
             )),
             None => Error::UnknownOperation(format!("unknown operation id {}", id.0)),
         },
-        _ if approximate_fallback_disabled => Error::OperationSelection(format!(
-            "no non-approximate compatible operation found for source EPSG:{} target EPSG:{}; {}",
-            from.epsg(),
-            to.epsg(),
-            selector::APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL
-        )),
         _ => Error::OperationSelection(format!(
-            "no compatible operation found for source EPSG:{} target EPSG:{}",
+            "no compatible registry operation found for source EPSG:{} target EPSG:{}",
             from.epsg(),
             to.epsg()
         )),
@@ -246,7 +226,6 @@ fn match_kind_priority(kind: crate::operation::OperationMatchKind) -> u8 {
         crate::operation::OperationMatchKind::ExactSourceTarget => 3,
         crate::operation::OperationMatchKind::DerivedGeographic => 2,
         crate::operation::OperationMatchKind::DatumCompatible => 1,
-        crate::operation::OperationMatchKind::ApproximateFallback => 0,
     }
 }
 

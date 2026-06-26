@@ -308,9 +308,6 @@ fn apply_compatibility_option(
         "require_exact_area_match" | "exact_area" | "exact_area_match" => {
             Ok(selection_options.require_exact_area_match())
         }
-        "allow_approximate_helmert_fallback"
-        | "allow_approximate_helmert"
-        | "allow_approximate" => Ok(selection_options.allow_approximate_helmert_fallback()),
         _ => match normalized
             .split_once('=')
             .or_else(|| normalized.split_once(':'))
@@ -744,21 +741,23 @@ mod tests {
     }
 
     #[test]
-    fn proj_facade_create_from_definitions_allows_approximate_fallback_option() {
+    fn proj_facade_create_from_definitions_rejects_approximate_fallback_option() {
         let from = Proj::new("+proj=longlat +datum=NAD27").unwrap();
         let to = Proj::new("+proj=longlat +datum=OSGB36").unwrap();
 
         let err = expect_proj_error(from.create_crs_to_crs_from_pj(&to, None, None));
         assert!(err
             .to_string()
-            .contains("allow_approximate_helmert_fallback"));
+            .contains("no compatible registry operation found"));
 
-        let proj = from
-            .create_crs_to_crs_from_pj(&to, None, Some("allow_approximate_helmert_fallback"))
-            .unwrap();
-        let (lon, lat) = proj.convert((-90.0, 45.0)).unwrap();
-        assert!(lon.is_finite());
-        assert!(lat.is_finite());
+        let err = expect_proj_error(from.create_crs_to_crs_from_pj(
+            &to,
+            None,
+            Some("allow_approximate_helmert_fallback"),
+        ));
+        assert!(err
+            .to_string()
+            .contains("unsupported Proj compatibility option"));
     }
 
     #[test]

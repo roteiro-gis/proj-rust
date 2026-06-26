@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- breaking: remove opt-in synthetic Helmert datum-shift fallback selection; `SelectionPolicy::AllowApproximateHelmertFallback`, `SelectionOptions::allow_approximate_helmert_fallback`, and `proj-wkt` compatibility aliases for that option are no longer supported, and CRS pairs without a registry, identity, or supported grid/identity custom datum operation now fail during transform construction
+
 ## 0.8.0 - 2026-06-24
 
 - breaking: bump the workspace crates to `0.8.0`; `SelectionOptions` now includes the public `area_bounds_densify_points` field for configurable AOI bounds sampling, so downstream struct-literal construction must set it or use `SelectionOptions::new()` / `Default`

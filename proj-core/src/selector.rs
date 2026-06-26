@@ -13,9 +13,6 @@ use smallvec::SmallVec;
 use std::borrow::Cow;
 use std::cmp::Ordering;
 
-pub(crate) const APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL: &str =
-    "approximate Helmert fallback is available but disabled by SelectionPolicy::BestAvailable; opt in with SelectionOptions::allow_approximate_helmert_fallback()";
-
 #[derive(Debug, Clone)]
 pub(crate) enum SelectedOperationKind {
     Identity,
@@ -237,32 +234,6 @@ pub(crate) fn rank_operation_candidates(
         });
     }
 
-    match options.policy {
-        SelectionPolicy::AllowApproximateHelmertFallback => {
-            if let Some(operation) = synthetic_helmert_fallback(source, target) {
-                candidates.push(RankedOperationCandidate {
-                    operation: SelectedOperationKind::registry_owned(operation),
-                    direction: OperationStepDirection::Forward,
-                    match_kind: OperationMatchKind::ApproximateFallback,
-                    matched_area_of_use: None,
-                    reasons: SmallVec::from_slice(&[SelectionReason::ApproximateFallback]),
-                });
-            }
-        }
-        SelectionPolicy::BestAvailable => {
-            if let Some(operation) = synthetic_helmert_fallback(source, target) {
-                skipped.push(SkippedOperation {
-                    metadata: selection_metadata(&operation, OperationStepDirection::Forward, None),
-                    reason: SkippedOperationReason::PolicyFiltered,
-                    detail: APPROXIMATE_HELMERT_FALLBACK_DISABLED_DETAIL.into(),
-                });
-            }
-        }
-        SelectionPolicy::RequireGrids
-        | SelectionPolicy::RequireExactAreaMatch
-        | SelectionPolicy::Operation(_) => {}
-    }
-
     candidates.sort_by(compare_candidates);
     Ok(OperationCandidateSet {
         ranked: candidates,
@@ -403,7 +374,6 @@ fn policy_skip_reason(
                 None
             }
         }
-        SelectionPolicy::AllowApproximateHelmertFallback => None,
         SelectionPolicy::Operation(_) => None,
     }
 }
@@ -541,7 +511,6 @@ fn match_kind_rank(kind: OperationMatchKind) -> u8 {
         OperationMatchKind::ExactSourceTarget => 3,
         OperationMatchKind::DerivedGeographic => 2,
         OperationMatchKind::DatumCompatible => 1,
-        OperationMatchKind::ApproximateFallback => 0,
     }
 }
 
@@ -772,27 +741,6 @@ fn validate_geographic_area_point(point: Coord) -> Result<()> {
     validate_lon_lat(point.x.to_radians(), point.y.to_radians())
 }
 
-fn synthetic_helmert_fallback(source: &CrsDef, target: &CrsDef) -> Option<CoordinateOperation> {
-    if requires_no_datum_operation(source, target) {
-        return None;
-    }
-    let params = source.datum().approximate_helmert_to(target.datum())?;
-    Some(CoordinateOperation {
-        id: None,
-        name: format!("Approximate {} to {}", source.epsg(), target.epsg()),
-        source_crs_epsg: source.base_geographic_crs_epsg(),
-        target_crs_epsg: target.base_geographic_crs_epsg(),
-        source_datum_epsg: None,
-        target_datum_epsg: None,
-        accuracy: None,
-        areas_of_use: SmallVec::new(),
-        deprecated: false,
-        preferred: false,
-        approximate: true,
-        method: OperationMethod::Helmert { params },
-    })
-}
-
 fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<CoordinateOperation> {
     if requires_no_datum_operation(source, target) {
         return None;
@@ -800,7 +748,9 @@ fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<Coordi
     if !source.datum().uses_grid_shift() && !target.datum().uses_grid_shift() {
         return None;
     }
-    if !source.datum().has_known_wgs84_transform() || !target.datum().has_known_wgs84_transform() {
+    if !supports_synthetic_grid_datum_leg(source.datum().to_wgs84())
+        || !supports_synthetic_grid_datum_leg(target.datum().to_wgs84())
+    {
         return None;
     }
 
@@ -825,6 +775,13 @@ fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<Coordi
             target_to_wgs84: target.datum().to_wgs84().clone(),
         },
     })
+}
+
+fn supports_synthetic_grid_datum_leg(transform: &crate::datum::DatumToWgs84) -> bool {
+    matches!(
+        transform,
+        crate::datum::DatumToWgs84::Identity | crate::datum::DatumToWgs84::GridShift(_)
+    )
 }
 
 #[cfg(test)]

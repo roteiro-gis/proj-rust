@@ -6,9 +6,9 @@ use crate::crs::{
 use crate::datum::{self, DatumToWgs84};
 use crate::grid::{FilesystemGridProvider, GridDefinition, GridError, GridFormat};
 use crate::operation::{
-    AreaOfInterest, GridId, GridInterpolation, OperationMatchKind, OperationMethod,
-    SelectionPolicy, SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention,
-    VerticalGridOperation, VerticalTransformAction,
+    AreaOfInterest, GridId, GridInterpolation, OperationMatchKind, SelectionPolicy,
+    SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention, VerticalGridOperation,
+    VerticalTransformAction,
 };
 use crate::selector::SelectedOperationKind;
 use smallvec::SmallVec;
@@ -207,7 +207,7 @@ fn helmert_constructor_rejects_non_finite_params() {
 }
 
 #[test]
-fn pipeline_rejects_non_finite_step_output() {
+fn custom_helmert_datum_does_not_synthesize_operation() {
     let datum = datum::Datum::new(
         datum::WGS84.ellipsoid(),
         DatumToWgs84::Helmert(
@@ -217,17 +217,53 @@ fn pipeline_rejects_non_finite_step_output() {
     .unwrap();
     let source = CrsDef::Geographic(GeographicCrsDef::new(0, datum, "Overflowing Helmert datum"));
     let target = registry::lookup_epsg(4326).unwrap();
-    let transform = Transform::from_crs_defs_with_selection_options(
-        &source,
-        &target,
-        SelectionOptions::new().allow_approximate_helmert_fallback(),
+
+    let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
+
+    assert!(matches!(err, Error::OperationSelection(_)), "got {err}");
+    assert!(
+        err.to_string()
+            .contains("no compatible registry operation found"),
+        "{err}"
+    );
+}
+
+#[test]
+fn custom_grid_datum_does_not_synthesize_helmert_leg() {
+    let grid = datum::DatumGridShift::from_vec(vec![datum::DatumGridShiftEntry::Grid {
+        definition: GridDefinition {
+            id: GridId(900_010),
+            name: "test horizontal grid".into(),
+            format: GridFormat::Ntv2,
+            interpolation: GridInterpolation::Bilinear,
+            area_of_use: None,
+            resource_names: SmallVec::from_vec(vec!["missing.gsb".into()]),
+        },
+        optional: false,
+    }]);
+    let grid_datum = datum::Datum::new(
+        datum::WGS84.ellipsoid(),
+        DatumToWgs84::GridShift(Box::new(grid)),
     )
     .unwrap();
+    let helmert_datum = datum::Datum::new(
+        datum::WGS84.ellipsoid(),
+        DatumToWgs84::Helmert(
+            datum::HelmertParams::new(1.0, 2.0, 3.0, 0.0, 0.0, 0.0, 0.0).unwrap(),
+        ),
+    )
+    .unwrap();
+    let source = CrsDef::Geographic(GeographicCrsDef::new(0, grid_datum, "Grid datum"));
+    let target = CrsDef::Geographic(GeographicCrsDef::new(0, helmert_datum, "Helmert datum"));
 
-    let err = transform.convert((0.0, 0.0)).unwrap_err();
+    let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
 
-    assert!(matches!(err, Error::OutOfRange(_)), "got {err}");
-    assert!(err.to_string().contains("pipeline step output"), "{err}");
+    assert!(matches!(err, Error::OperationSelection(_)), "got {err}");
+    assert!(
+        err.to_string()
+            .contains("no compatible registry operation found"),
+        "{err}"
+    );
 }
 
 #[test]
@@ -613,7 +649,7 @@ fn selection_diagnostics_capture_area_mismatch_candidates() {
 }
 
 #[test]
-fn grid_coverage_miss_does_not_use_approximate_fallback_by_default() {
+fn grid_coverage_miss_has_no_approximate_fallback_candidate() {
     let t = Transform::with_selection_options(
         "EPSG:4267",
         "EPSG:4269",
@@ -637,93 +673,8 @@ fn grid_coverage_miss_does_not_use_approximate_fallback_by_default() {
         .selection_diagnostics()
         .skipped_operations
         .iter()
-        .any(|skipped| skipped.metadata.approximate
-            && matches!(skipped.reason, SkippedOperationReason::PolicyFiltered)
-            && skipped
-                .detail
-                .contains("allow_approximate_helmert_fallback")));
-}
-
-#[test]
-fn grid_coverage_miss_falls_back_when_approximate_fallback_allowed() {
-    let t = Transform::with_selection_options(
-        "EPSG:4267",
-        "EPSG:4269",
-        SelectionOptions {
-            area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
-                -80.5041667,
-                44.5458333,
-            ))),
-            policy: SelectionPolicy::AllowApproximateHelmertFallback,
-            ..SelectionOptions::default()
-        },
-    )
-    .unwrap();
-
-    assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1313)));
-    assert!(!t.selection_diagnostics().fallback_operations.is_empty());
-
-    let outcome = t.convert_with_diagnostics((0.0, 0.0)).unwrap();
-    let plain = t.convert((0.0, 0.0)).unwrap();
-
-    assert_eq!(plain, outcome.coord);
-    assert_ne!(outcome.operation.id, Some(CoordinateOperationId(1313)));
-    assert!(outcome.operation.approximate);
-    assert!(outcome
-        .grid_coverage_misses
-        .iter()
-        .any(|miss| miss.operation.id == Some(CoordinateOperationId(1313))));
-}
-
-#[test]
-fn inverse_grid_coverage_miss_preserves_fallback_operations() {
-    let fwd = Transform::with_selection_options(
-        "EPSG:4267",
-        "EPSG:4269",
-        SelectionOptions {
-            area_of_interest: Some(AreaOfInterest::geographic_point(Coord::new(
-                -80.5041667,
-                44.5458333,
-            ))),
-            policy: SelectionPolicy::AllowApproximateHelmertFallback,
-            ..SelectionOptions::default()
-        },
-    )
-    .unwrap();
-    assert_eq!(
-        fwd.selected_operation().id,
-        Some(CoordinateOperationId(1313))
-    );
-    assert!(!fwd.selection_diagnostics().fallback_operations.is_empty());
-
-    let inv = fwd.inverse().unwrap();
-    assert_eq!(
-        inv.selected_operation().id,
-        Some(CoordinateOperationId(1313))
-    );
-    assert_eq!(
-        inv.selected_operation().direction,
-        OperationStepDirection::Reverse
-    );
-    assert!(!inv.selection_diagnostics().fallback_operations.is_empty());
-
-    let outcome = inv.convert_with_diagnostics((0.0, 0.0)).unwrap();
-    let plain = inv.convert((0.0, 0.0)).unwrap();
-
-    assert_eq!(plain, outcome.coord);
-    assert_ne!(outcome.operation.id, Some(CoordinateOperationId(1313)));
-    assert_eq!(outcome.operation.source_crs_epsg, Some(4269));
-    assert_eq!(outcome.operation.target_crs_epsg, Some(4267));
-    assert!(inv
-        .selection_diagnostics()
-        .fallback_operations
-        .iter()
-        .any(|operation| operation.id == outcome.operation.id
-            && operation.direction == outcome.operation.direction));
-    assert!(outcome.grid_coverage_misses.iter().any(|miss| {
-        miss.operation.id == Some(CoordinateOperationId(1313))
-            && miss.operation.direction == OperationStepDirection::Reverse
-    }));
+        .all(|skipped| !skipped.metadata.approximate));
+    assert!(t.selection_diagnostics().fallback_operations.is_empty());
 }
 
 #[test]
@@ -1502,45 +1453,25 @@ fn unknown_custom_datums_do_not_collapse_to_identity() {
         Err(err) => err,
     };
     assert!(
-        err.to_string().contains("no compatible operation found")
-            || err
-                .to_string()
-                .contains("legacy Helmert fallback unavailable")
+        err.to_string()
+            .contains("no compatible registry operation found"),
+        "{err}"
     );
 }
 
 #[test]
-fn approximate_helmert_fallback_requires_explicit_opt_in() {
+fn custom_helmert_datum_pair_without_registry_operation_fails() {
     let from = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD27, "Custom NAD27"));
     let to = CrsDef::Geographic(GeographicCrsDef::new(0, datum::OSGB36, "Custom OSGB36"));
 
     let err = expect_transform_error(Transform::from_crs_defs(&from, &to));
     let message = err.to_string();
-    assert!(message.contains("no non-approximate compatible operation found"));
-    assert!(message.contains("approximate Helmert fallback is available but disabled"));
-    assert!(message.contains("SelectionOptions::allow_approximate_helmert_fallback()"));
-
-    let t = Transform::from_crs_defs_with_selection_options(
-        &from,
-        &to,
-        SelectionOptions::new().allow_approximate_helmert_fallback(),
-    )
-    .unwrap();
-
-    assert!(t.selected_operation().approximate);
-    assert!(t.selection_diagnostics().approximate);
-    assert_eq!(
-        t.selection_diagnostics().selected_match_kind,
-        OperationMatchKind::ApproximateFallback
-    );
-    let Some(operation) = t.selected_operation_kind.as_operation() else {
-        panic!("approximate fallback should select a registry operation kind");
-    };
-    assert!(matches!(operation.method, OperationMethod::Helmert { .. }));
+    assert!(message.contains("no compatible registry operation found"));
+    assert!(!message.contains("allow_approximate_helmert_fallback"));
 }
 
 #[test]
-fn selection_diagnostics_report_disabled_approximate_fallback() {
+fn selection_diagnostics_do_not_report_disabled_approximate_fallback() {
     let t = Transform::new("EPSG:4267", "EPSG:4326").unwrap();
 
     assert!(!t.selection_diagnostics().approximate);
@@ -1548,13 +1479,7 @@ fn selection_diagnostics_report_disabled_approximate_fallback() {
         .selection_diagnostics()
         .skipped_operations
         .iter()
-        .any(|skipped| {
-            matches!(skipped.reason, SkippedOperationReason::PolicyFiltered)
-                && skipped.metadata.approximate
-                && skipped
-                    .detail
-                    .contains("allow_approximate_helmert_fallback")
-        }));
+        .all(|skipped| !skipped.metadata.approximate));
 }
 
 #[test]
