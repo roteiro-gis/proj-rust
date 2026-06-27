@@ -290,6 +290,15 @@ pub(super) fn compile_pipeline(
                 &mut steps,
             )?;
         }
+        SelectedOperationKind::Custom(operation) => {
+            compile_operation(
+                operation,
+                direction,
+                Some((source, target)),
+                grid_runtime,
+                &mut steps,
+            )?;
+        }
     }
 
     if let Some(projected) = target.as_projected() {

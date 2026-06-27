@@ -75,7 +75,7 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 | Mercator | EPSG:3395 |
 | Equidistant Cylindrical | EPSG:32662 |
 
-`Transform::new()` and `Transform::from_crs_defs()` select the best supported operation for a CRS pair. Use `Transform::with_selection_options()` or `Transform::from_crs_defs_with_selection_options()` to set an area of interest, require grid-backed operations, require exact area matches, provide a `GridProvider`, or select an explicit registry operation.
+`Transform::new()` and `Transform::from_crs_defs()` select the best supported operation for a CRS pair. Use `Transform::with_selection_options()` or `Transform::from_crs_defs_with_selection_options()` to set an area of interest, require grid-backed operations, require exact area matches, provide a `GridProvider`, select an explicit registry operation, or provide explicit custom horizontal `CoordinateOperation` candidates.
 
 Operation selection does not synthesize last-resort Helmert datum-shift fallbacks from datum metadata. CRS pairs without a registry, identity, or supported grid/identity custom datum operation fail during transform construction.
 
