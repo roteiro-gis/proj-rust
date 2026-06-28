@@ -222,7 +222,8 @@ fn same_pre_accuracy_priority(
 
 fn match_kind_priority(kind: crate::operation::OperationMatchKind) -> u8 {
     match kind {
-        crate::operation::OperationMatchKind::Explicit => 4,
+        crate::operation::OperationMatchKind::Explicit => 5,
+        crate::operation::OperationMatchKind::Custom => 4,
         crate::operation::OperationMatchKind::ExactSourceTarget => 3,
         crate::operation::OperationMatchKind::DerivedGeographic => 2,
         crate::operation::OperationMatchKind::DatumCompatible => 1,

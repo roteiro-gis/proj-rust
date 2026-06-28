@@ -10,7 +10,8 @@
 //! [`Transform::with_selection_options`] and inspect
 //! [`Transform::selected_operation`] /
 //! [`Transform::selection_diagnostics`].
-//! Operation selection uses registry operations, exact identity/no-datum-shift
+//! Operation selection uses registry operations, explicit custom horizontal
+//! operations supplied in [`SelectionOptions`], exact identity/no-datum-shift
 //! paths, and supported grid/identity custom datum shifts; it does not
 //! synthesize last-resort Helmert datum-shift fallbacks from datum metadata.
 //! The [`registry`], [`operation`], and [`grid`] modules expose the embedded

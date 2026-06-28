@@ -6,9 +6,9 @@ use crate::crs::{
 use crate::datum::{self, DatumToWgs84};
 use crate::grid::{FilesystemGridProvider, GridDefinition, GridError, GridFormat};
 use crate::operation::{
-    AreaOfInterest, GridId, GridInterpolation, OperationMatchKind, SelectionPolicy,
-    SelectionReason, SkippedOperationReason, VerticalGridOffsetConvention, VerticalGridOperation,
-    VerticalTransformAction,
+    AreaOfInterest, CoordinateOperation, GridId, GridInterpolation, OperationMatchKind,
+    OperationMethod, SelectionPolicy, SelectionReason, SkippedOperationReason,
+    VerticalGridOffsetConvention, VerticalGridOperation, VerticalTransformAction,
 };
 use crate::selector::SelectedOperationKind;
 use smallvec::SmallVec;
@@ -24,6 +24,25 @@ fn expect_transform_error(result: Result<Transform>) -> Error {
     match result {
         Ok(_) => panic!("expected transform construction to fail"),
         Err(err) => err,
+    }
+}
+
+fn custom_nad27_to_wgs84_operation(name: &str) -> CoordinateOperation {
+    CoordinateOperation {
+        id: None,
+        name: name.into(),
+        source_crs_epsg: None,
+        target_crs_epsg: Some(4326),
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: Some(crate::operation::OperationAccuracy { meters: 5.0 }),
+        areas_of_use: SmallVec::new(),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        method: OperationMethod::Helmert {
+            params: *datum::NAD27.helmert_to_wgs84().unwrap(),
+        },
     }
 }
 
@@ -427,6 +446,67 @@ fn cross_datum_nad27_to_wgs84() {
     assert!((lon - (-90.0)).abs() < 0.01, "lon = {lon}");
     assert!((lat - 45.0).abs() < 0.01, "lat = {lat}");
     assert!(!t.selected_operation().approximate);
+}
+
+#[test]
+fn custom_coordinate_operation_is_selected_and_compiled() {
+    let source = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD27, "Custom NAD27"));
+    let target = registry::lookup_epsg(4326).unwrap();
+    let operation = custom_nad27_to_wgs84_operation("Custom NAD27 to WGS84");
+
+    let t = Transform::from_crs_defs_with_selection_options(
+        &source,
+        &target,
+        SelectionOptions::new().with_coordinate_operation(operation),
+    )
+    .unwrap();
+
+    assert_eq!(t.selected_operation().name, "Custom NAD27 to WGS84");
+    assert_eq!(t.selected_operation().id, None);
+    assert_eq!(
+        t.selection_diagnostics().selected_match_kind,
+        OperationMatchKind::Custom
+    );
+    assert!(t
+        .selection_diagnostics()
+        .selected_reasons
+        .contains(&SelectionReason::CustomOperation));
+
+    let (lon, lat) = t.convert((-90.0, 45.0)).unwrap();
+    assert!((lon - (-90.0)).abs() < 0.01, "lon = {lon}");
+    assert!((lat - 45.0).abs() < 0.01, "lat = {lat}");
+
+    let inv = t.inverse().unwrap();
+    assert_eq!(
+        inv.selected_operation().direction,
+        OperationStepDirection::Reverse
+    );
+    let (back_lon, back_lat) = inv.convert((lon, lat)).unwrap();
+    assert!((back_lon - (-90.0)).abs() < 1e-6, "lon = {back_lon}");
+    assert!((back_lat - 45.0).abs() < 1e-6, "lat = {back_lat}");
+}
+
+#[test]
+fn custom_coordinate_operation_is_ranked_above_registry_candidates() {
+    let t = Transform::with_selection_options(
+        "EPSG:4267",
+        "EPSG:4326",
+        SelectionOptions::new()
+            .with_coordinate_operation(custom_nad27_to_wgs84_operation("Preferred custom NAD27")),
+    )
+    .unwrap();
+
+    assert_eq!(t.selected_operation().name, "Preferred custom NAD27");
+    assert_eq!(
+        t.selection_diagnostics().selected_match_kind,
+        OperationMatchKind::Custom
+    );
+    assert!(t
+        .selection_diagnostics()
+        .skipped_operations
+        .iter()
+        .any(|skipped| skipped.metadata.id.is_some()
+            && matches!(skipped.reason, SkippedOperationReason::LessPreferred)));
 }
 
 #[test]

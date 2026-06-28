@@ -17,6 +17,7 @@ use std::cmp::Ordering;
 pub(crate) enum SelectedOperationKind {
     Identity,
     Registry(Box<Cow<'static, CoordinateOperation>>),
+    Custom(Box<CoordinateOperation>),
 }
 
 impl SelectedOperationKind {
@@ -28,12 +29,17 @@ impl SelectedOperationKind {
         Self::Registry(Box::new(Cow::Borrowed(operation)))
     }
 
+    pub(crate) fn custom(operation: CoordinateOperation) -> Self {
+        Self::Custom(Box::new(operation))
+    }
+
     pub(crate) fn into_owned(self) -> Self {
         match self {
             Self::Identity => Self::Identity,
             Self::Registry(operation) => {
                 Self::Registry(Box::new(Cow::Owned((*operation).into_owned())))
             }
+            Self::Custom(operation) => Self::Custom(operation),
         }
     }
 
@@ -41,6 +47,7 @@ impl SelectedOperationKind {
         match self {
             Self::Identity => None,
             Self::Registry(operation) => Some(operation.as_ref().as_ref()),
+            Self::Custom(operation) => Some(operation),
         }
     }
 
@@ -54,6 +61,12 @@ impl SelectedOperationKind {
         match self {
             Self::Identity => identity_metadata(source, target, direction),
             Self::Registry(operation) => {
+                let mut metadata = operation.as_ref().metadata_for_direction(direction);
+                metadata.area_of_use =
+                    matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
+                metadata
+            }
+            Self::Custom(operation) => {
                 let mut metadata = operation.metadata_for_direction(direction);
                 metadata.area_of_use =
                     matched_area_of_use.or_else(|| operation.areas_of_use.first().cloned());
@@ -90,6 +103,7 @@ impl SelectedOperationKind {
         match self {
             Self::Identity => Some(OperationAccuracy { meters: 0.0 }),
             Self::Registry(operation) => operation.accuracy,
+            Self::Custom(operation) => operation.accuracy,
         }
     }
 }
@@ -164,6 +178,46 @@ pub(crate) fn rank_operation_candidates(
                 SelectionReason::ExactSourceTarget,
                 SelectionReason::PreferredOperation,
             ]),
+        });
+    }
+
+    for operation in &options.coordinate_operations {
+        let Some(direction) = custom_operation_direction(source, target, operation) else {
+            continue;
+        };
+        let matched_area_of_use = matched_area_of_use(resolved_aoi.as_ref(), operation);
+        if let Some((reason, detail)) = policy_skip_reason(
+            source,
+            target,
+            options,
+            matched_area_of_use.is_some(),
+            operation,
+        ) {
+            skipped.push(SkippedOperation {
+                metadata: selection_metadata(operation, direction, matched_area_of_use),
+                reason,
+                detail,
+            });
+            continue;
+        }
+
+        let mut reasons = SmallVec::from_slice(&[SelectionReason::CustomOperation]);
+        if matched_area_of_use.is_some() {
+            reasons.push(SelectionReason::AreaOfUseMatch);
+        }
+        if !operation.deprecated {
+            reasons.push(SelectionReason::NonDeprecated);
+        }
+        if operation.preferred {
+            reasons.push(SelectionReason::PreferredOperation);
+        }
+
+        candidates.push(RankedOperationCandidate {
+            operation: SelectedOperationKind::custom(operation.clone()),
+            direction,
+            match_kind: OperationMatchKind::Custom,
+            matched_area_of_use,
+            reasons,
         });
     }
 
@@ -255,6 +309,57 @@ fn compatible_direction(
     } else {
         None
     }
+}
+
+fn custom_operation_direction(
+    source: &CrsDef,
+    target: &CrsDef,
+    operation: &CoordinateOperation,
+) -> Option<OperationStepDirection> {
+    if custom_operation_matches_pair(source, target, operation) {
+        Some(OperationStepDirection::Forward)
+    } else if custom_operation_matches_pair_reversed(source, target, operation) {
+        Some(OperationStepDirection::Reverse)
+    } else {
+        None
+    }
+}
+
+fn custom_operation_matches_pair(
+    source: &CrsDef,
+    target: &CrsDef,
+    operation: &CoordinateOperation,
+) -> bool {
+    operation_crs_filter_matches(operation.source_crs_epsg, source)
+        && operation_crs_filter_matches(operation.target_crs_epsg, target)
+        && operation_datum_filter_matches(operation.source_datum_epsg, source)
+        && operation_datum_filter_matches(operation.target_datum_epsg, target)
+}
+
+fn custom_operation_matches_pair_reversed(
+    source: &CrsDef,
+    target: &CrsDef,
+    operation: &CoordinateOperation,
+) -> bool {
+    operation_crs_filter_matches(operation.source_crs_epsg, target)
+        && operation_crs_filter_matches(operation.target_crs_epsg, source)
+        && operation_datum_filter_matches(operation.source_datum_epsg, target)
+        && operation_datum_filter_matches(operation.target_datum_epsg, source)
+}
+
+fn operation_crs_filter_matches(filter: Option<u32>, crs: &CrsDef) -> bool {
+    filter.is_none_or(|code| {
+        (crs.epsg() != 0 && crs.epsg() == code) || crs.base_geographic_crs_epsg() == Some(code)
+    })
+}
+
+fn operation_datum_filter_matches(filter: Option<u32>, crs: &CrsDef) -> bool {
+    filter.is_none_or(|code| {
+        crs.base_geographic_crs_epsg()
+            .and_then(crate::epsg_db::lookup_datum_code_for_crs)
+            == Some(code)
+            || registry::lookup_datum_epsg(code).is_some_and(|datum| crs.datum().same_datum(&datum))
+    })
 }
 
 fn explicit_selection_reasons(
@@ -507,7 +612,8 @@ fn compare_candidates(
 
 fn match_kind_rank(kind: OperationMatchKind) -> u8 {
     match kind {
-        OperationMatchKind::Explicit => 4,
+        OperationMatchKind::Explicit => 5,
+        OperationMatchKind::Custom => 4,
         OperationMatchKind::ExactSourceTarget => 3,
         OperationMatchKind::DerivedGeographic => 2,
         OperationMatchKind::DatumCompatible => 1,

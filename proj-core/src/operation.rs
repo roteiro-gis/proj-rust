@@ -246,6 +246,7 @@ pub enum OperationMethod {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OperationMatchKind {
+    Custom,
     ExactSourceTarget,
     DerivedGeographic,
     DatumCompatible,
@@ -415,6 +416,7 @@ pub struct SelectionOptions {
     pub area_bounds_densify_points: usize,
     pub policy: SelectionPolicy,
     pub grid_provider: Option<Arc<dyn crate::grid::GridProvider>>,
+    pub coordinate_operations: Vec<CoordinateOperation>,
     pub vertical_grid_operations: Vec<VerticalGridOperation>,
 }
 
@@ -425,6 +427,7 @@ impl Default for SelectionOptions {
             area_bounds_densify_points: DEFAULT_AREA_BOUNDS_DENSIFY_POINTS,
             policy: SelectionPolicy::BestAvailable,
             grid_provider: None,
+            coordinate_operations: Vec::new(),
             vertical_grid_operations: Vec::new(),
         }
     }
@@ -486,6 +489,21 @@ impl SelectionOptions {
         self
     }
 
+    /// Add one explicit horizontal coordinate operation candidate.
+    pub fn with_coordinate_operation(mut self, operation: CoordinateOperation) -> Self {
+        self.coordinate_operations.push(operation);
+        self
+    }
+
+    /// Add explicit horizontal coordinate operation candidates.
+    pub fn with_coordinate_operations(
+        mut self,
+        operations: impl IntoIterator<Item = CoordinateOperation>,
+    ) -> Self {
+        self.coordinate_operations.extend(operations);
+        self
+    }
+
     /// Add one explicit vertical grid operation candidate.
     pub fn with_vertical_grid_operation(mut self, operation: VerticalGridOperation) -> Self {
         self.vertical_grid_operations.push(operation);
@@ -507,6 +525,7 @@ impl SelectionOptions {
             area_bounds_densify_points: self.area_bounds_densify_points,
             policy: self.policy.clone(),
             grid_provider: self.grid_provider.clone(),
+            coordinate_operations: self.coordinate_operations.clone(),
             vertical_grid_operations: self
                 .vertical_grid_operations
                 .iter()
@@ -518,6 +537,7 @@ impl SelectionOptions {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SelectionReason {
+    CustomOperation,
     ExplicitOperation,
     ExactSourceTarget,
     AreaOfUseMatch,
@@ -637,10 +657,29 @@ mod tests {
         }
     }
 
+    fn coordinate_operation(name: &str) -> CoordinateOperation {
+        CoordinateOperation {
+            id: None,
+            name: name.into(),
+            source_crs_epsg: None,
+            target_crs_epsg: None,
+            source_datum_epsg: None,
+            target_datum_epsg: None,
+            accuracy: Some(OperationAccuracy { meters: 0.0 }),
+            areas_of_use: smallvec::SmallVec::new(),
+            deprecated: false,
+            preferred: true,
+            approximate: false,
+            method: OperationMethod::Identity,
+        }
+    }
+
     #[test]
     fn selection_options_builders_chain_advanced_options() {
         let area = AreaOfInterest::geographic_point(Coord::new(-74.0, 40.0));
         let provider: Arc<dyn crate::grid::GridProvider> = Arc::new(EmbeddedGridProvider);
+        let first_operation = coordinate_operation("first operation");
+        let second_operation = coordinate_operation("second operation");
         let first = vertical_grid_operation("first", Some(4979), Some(5703));
         let second = vertical_grid_operation("second", Some(4979), Some(5703));
 
@@ -649,6 +688,8 @@ mod tests {
             .with_area_bounds_densify_points(32)
             .require_grids()
             .with_grid_provider(provider.clone())
+            .with_coordinate_operation(first_operation.clone())
+            .with_coordinate_operations([second_operation.clone()])
             .with_vertical_grid_operation(first.clone())
             .with_vertical_grid_operations([second.clone()]);
 
@@ -659,6 +700,10 @@ mod tests {
             options.grid_provider.as_ref().unwrap(),
             &provider
         ));
+        assert_eq!(
+            options.coordinate_operations,
+            vec![first_operation, second_operation]
+        );
         assert_eq!(options.vertical_grid_operations, vec![first, second]);
     }
 
@@ -723,6 +768,7 @@ mod tests {
             .with_area_of_interest(AreaOfInterest::source_crs_point(Coord::new(1.0, 2.0)))
             .with_area_bounds_densify_points(32)
             .with_policy(SelectionPolicy::RequireExactAreaMatch)
+            .with_coordinate_operation(coordinate_operation("operation"))
             .with_vertical_grid_operation(vertical_grid_operation("grid", Some(4979), Some(5703)));
 
         let inverse = options.inverse();
@@ -740,6 +786,7 @@ mod tests {
             SelectionPolicy::RequireExactAreaMatch
         ));
         assert_eq!(inverse.area_bounds_densify_points, 32);
+        assert_eq!(inverse.coordinate_operations, options.coordinate_operations);
         assert_eq!(
             inverse.vertical_grid_operations[0].source_vertical_crs_epsg,
             Some(5703)

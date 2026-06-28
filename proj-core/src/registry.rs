@@ -527,6 +527,37 @@ mod tests {
     }
 
     #[test]
+    fn operation_candidate_discovery_includes_custom_operations() {
+        let source = lookup_epsg(4267).expect("should find NAD27");
+        let target = lookup_epsg(4326).expect("should find WGS84");
+        let custom = CoordinateOperation {
+            id: None,
+            name: "Custom candidate".into(),
+            source_crs_epsg: Some(4267),
+            target_crs_epsg: Some(4326),
+            source_datum_epsg: None,
+            target_datum_epsg: None,
+            accuracy: None,
+            areas_of_use: smallvec::SmallVec::new(),
+            deprecated: false,
+            preferred: true,
+            approximate: false,
+            method: crate::operation::OperationMethod::Identity,
+        };
+        let options = SelectionOptions::new().with_coordinate_operation(custom);
+
+        let candidates =
+            operation_candidates_between_with_selection_options(&source, &target, &options)
+                .unwrap();
+
+        assert_eq!(candidates[0].name, "Custom candidate");
+        assert_eq!(
+            candidates[0].direction,
+            crate::operation::OperationStepDirection::Forward
+        );
+    }
+
+    #[test]
     fn operation_candidate_discovery_validates_aoi_bounds() {
         let source = lookup_epsg(4267).expect("should find NAD27");
         let target = lookup_epsg(4326).expect("should find WGS84");
