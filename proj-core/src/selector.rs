@@ -3,8 +3,8 @@ use crate::crs::CrsDef;
 use crate::error::{Error, Result};
 use crate::operation::{
     AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata, OperationAccuracy,
-    OperationMatchKind, OperationMethod, OperationStepDirection, SelectionOptions, SelectionPolicy,
-    SelectionReason, SkippedOperation, SkippedOperationReason,
+    OperationMatchKind, OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason,
+    SkippedOperation, SkippedOperationReason,
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
@@ -276,16 +276,6 @@ pub(crate) fn rank_operation_candidates(
                 reasons,
             });
         }
-    }
-
-    if let Some(operation) = synthetic_grid_datum_shift(source, target) {
-        candidates.push(RankedOperationCandidate {
-            operation: SelectedOperationKind::registry_owned(operation),
-            direction: OperationStepDirection::Forward,
-            match_kind: OperationMatchKind::DatumCompatible,
-            matched_area_of_use: None,
-            reasons: SmallVec::from_slice(&[SelectionReason::NonDeprecated]),
-        });
     }
 
     candidates.sort_by(compare_candidates);
@@ -845,49 +835,6 @@ fn validate_geographic_area_point(point: Coord) -> Result<()> {
     }
 
     validate_lon_lat(point.x.to_radians(), point.y.to_radians())
-}
-
-fn synthetic_grid_datum_shift(source: &CrsDef, target: &CrsDef) -> Option<CoordinateOperation> {
-    if requires_no_datum_operation(source, target) {
-        return None;
-    }
-    if !source.datum().uses_grid_shift() && !target.datum().uses_grid_shift() {
-        return None;
-    }
-    if !supports_synthetic_grid_datum_leg(source.datum().to_wgs84())
-        || !supports_synthetic_grid_datum_leg(target.datum().to_wgs84())
-    {
-        return None;
-    }
-
-    Some(CoordinateOperation {
-        id: None,
-        name: format!(
-            "Grid-backed datum shift {} to {}",
-            source.epsg(),
-            target.epsg()
-        ),
-        source_crs_epsg: source.base_geographic_crs_epsg(),
-        target_crs_epsg: target.base_geographic_crs_epsg(),
-        source_datum_epsg: None,
-        target_datum_epsg: None,
-        accuracy: None,
-        areas_of_use: SmallVec::new(),
-        deprecated: false,
-        preferred: true,
-        approximate: false,
-        method: OperationMethod::DatumShift {
-            source_to_wgs84: source.datum().to_wgs84().clone(),
-            target_to_wgs84: target.datum().to_wgs84().clone(),
-        },
-    })
-}
-
-fn supports_synthetic_grid_datum_leg(transform: &crate::datum::DatumToWgs84) -> bool {
-    matches!(
-        transform,
-        crate::datum::DatumToWgs84::Identity | crate::datum::DatumToWgs84::GridShift(_)
-    )
 }
 
 #[cfg(test)]

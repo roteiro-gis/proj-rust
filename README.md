@@ -81,7 +81,7 @@ Operation selection does not synthesize last-resort Helmert datum-shift fallback
 
 ## Grids
 
-Horizontal NTv2 grid shifts are supported through embedded registry operations, parsed PROJ `+nadgrids` definitions, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations.
+Horizontal NTv2 grid shifts are supported through embedded registry operations, parsed PROJ `+nadgrids` definitions built with `proj-wkt` transform helpers or the `Proj` facade, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations.
 
 Vertical GTX geoid operations are supported for registry-backed ellipsoidal-to-gravity height pairs and explicit `VerticalGridOperation` values. Grid files are resolved through a caller-provided `FilesystemGridProvider` or custom `GridProvider`; geoid grid files are not bundled.
 

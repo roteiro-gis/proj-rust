@@ -14,6 +14,7 @@ use proj_core::GridId;
 use proj_core::GridInterpolation;
 
 use crate::semantics::normalize_key;
+use crate::ParsedCrs;
 use crate::{ParseError, Result};
 
 const COMMON_PROJ_PARAMS: &[&str] = &[
@@ -36,12 +37,26 @@ const OMERC_PARAMS: &[&str] = &[
 const CASS_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
 
 /// Parse a PROJ format string like `+proj=utm +zone=18 +datum=WGS84 +units=m`.
+#[cfg(test)]
 pub(crate) fn parse_proj_string(s: &str) -> Result<CrsDef> {
-    let params = parse_params(s)?;
+    Ok(parse_proj_string_with_operations(s)?.crs)
+}
 
+pub(crate) fn parse_proj_string_with_operations(s: &str) -> Result<ParsedCrs> {
+    let params = parse_params(s)?;
+    let grid_shift_to_wgs84 = parse_nadgrids(&params)?.filter(DatumGridShift::uses_grid_shift);
+    let crs = parse_proj_params(&params)?;
+
+    Ok(ParsedCrs {
+        crs,
+        grid_shift_to_wgs84,
+    })
+}
+
+fn parse_proj_params(params: &HashMap<String, String>) -> Result<CrsDef> {
     if !params.contains_key("proj") && params.contains_key("init") {
-        validate_supported_proj_init_params(&params)?;
-        if let Some(crs) = parse_init_authority(&params)? {
+        validate_supported_proj_init_params(params)?;
+        if let Some(crs) = parse_init_authority(params)? {
             return Ok(crs);
         }
     }
@@ -49,18 +64,18 @@ pub(crate) fn parse_proj_string(s: &str) -> Result<CrsDef> {
     let proj = params.get("proj").map(|s| s.as_str()).unwrap_or("longlat");
 
     match proj {
-        "longlat" | "lonlat" | "latlong" | "latlon" => parse_geographic(&params),
-        "utm" => parse_utm(&params),
-        "tmerc" => parse_tmerc(&params),
-        "merc" => parse_merc(&params),
-        "stere" => parse_stereo(&params),
-        "sterea" => parse_sterea(&params),
-        "lcc" => parse_lcc(&params),
-        "aea" => parse_aea(&params),
-        "eqc" => parse_eqc(&params),
-        "laea" => parse_laea(&params),
-        "omerc" => parse_omerc(&params),
-        "cass" => parse_cass(&params),
+        "longlat" | "lonlat" | "latlong" | "latlon" => parse_geographic(params),
+        "utm" => parse_utm(params),
+        "tmerc" => parse_tmerc(params),
+        "merc" => parse_merc(params),
+        "stere" => parse_stereo(params),
+        "sterea" => parse_sterea(params),
+        "lcc" => parse_lcc(params),
+        "aea" => parse_aea(params),
+        "eqc" => parse_eqc(params),
+        "laea" => parse_laea(params),
+        "omerc" => parse_omerc(params),
+        "cass" => parse_cass(params),
         other => Err(ParseError::Parse(format!(
             "unsupported PROJ projection: {other}"
         ))),
@@ -134,7 +149,7 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
         if let Some(grid_shift) = nadgrids {
             return Ok(proj_core::Datum::new(
                 datum.ellipsoid(),
-                datum_grid_shift_to_wgs84(grid_shift),
+                datum_grid_shift_to_crs_datum_transform(grid_shift),
             )?);
         }
         return Ok(datum);
@@ -157,7 +172,7 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
         };
         let to_wgs84 = towgs84.unwrap_or_else(|| {
             if let Some(grid_shift) = nadgrids {
-                datum_grid_shift_to_wgs84(grid_shift)
+                datum_grid_shift_to_crs_datum_transform(grid_shift)
             } else if (ellps.semi_major_axis() - ellipsoid::WGS84.semi_major_axis()).abs() < 1e-9
                 && (ellps.flattening() - ellipsoid::WGS84.flattening()).abs() < 1e-15
             {
@@ -172,7 +187,7 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
     if let Some(grid_shift) = nadgrids {
         return Ok(proj_core::Datum::new(
             ellipsoid::WGS84,
-            datum_grid_shift_to_wgs84(grid_shift),
+            datum_grid_shift_to_crs_datum_transform(grid_shift),
         )?);
     }
 
@@ -183,9 +198,9 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
     Ok(datum::WGS84)
 }
 
-fn datum_grid_shift_to_wgs84(grid_shift: DatumGridShift) -> DatumToWgs84 {
+fn datum_grid_shift_to_crs_datum_transform(grid_shift: DatumGridShift) -> DatumToWgs84 {
     if grid_shift.uses_grid_shift() {
-        DatumToWgs84::GridShift(Box::new(grid_shift))
+        DatumToWgs84::Unknown
     } else {
         DatumToWgs84::Identity
     }
@@ -993,12 +1008,18 @@ mod tests {
 
     #[test]
     fn parse_nadgrids_datum_shift() {
-        let crs =
-            parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb")
-                .unwrap();
-        let DatumToWgs84::GridShift(grids) = crs.datum().to_wgs84() else {
-            panic!("expected grid shift datum");
-        };
+        let parsed = parse_proj_string_with_operations(
+            "+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb",
+        )
+        .unwrap();
+        assert!(matches!(
+            parsed.crs.datum().to_wgs84(),
+            DatumToWgs84::Unknown
+        ));
+        let grids = parsed
+            .grid_shift_to_wgs84
+            .as_ref()
+            .expect("expected parsed grid shift");
         assert_eq!(grids.entries().len(), 2);
     }
 
@@ -1010,11 +1031,15 @@ mod tests {
 
     #[test]
     fn nadgrids_transform_uses_grid_provider_path() {
-        let from =
-            parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb")
-                .unwrap();
-        let to = parse_proj_string("+proj=longlat +datum=WGS84").unwrap();
-        let transform = proj_core::Transform::from_crs_defs(&from, &to).unwrap();
+        let transform = crate::transform_from_crs_strings(
+            "+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb",
+            "+proj=longlat +datum=WGS84",
+        )
+        .unwrap();
+        assert_eq!(
+            transform.selection_diagnostics().selected_match_kind,
+            proj_core::OperationMatchKind::Custom
+        );
 
         let (lon, lat) = transform.convert((-80.5041667, 44.5458333)).unwrap();
 
@@ -1029,10 +1054,26 @@ mod tests {
     }
 
     #[test]
+    fn same_nadgrids_definition_does_not_load_grid() {
+        let definition = "+proj=longlat +ellps=clrk66 +nadgrids=missing.gsb";
+        let transform = crate::transform_from_crs_strings(definition, definition).unwrap();
+        assert_eq!(
+            transform.selection_diagnostics().selected_match_kind,
+            proj_core::OperationMatchKind::Custom
+        );
+
+        let (lon, lat) = transform.convert((-80.5, 44.5)).unwrap();
+
+        assert_eq!(lon, -80.5);
+        assert_eq!(lat, 44.5);
+    }
+
+    #[test]
     fn required_nadgrids_resource_must_load() {
-        let from = parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=missing.gsb").unwrap();
-        let to = parse_proj_string("+proj=longlat +datum=WGS84").unwrap();
-        let err = match proj_core::Transform::from_crs_defs(&from, &to) {
+        let err = match crate::transform_from_crs_strings(
+            "+proj=longlat +ellps=clrk66 +nadgrids=missing.gsb",
+            "+proj=longlat +datum=WGS84",
+        ) {
             Ok(_) => panic!("expected missing grid to fail"),
             Err(err) => err,
         };
