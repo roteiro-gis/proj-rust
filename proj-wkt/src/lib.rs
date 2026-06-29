@@ -20,6 +20,10 @@
 //! easting/northing axis order, and compound vertical components that can be
 //! preserved or unit-converted only when source and target vertical CRS
 //! definitions use the same vertical reference frame.
+//! Parsed PROJ `+nadgrids` metadata is applied by
+//! [`transform_from_crs_strings`], [`transform_from_crs_strings_with_selection_options`],
+//! and the [`Proj`] facade as explicit custom coordinate operations; plain
+//! [`parse_crs`] returns only the CRS definition.
 //! Unsupported axis-order, prime-meridian, geographic angular-unit, and vertical
 //! transformation semantics are rejected.
 //!
@@ -41,8 +45,9 @@ mod semantics;
 mod wkt;
 
 use proj_core::{
-    AreaOfInterest, Bounds, Coord, Coord3D, CoordinateOperationId, CrsDef, SelectionOptions,
-    Transform, Transformable, Transformable3D,
+    AreaOfInterest, Bounds, Coord, Coord3D, CoordinateOperation, CoordinateOperationId, CrsDef,
+    DatumGridShift, DatumToWgs84, OperationMethod, SelectionOptions, Transform, Transformable,
+    Transformable3D,
 };
 
 /// Parse error.
@@ -58,6 +63,21 @@ pub enum ParseError {
 
 pub type Result<T> = std::result::Result<T, ParseError>;
 
+#[derive(Clone)]
+struct ParsedCrs {
+    crs: CrsDef,
+    grid_shift_to_wgs84: Option<DatumGridShift>,
+}
+
+impl ParsedCrs {
+    fn new(crs: CrsDef) -> Self {
+        Self {
+            crs,
+            grid_shift_to_wgs84: None,
+        }
+    }
+}
+
 /// Parse a CRS definition string in any supported format.
 ///
 /// Automatically detects and handles:
@@ -70,17 +90,22 @@ pub type Result<T> = std::result::Result<T, ParseError>;
 /// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]`
 /// - **WKT2**: `GEODCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
+    Ok(parse_crs_definition(s)?.crs)
+}
+
+fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
     let s = s.trim();
 
     // Normalize common aliases
     let upper = s.to_uppercase();
     if upper == "CRS:84" || upper == "OGC:CRS84" {
         return proj_core::lookup_epsg(4326)
+            .map(ParsedCrs::new)
             .ok_or_else(|| ParseError::Parse("CRS:84 not found in registry".into()));
     }
 
     if upper.starts_with("URN:") {
-        return parse_ogc_crs_urn(s);
+        return parse_ogc_crs_urn(s).map(ParsedCrs::new);
     }
 
     // Try authority code (EPSG:XXXX)
@@ -90,25 +115,25 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
         && !upper.starts_with("PROJ")
     {
         if let Ok(crs) = proj_core::lookup_authority_code(s) {
-            return Ok(crs);
+            return Ok(ParsedCrs::new(crs));
         }
     }
 
     // Bare numeric EPSG code (e.g., "4326")
     if let Ok(code) = s.parse::<u32>() {
         if let Some(crs) = proj_core::lookup_epsg(code) {
-            return Ok(crs);
+            return Ok(ParsedCrs::new(crs));
         }
     }
 
     // PROJ string
     if s.starts_with('+') {
-        return proj_string::parse_proj_string(s);
+        return proj_string::parse_proj_string_with_operations(s);
     }
 
     // PROJJSON
     if s.starts_with('{') {
-        return projjson::parse_projjson(s);
+        return projjson::parse_projjson(s).map(ParsedCrs::new);
     }
 
     // WKT
@@ -123,7 +148,7 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
         || upper.starts_with("VERTCRS")
         || upper.starts_with("VERTICALCRS")
     {
-        return wkt::parse_wkt(s);
+        return wkt::parse_wkt(s).map(ParsedCrs::new);
     }
 
     Err(ParseError::Parse(format!(
@@ -171,9 +196,7 @@ pub fn transform_from_crs_strings(
     from: &str,
     to: &str,
 ) -> std::result::Result<proj_core::Transform, ParseError> {
-    let from_crs = parse_crs(from)?;
-    let to_crs = parse_crs(to)?;
-    Ok(proj_core::Transform::from_crs_defs(&from_crs, &to_crs)?)
+    transform_from_crs_strings_with_selection_options(from, to, SelectionOptions::default())
 }
 
 /// Create a [`Transform`] from two CRS strings using explicit selection options.
@@ -186,10 +209,13 @@ pub fn transform_from_crs_strings_with_selection_options(
     to: &str,
     options: SelectionOptions,
 ) -> std::result::Result<proj_core::Transform, ParseError> {
-    let from_crs = parse_crs(from)?;
-    let to_crs = parse_crs(to)?;
+    let from_crs = parse_crs_definition(from)?;
+    let to_crs = parse_crs_definition(to)?;
+    let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(proj_core::Transform::from_crs_defs_with_selection_options(
-        &from_crs, &to_crs, options,
+        &from_crs.crs,
+        &to_crs.crs,
+        options,
     )?)
 }
 
@@ -216,13 +242,106 @@ pub fn transform_from_crs_strings_horizontal_with_selection_options(
     to: &str,
     options: SelectionOptions,
 ) -> std::result::Result<proj_core::Transform, ParseError> {
-    let from_crs = parse_crs(from)?;
-    let to_crs = parse_crs(to)?;
+    let from_crs = parse_crs_definition(from)?;
+    let to_crs = parse_crs_definition(to)?;
+    let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(
         proj_core::Transform::from_horizontal_components_with_selection_options(
-            &from_crs, &to_crs, options,
+            &from_crs.crs,
+            &to_crs.crs,
+            options,
         )?,
     )
+}
+
+fn with_parsed_coordinate_operations(
+    options: SelectionOptions,
+    source: &ParsedCrs,
+    target: &ParsedCrs,
+) -> SelectionOptions {
+    if let Some(operation) = parsed_grid_datum_operation(source, target) {
+        options.with_coordinate_operation(operation)
+    } else {
+        options
+    }
+}
+
+fn parsed_grid_datum_operation(
+    source: &ParsedCrs,
+    target: &ParsedCrs,
+) -> Option<CoordinateOperation> {
+    if source.grid_shift_to_wgs84.is_none() && target.grid_shift_to_wgs84.is_none() {
+        return None;
+    }
+
+    if parsed_grid_datums_match(source, target) {
+        return Some(parsed_coordinate_operation(
+            source,
+            target,
+            "Parsed +nadgrids identity datum match",
+            OperationMethod::Identity,
+        ));
+    }
+
+    let source_to_wgs84 = parsed_datum_to_wgs84(source)?;
+    let target_to_wgs84 = parsed_datum_to_wgs84(target)?;
+
+    Some(parsed_coordinate_operation(
+        source,
+        target,
+        "Parsed +nadgrids datum shift",
+        OperationMethod::DatumShift {
+            source_to_wgs84,
+            target_to_wgs84,
+        },
+    ))
+}
+
+fn parsed_coordinate_operation(
+    source: &ParsedCrs,
+    target: &ParsedCrs,
+    name: &str,
+    method: OperationMethod,
+) -> CoordinateOperation {
+    CoordinateOperation {
+        id: None,
+        name: name.into(),
+        source_crs_epsg: source.crs.base_geographic_crs_epsg(),
+        target_crs_epsg: target.crs.base_geographic_crs_epsg(),
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: None,
+        areas_of_use: smallvec::SmallVec::new(),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        method,
+    }
+}
+
+fn parsed_grid_datums_match(source: &ParsedCrs, target: &ParsedCrs) -> bool {
+    source.grid_shift_to_wgs84.is_some()
+        && source.grid_shift_to_wgs84 == target.grid_shift_to_wgs84
+        && same_ellipsoid(
+            source.crs.datum().ellipsoid(),
+            target.crs.datum().ellipsoid(),
+        )
+}
+
+fn same_ellipsoid(left: proj_core::Ellipsoid, right: proj_core::Ellipsoid) -> bool {
+    (left.semi_major_axis() - right.semi_major_axis()).abs() < 1e-6
+        && (left.flattening() - right.flattening()).abs() < 1e-12
+}
+
+fn parsed_datum_to_wgs84(parsed: &ParsedCrs) -> Option<DatumToWgs84> {
+    if let Some(grid_shift) = &parsed.grid_shift_to_wgs84 {
+        return Some(DatumToWgs84::GridShift(Box::new(grid_shift.clone())));
+    }
+
+    match parsed.crs.datum().to_wgs84() {
+        DatumToWgs84::Identity => Some(DatumToWgs84::Identity),
+        _ => None,
+    }
 }
 
 fn compatibility_selection_options(
@@ -349,7 +468,7 @@ pub struct Proj {
 }
 
 enum ProjInner {
-    Definition(CrsDef),
+    Definition(Box<ParsedCrs>),
     Transform(Box<Transform>),
 }
 
@@ -357,7 +476,7 @@ impl Proj {
     /// Parse a single CRS definition in any supported format.
     pub fn new(definition: &str) -> Result<Self> {
         Ok(Self {
-            inner: ProjInner::Definition(parse_crs(definition)?),
+            inner: ProjInner::Definition(Box::new(parse_crs_definition(definition)?)),
         })
     }
 
@@ -424,11 +543,14 @@ impl Proj {
         target: &Self,
         options: SelectionOptions,
     ) -> Result<Self> {
-        let source = self.definition()?;
-        let target = target.definition()?;
+        let source = self.parsed_definition()?;
+        let target = target.parsed_definition()?;
+        let options = with_parsed_coordinate_operations(options, source, target);
         Ok(Self {
             inner: ProjInner::Transform(Box::new(Transform::from_crs_defs_with_selection_options(
-                source, target, options,
+                &source.crs,
+                &target.crs,
+                options,
             )?)),
         })
     }
@@ -452,12 +574,15 @@ impl Proj {
         target: &Self,
         options: SelectionOptions,
     ) -> Result<Self> {
-        let source = self.definition()?;
-        let target = target.definition()?;
+        let source = self.parsed_definition()?;
+        let target = target.parsed_definition()?;
+        let options = with_parsed_coordinate_operations(options, source, target);
         Ok(Self {
             inner: ProjInner::Transform(Box::new(
                 Transform::from_horizontal_components_with_selection_options(
-                    source, target, options,
+                    &source.crs,
+                    &target.crs,
+                    options,
                 )?,
             )),
         })
@@ -519,9 +644,9 @@ impl Proj {
         }
     }
 
-    fn definition(&self) -> Result<&CrsDef> {
+    fn parsed_definition(&self) -> Result<&ParsedCrs> {
         match &self.inner {
-            ProjInner::Definition(crs) => Ok(crs),
+            ProjInner::Definition(parsed) => Ok(parsed.as_ref()),
             ProjInner::Transform(_) => Err(ParseError::Parse(
                 "expected a CRS definition, found a transform".into(),
             )),
@@ -729,6 +854,19 @@ mod tests {
         let proj = from.create_crs_to_crs_from_pj(&to, None, None).unwrap();
         let (x, _y) = proj.convert((-74.006, 40.7128)).unwrap();
         assert!((x - (-8238310.0)).abs() < 100.0);
+    }
+
+    #[test]
+    fn proj_facade_create_from_nadgrids_definition() {
+        let from =
+            Proj::new("+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb").unwrap();
+        let to = Proj::new("+proj=longlat +datum=WGS84").unwrap();
+        let proj = from.create_crs_to_crs_from_pj(&to, None, None).unwrap();
+
+        let (lon, lat) = proj.convert((-80.5041667, 44.5458333)).unwrap();
+
+        assert!((lon - (-80.50401615833)).abs() < 1e-6, "lon={lon}");
+        assert!((lat - 44.5458827236).abs() < 3e-6, "lat={lat}");
     }
 
     #[test]

@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- move parsed PROJ `+nadgrids` horizontal datum shifts out of selector internals and into explicit custom coordinate operations supplied by `proj-wkt` transform construction paths
 - add explicit custom horizontal coordinate operation candidates through `SelectionOptions::with_coordinate_operation` and `SelectionOptions::with_coordinate_operations`, with custom selection diagnostics and direct pipeline compilation
 - breaking: remove opt-in synthetic Helmert datum-shift fallback selection; `SelectionPolicy::AllowApproximateHelmertFallback`, `SelectionOptions::allow_approximate_helmert_fallback`, and `proj-wkt` compatibility aliases for that option are no longer supported, and CRS pairs without a registry, identity, or supported grid/identity custom datum operation now fail during transform construction
 
