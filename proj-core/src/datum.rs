@@ -100,7 +100,10 @@ impl Datum {
     }
 }
 
-/// Explicit WGS84 relationship for a datum.
+/// WGS84 relationship metadata for a datum definition.
+///
+/// Operation selection treats this as CRS definition metadata. Registry
+/// operations or explicit custom operations are the authority for transforms.
 #[derive(Debug, Clone, PartialEq)]
 pub enum DatumToWgs84 {
     /// The datum can be treated as WGS84-compatible in the current model.

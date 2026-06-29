@@ -338,10 +338,16 @@ fn parsed_datum_to_wgs84(parsed: &ParsedCrs) -> Option<DatumToWgs84> {
         return Some(DatumToWgs84::GridShift(Box::new(grid_shift.clone())));
     }
 
-    match parsed.crs.datum().to_wgs84() {
-        DatumToWgs84::Identity => Some(DatumToWgs84::Identity),
-        _ => None,
+    if is_wgs84_datum_definition(parsed) {
+        Some(DatumToWgs84::Identity)
+    } else {
+        None
     }
+}
+
+fn is_wgs84_datum_definition(parsed: &ParsedCrs) -> bool {
+    parsed.crs.base_geographic_crs_epsg() == Some(4326)
+        || parsed.crs.datum().same_datum(&proj_core::datum::WGS84)
 }
 
 fn compatibility_selection_options(

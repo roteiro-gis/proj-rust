@@ -1,5 +1,5 @@
 use crate::coord::{Coord, Coord3D};
-use crate::crs::{CrsDef, LinearUnit, VerticalCrsKind};
+use crate::crs::{CrsDef, LinearUnit};
 use crate::datum::{DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams};
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
@@ -250,16 +250,6 @@ pub(super) fn validate_vertical_ordinate(z: f64) -> Result<()> {
         return Err(Error::OutOfRange(
             "vertical input coordinate must be finite".into(),
         ));
-    }
-    Ok(())
-}
-
-pub(super) fn validate_transform_crs_definition(crs: &CrsDef) -> Result<()> {
-    crs.datum().to_wgs84().validate()?;
-    if let Some(vertical) = crs.vertical_crs() {
-        if let VerticalCrsKind::EllipsoidalHeight { datum } = vertical.kind() {
-            datum.to_wgs84().validate()?;
-        }
     }
     Ok(())
 }
