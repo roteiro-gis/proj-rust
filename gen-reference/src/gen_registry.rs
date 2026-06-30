@@ -813,8 +813,11 @@ fn generated_vertical_grid_operation(
     horizontal: GeneratedVerticalHorizontalCodes,
 ) -> Option<VerticalOperationRecord> {
     let original_grid_name = grid_name_by_id(ctx.grid_resources, operation.grid_id)?;
-    let alternative =
-        supported_grid_alternative(ctx.conn, &original_grid_name, VERTICAL_GRID_ALTERNATIVE_METHODS)?;
+    let alternative = supported_grid_alternative(
+        ctx.conn,
+        &original_grid_name,
+        VERTICAL_GRID_ALTERNATIVE_METHODS,
+    )?;
     let method_key = generated_grid_method_key(&alternative);
     let generated_grid_id = intern_grid_resource(
         ctx.grid_resources,
@@ -1036,11 +1039,9 @@ fn add_generated_operation_graph(
     let base_operations = operations.clone();
     let mut generated_horizontal_operations = Vec::new();
     for operation in &base_operations {
-        if let Some(generated) = generated_horizontal_grid_operation(
-            &mut ctx,
-            operation,
-            &mut used_operation_codes,
-        ) {
+        if let Some(generated) =
+            generated_horizontal_grid_operation(&mut ctx, operation, &mut used_operation_codes)
+        {
             generated_horizontal_operations.push(generated.clone());
             operations.push(generated);
         }
