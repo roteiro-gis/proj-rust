@@ -664,6 +664,21 @@ struct HorizontalGraphEdge {
     step: GeneratedOperationStep,
 }
 
+struct GeneratedOperationGraphContext<'a> {
+    conn: &'a Connection,
+    grid_resources: &'a mut Vec<GridRecord>,
+    grid_resource_ids: &'a mut BTreeMap<(String, String, String), u32>,
+    geo_crs: &'a [GeoCrs],
+    proj_crs: &'a [ProjCrs],
+    compound_crs: &'a [CompoundCrs],
+}
+
+struct GeneratedVerticalHorizontalCodes {
+    source_horizontal_crs_code: u32,
+    target_horizontal_crs_code: u32,
+    grid_horizontal_crs_code: u32,
+}
+
 fn grid_format_label(format: u8) -> &'static str {
     match format {
         GRID_FORMAT_GEOTIFF => "GeoTIFF",
@@ -738,18 +753,16 @@ fn generated_grid_method_key(alternative: &GridAlternative) -> String {
 }
 
 fn generated_horizontal_grid_operation(
-    conn: &Connection,
-    grid_resources: &mut Vec<GridRecord>,
-    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+    ctx: &mut GeneratedOperationGraphContext<'_>,
     operation: &OperationRecord,
     used_operation_codes: &mut BTreeSet<u32>,
 ) -> Option<OperationRecord> {
     let OperationPayload::GridShift { grid_id, .. } = &operation.payload else {
         return None;
     };
-    let original_grid_name = grid_name_by_id(grid_resources, *grid_id)?;
+    let original_grid_name = grid_name_by_id(ctx.grid_resources, *grid_id)?;
     let alternative = supported_grid_alternative(
-        conn,
+        ctx.conn,
         &original_grid_name,
         HORIZONTAL_GRID_ALTERNATIVE_METHODS,
     )?;
@@ -760,8 +773,8 @@ fn generated_horizontal_grid_operation(
 
     let method_key = generated_grid_method_key(&alternative);
     let generated_grid_id = intern_grid_resource(
-        grid_resources,
-        grid_resource_ids,
+        ctx.grid_resources,
+        ctx.grid_resource_ids,
         &method_key,
         &alternative.proj_grid_name,
         "",
@@ -794,22 +807,18 @@ fn generated_horizontal_grid_operation(
 }
 
 fn generated_vertical_grid_operation(
-    conn: &Connection,
-    grid_resources: &mut Vec<GridRecord>,
-    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+    ctx: &mut GeneratedOperationGraphContext<'_>,
     operation: &VerticalOperationRecord,
     code: u32,
-    source_horizontal_crs_code: u32,
-    target_horizontal_crs_code: u32,
-    grid_horizontal_crs_code: u32,
+    horizontal: GeneratedVerticalHorizontalCodes,
 ) -> Option<VerticalOperationRecord> {
-    let original_grid_name = grid_name_by_id(grid_resources, operation.grid_id)?;
+    let original_grid_name = grid_name_by_id(ctx.grid_resources, operation.grid_id)?;
     let alternative =
-        supported_grid_alternative(conn, &original_grid_name, VERTICAL_GRID_ALTERNATIVE_METHODS)?;
+        supported_grid_alternative(ctx.conn, &original_grid_name, VERTICAL_GRID_ALTERNATIVE_METHODS)?;
     let method_key = generated_grid_method_key(&alternative);
     let generated_grid_id = intern_grid_resource(
-        grid_resources,
-        grid_resource_ids,
+        ctx.grid_resources,
+        ctx.grid_resource_ids,
         &method_key,
         &alternative.proj_grid_name,
         "",
@@ -824,9 +833,9 @@ fn generated_vertical_grid_operation(
             operation.name,
             grid_format_label(alternative.format)
         ),
-        source_horizontal_crs_code,
-        target_horizontal_crs_code,
-        grid_horizontal_crs_code,
+        source_horizontal_crs_code: horizontal.source_horizontal_crs_code,
+        target_horizontal_crs_code: horizontal.target_horizontal_crs_code,
+        grid_horizontal_crs_code: horizontal.grid_horizontal_crs_code,
         source_vertical_crs_code: operation.source_vertical_crs_code,
         target_vertical_crs_code: operation.target_vertical_crs_code,
         source_vertical_datum_code: operation.source_vertical_datum_code,
@@ -987,25 +996,22 @@ fn crs_name(geographic_names: &BTreeMap<u32, String>, code: u32) -> String {
 }
 
 fn add_generated_operation_graph(
-    conn: &Connection,
-    grid_resources: &mut Vec<GridRecord>,
-    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+    mut ctx: GeneratedOperationGraphContext<'_>,
     operations: &mut Vec<OperationRecord>,
     vertical_operations: &mut Vec<VerticalOperationRecord>,
-    geo_crs: &[GeoCrs],
-    proj_crs: &[ProjCrs],
-    compound_crs: &[CompoundCrs],
 ) {
-    let geographic_names: BTreeMap<u32, String> = geo_crs
+    let geographic_names: BTreeMap<u32, String> = ctx
+        .geo_crs
         .iter()
         .map(|crs| (crs.code, crs.name.clone()))
         .collect();
-    let projected_base_geographic: BTreeMap<u32, u32> = proj_crs
+    let projected_base_geographic: BTreeMap<u32, u32> = ctx
+        .proj_crs
         .iter()
         .map(|crs| (crs.code, crs.base_geographic_crs_code))
         .collect();
     let mut compound_base_geographic_by_vertical = BTreeMap::<u32, BTreeSet<u32>>::new();
-    for crs in compound_crs {
+    for crs in ctx.compound_crs {
         if crs.vertical_kind != VERTICAL_COMPONENT_REGISTRY_CRS {
             continue;
         }
@@ -1031,9 +1037,7 @@ fn add_generated_operation_graph(
     let mut generated_horizontal_operations = Vec::new();
     for operation in &base_operations {
         if let Some(generated) = generated_horizontal_grid_operation(
-            conn,
-            grid_resources,
-            grid_resource_ids,
+            &mut ctx,
             operation,
             &mut used_operation_codes,
         ) {
@@ -1042,7 +1046,7 @@ fn add_generated_operation_graph(
         }
     }
 
-    let datum_equivalences = datum_ensemble_equivalences(conn);
+    let datum_equivalences = datum_ensemble_equivalences(ctx.conn);
     let bridge_edges = identity_bridge_edges(operations, &datum_equivalences);
     if bridge_edges.is_empty() || generated_horizontal_operations.is_empty() {
         return;
@@ -1145,14 +1149,14 @@ fn add_generated_operation_graph(
                     &mut next_extra_vertical_code,
                 );
                 if let Some(generated) = generated_vertical_grid_operation(
-                    conn,
-                    grid_resources,
-                    grid_resource_ids,
+                    &mut ctx,
                     operation,
                     code,
-                    bridge.source_crs_code,
-                    *target_horizontal,
-                    bridge.source_crs_code,
+                    GeneratedVerticalHorizontalCodes {
+                        source_horizontal_crs_code: bridge.source_crs_code,
+                        target_horizontal_crs_code: *target_horizontal,
+                        grid_horizontal_crs_code: bridge.source_crs_code,
+                    },
                 ) {
                     vertical_operations.push(generated);
                 }
@@ -2435,14 +2439,16 @@ fn main() {
         operation.area_codes.dedup();
     }
     add_generated_operation_graph(
-        &conn,
-        &mut grid_resources,
-        &mut grid_resource_ids,
+        GeneratedOperationGraphContext {
+            conn: &conn,
+            grid_resources: &mut grid_resources,
+            grid_resource_ids: &mut grid_resource_ids,
+            geo_crs: &geo_crs,
+            proj_crs: &proj_crs,
+            compound_crs: &compound_crs,
+        },
         &mut operations,
         &mut vertical_operations,
-        &geo_crs,
-        &proj_crs,
-        &compound_crs,
     );
 
     let mut grid_area_by_id: BTreeMap<u32, u32> = BTreeMap::new();
