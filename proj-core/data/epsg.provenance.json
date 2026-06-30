@@ -28,8 +28,8 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 946181,
-    "sha256": "sha256:1942847d5feb98c0f3222216b19c35731c39527cd77b9d7aa84b12371416f7f8"
+    "byte_len": 983828,
+    "sha256": "sha256:f8b45cb7ca10f67f7b0bfdef3cb15c4e23cd89b8fb2acfac24d554bcc5141c56"
   },
   "counts": {
     "ellipsoids": 44,
@@ -39,9 +39,9 @@
     "vertical_crs": 293,
     "compound_crs": 684,
     "extents": 756,
-    "grid_resources": 255,
-    "operations": 1827,
-    "vertical_operations": 26
+    "grid_resources": 403,
+    "operations": 2122,
+    "vertical_operations": 27
   },
   "supported_projection_methods": {
     "Albers Equal Area": 5,
