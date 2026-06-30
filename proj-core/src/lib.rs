@@ -13,7 +13,8 @@
 //! Operation selection uses registry operations, explicit custom horizontal
 //! operations supplied in [`SelectionOptions`], exact identity/no-datum-shift
 //! paths, and supported grid/identity custom datum shifts; it does not
-//! synthesize last-resort Helmert datum-shift fallbacks from datum metadata.
+//! synthesize Helmert, grid, or WGS84-compatible identity operations from
+//! datum metadata.
 //! The [`registry`], [`operation`], and [`grid`] modules expose the embedded
 //! operation catalog, selection metadata, and NTv2 grid-provider interfaces.
 //! `convert_3d` preserves `z` when no explicit vertical CRS is present or when

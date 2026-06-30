@@ -22,8 +22,8 @@ mod vertical;
 
 use pipeline::{
     compile_pipeline, execute_pipeline_xy, validate_output_len, validate_pipeline_coord3d,
-    validate_transform_crs_definition, validate_vertical_ordinate, CompiledOperationFallback,
-    CompiledOperationPipeline, PipelineExecutionOutcome,
+    validate_vertical_ordinate, CompiledOperationFallback, CompiledOperationPipeline,
+    PipelineExecutionOutcome,
 };
 use selection::{
     compile_selected_pipelines, grid_coverage_miss_detail, is_grid_coverage_miss, selected_metadata,
@@ -180,9 +180,6 @@ impl Transform {
         to: &CrsDef,
         options: SelectionOptions,
     ) -> Result<Self> {
-        validate_transform_crs_definition(from)?;
-        validate_transform_crs_definition(to)?;
-
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
         let vertical_transform = compile_vertical_transform(from, to, &options, &grid_runtime)?;
         let selected = compile_selected_pipelines(from, to, &options, &grid_runtime)?;

@@ -248,6 +248,21 @@ fn custom_helmert_datum_does_not_synthesize_operation() {
 }
 
 #[test]
+fn custom_wgs84_compatible_datum_does_not_synthesize_identity() {
+    let source = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD83, "Custom NAD83"));
+    let target = registry::lookup_epsg(4326).unwrap();
+
+    let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
+
+    assert!(matches!(err, Error::OperationSelection(_)), "got {err}");
+    assert!(
+        err.to_string()
+            .contains("no compatible registry operation found"),
+        "{err}"
+    );
+}
+
+#[test]
 fn custom_grid_datum_does_not_synthesize_helmert_leg() {
     let grid = datum::DatumGridShift::from_vec(vec![datum::DatumGridShiftEntry::Grid {
         definition: GridDefinition {
@@ -421,13 +436,13 @@ fn roundtrip_4326_3413() {
 }
 
 #[test]
-fn geographic_to_geographic_same_datum_is_identity() {
+fn nad83_to_wgs84_uses_registry_operation() {
     let t = Transform::new("EPSG:4269", "EPSG:4326").unwrap();
     let (lon, lat) = t.convert((-74.006, 40.7128)).unwrap();
-    assert_eq!(lon, -74.006);
-    assert_eq!(lat, 40.7128);
-    assert_eq!(t.selected_operation().name, "Identity");
-    assert!(matches!(
+    assert!((lon - (-74.006)).abs() < 1e-9, "lon = {lon}");
+    assert!((lat - 40.7128).abs() < 1e-9, "lat = {lat}");
+    assert!(t.selected_operation().id.is_some());
+    assert!(!matches!(
         t.selected_operation_kind,
         SelectedOperationKind::Identity
     ));
