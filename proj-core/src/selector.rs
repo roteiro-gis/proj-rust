@@ -1,10 +1,11 @@
 use crate::coord::{Bounds, Coord};
 use crate::crs::CrsDef;
 use crate::error::{Error, Result};
+use crate::grid::GridFormat;
 use crate::operation::{
-    AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata, OperationAccuracy,
-    OperationMatchKind, OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason,
-    SkippedOperation, SkippedOperationReason,
+    AreaOfInterest, AreaOfUse, CoordinateOperation, CoordinateOperationMetadata, GridId,
+    OperationAccuracy, OperationMatchKind, OperationMethod, OperationStepDirection,
+    SelectionOptions, SelectionPolicy, SelectionReason, SkippedOperation, SkippedOperationReason,
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected};
 use crate::registry;
@@ -97,6 +98,12 @@ impl SelectedOperationKind {
         self.as_operation()
             .map(|operation| operation.approximate)
             .unwrap_or(false)
+    }
+
+    pub(crate) fn grid_format_preference(&self) -> u8 {
+        self.as_operation()
+            .map(operation_grid_format_preference)
+            .unwrap_or(0)
     }
 
     pub(crate) fn accuracy(&self) -> Option<OperationAccuracy> {
@@ -596,7 +603,52 @@ fn compare_candidates(
                 .deprecated()
                 .cmp(&right.operation.deprecated())
         })
+        .then_with(|| {
+            right
+                .operation
+                .grid_format_preference()
+                .cmp(&left.operation.grid_format_preference())
+        })
         .then_with(|| right.operation.preferred().cmp(&left.operation.preferred()))
+}
+
+fn operation_grid_format_preference(operation: &CoordinateOperation) -> u8 {
+    let mut visited = std::collections::HashSet::new();
+    operation_grid_format_preference_with_visited(operation, &mut visited)
+}
+
+fn operation_grid_format_preference_with_visited(
+    operation: &CoordinateOperation,
+    visited: &mut std::collections::HashSet<crate::operation::CoordinateOperationId>,
+) -> u8 {
+    match &operation.method {
+        OperationMethod::GridShift { grid_id, .. } => grid_format_preference(*grid_id),
+        OperationMethod::Concatenated { steps } => steps
+            .iter()
+            .filter_map(|step| {
+                if !visited.insert(step.operation_id) {
+                    return None;
+                }
+                let preference = registry::lookup_operation(step.operation_id).map(|operation| {
+                    operation_grid_format_preference_with_visited(&operation, visited)
+                });
+                visited.remove(&step.operation_id);
+                preference
+            })
+            .max()
+            .unwrap_or(0),
+        _ => 0,
+    }
+}
+
+fn grid_format_preference(grid_id: GridId) -> u8 {
+    registry::lookup_grid_definition(grid_id.0)
+        .map(|grid| match grid.format {
+            GridFormat::GeoTiff => 3,
+            GridFormat::Ntv2 | GridFormat::Gtx => 2,
+            GridFormat::Unsupported => 0,
+        })
+        .unwrap_or(0)
 }
 
 fn match_kind_rank(kind: OperationMatchKind) -> u8 {

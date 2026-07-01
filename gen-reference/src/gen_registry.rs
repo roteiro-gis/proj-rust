@@ -645,6 +645,27 @@ struct GridAlternative {
     proj_method: String,
 }
 
+struct GridResourceSelection {
+    method_name: String,
+    grid_name: String,
+    grid2_name: String,
+    format: u8,
+    direction: u8,
+}
+
+struct PendingHorizontalGridAlternative {
+    operation_index: usize,
+    grid_id: u32,
+    direction: u8,
+    format: u8,
+}
+
+struct PendingVerticalGridAlternative {
+    operation_index: usize,
+    grid_id: u32,
+    format: u8,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 struct GeneratedOperationStep {
     operation_code: u32,
@@ -666,8 +687,7 @@ struct HorizontalGraphEdge {
 
 struct GeneratedOperationGraphContext<'a> {
     conn: &'a Connection,
-    grid_resources: &'a mut Vec<GridRecord>,
-    grid_resource_ids: &'a mut BTreeMap<(String, String, String), u32>,
+    grid_resources: &'a [GridRecord],
     geo_crs: &'a [GeoCrs],
     proj_crs: &'a [ProjCrs],
     compound_crs: &'a [CompoundCrs],
@@ -679,15 +699,6 @@ struct GeneratedVerticalHorizontalCodes {
     grid_horizontal_crs_code: u32,
 }
 
-fn grid_format_label(format: u8) -> &'static str {
-    match format {
-        GRID_FORMAT_GEOTIFF => "GeoTIFF",
-        GRID_FORMAT_GTX => "GTX",
-        GRID_FORMAT_NTV2 => "NTv2",
-        _ => "Unsupported",
-    }
-}
-
 fn grid_format_key(format: u8) -> &'static str {
     match format {
         GRID_FORMAT_GEOTIFF => "GTiff",
@@ -697,8 +708,24 @@ fn grid_format_key(format: u8) -> &'static str {
     }
 }
 
-fn generated_grid_alternative_code(operation_code: u32) -> u32 {
+fn grid_format_label(format: u8) -> &'static str {
+    match format {
+        GRID_FORMAT_GEOTIFF => "GeoTIFF",
+        GRID_FORMAT_GTX => "GTX",
+        GRID_FORMAT_NTV2 => "NTv2",
+        _ => "Unsupported",
+    }
+}
+
+fn generated_operation_code_for_epsg_code(operation_code: u32) -> u32 {
     GENERATED_OPERATION_CODE_OFFSET + operation_code
+}
+
+fn runtime_supports_grid_format(format: u8) -> bool {
+    matches!(
+        format,
+        GRID_FORMAT_NTV2 | GRID_FORMAT_GTX | GRID_FORMAT_GEOTIFF
+    )
 }
 
 fn supported_grid_alternative(
@@ -706,42 +733,37 @@ fn supported_grid_alternative(
     original_grid_name: &str,
     allowed_proj_methods: &[&str],
 ) -> Option<GridAlternative> {
-    conn.query_row(
-        "SELECT proj_grid_name, proj_grid_format, inverse_direction, proj_method
+    let mut stmt = conn
+        .prepare(
+            "SELECT proj_grid_name, proj_grid_format, inverse_direction, proj_method
          FROM grid_alternatives
          WHERE original_grid_name=?1
            AND proj_grid_name IS NOT NULL
            AND proj_grid_name != ''
-         ORDER BY open_license DESC, direct_download DESC, proj_grid_name
-         LIMIT 1",
-        params![original_grid_name],
-        |row| {
-            let proj_grid_name: String = row.get(0)?;
-            let format_name: String = row.get(1)?;
-            let inverse_direction: bool = row.get(2)?;
-            let proj_method: String = row.get(3)?;
-            Ok(GridAlternative {
-                proj_grid_name,
-                format: grid_format_from_proj_grid_format(&format_name),
-                inverse_direction,
-                proj_method,
-            })
-        },
-    )
-    .ok()
-    .filter(|alternative| alternative.format != GRID_FORMAT_UNSUPPORTED)
-    .filter(|alternative| {
-        allowed_proj_methods
-            .iter()
-            .any(|method| alternative.proj_method == *method)
-    })
-}
+         ORDER BY open_license DESC, direct_download DESC, proj_grid_name",
+        )
+        .ok()?;
 
-fn grid_name_by_id(grid_resources: &[GridRecord], grid_id: u32) -> Option<String> {
-    grid_resources
-        .iter()
-        .find(|grid| grid.id == grid_id)
-        .map(|grid| grid.name.clone())
+    let alternatives = stmt.query_map(params![original_grid_name], |row| {
+        let proj_grid_name: String = row.get(0)?;
+        let format_name: String = row.get(1)?;
+        let inverse_direction: bool = row.get(2)?;
+        let proj_method: String = row.get(3)?;
+        Ok(GridAlternative {
+            proj_grid_name,
+            format: grid_format_from_proj_grid_format(&format_name),
+            inverse_direction,
+            proj_method,
+        })
+    });
+
+    let selected = alternatives.ok()?.flatten().find(|alternative| {
+        runtime_supports_grid_format(alternative.format)
+            && allowed_proj_methods
+                .iter()
+                .any(|method| alternative.proj_method == *method)
+    });
+    selected
 }
 
 fn generated_grid_method_key(alternative: &GridAlternative) -> String {
@@ -752,42 +774,37 @@ fn generated_grid_method_key(alternative: &GridAlternative) -> String {
     )
 }
 
-fn generated_horizontal_grid_operation(
-    ctx: &mut GeneratedOperationGraphContext<'_>,
-    operation: &OperationRecord,
-    used_operation_codes: &mut BTreeSet<u32>,
-) -> Option<OperationRecord> {
-    let OperationPayload::GridShift { grid_id, .. } = &operation.payload else {
-        return None;
-    };
-    let original_grid_name = grid_name_by_id(ctx.grid_resources, *grid_id)?;
-    let alternative = supported_grid_alternative(
-        ctx.conn,
-        &original_grid_name,
-        HORIZONTAL_GRID_ALTERNATIVE_METHODS,
-    )?;
-    let generated_code = generated_grid_alternative_code(operation.code);
-    if !used_operation_codes.insert(generated_code) {
-        return None;
+fn alternative_grid_resource(
+    conn: &Connection,
+    grid_name: &str,
+    allowed_proj_methods: &[&str],
+) -> Option<GridResourceSelection> {
+    if let Some(alternative) = supported_grid_alternative(conn, grid_name, allowed_proj_methods) {
+        return Some(GridResourceSelection {
+            method_name: generated_grid_method_key(&alternative),
+            grid_name: alternative.proj_grid_name,
+            grid2_name: String::new(),
+            format: alternative.format,
+            direction: if alternative.inverse_direction { 1 } else { 0 },
+        });
     }
 
-    let method_key = generated_grid_method_key(&alternative);
-    let generated_grid_id = intern_grid_resource(
-        ctx.grid_resources,
-        ctx.grid_resource_ids,
-        &method_key,
-        &alternative.proj_grid_name,
-        "",
-        alternative.format,
-    );
+    None
+}
 
-    Some(OperationRecord {
-        table_name: "generated_operation",
-        code: generated_code,
+fn horizontal_grid_alternative_operation(
+    operation: &OperationRecord,
+    grid_id: u32,
+    direction: u8,
+    format: u8,
+) -> OperationRecord {
+    OperationRecord {
+        table_name: "grid_alternative",
+        code: generated_operation_code_for_epsg_code(operation.code),
         name: format!(
             "{} (PROJ {} grid)",
             operation.name,
-            grid_format_label(alternative.format)
+            grid_format_label(format)
         ),
         source_crs_code: operation.source_crs_code,
         target_crs_code: operation.target_crs_code,
@@ -799,43 +816,49 @@ fn generated_horizontal_grid_operation(
         approximate: operation.approximate,
         area_codes: operation.area_codes.clone(),
         payload: OperationPayload::GridShift {
-            grid_id: generated_grid_id,
-            direction: if alternative.inverse_direction { 1 } else { 0 },
+            grid_id,
+            direction,
             interpolation: GRID_INTERPOLATION_BILINEAR,
         },
-    })
+    }
 }
 
-fn generated_vertical_grid_operation(
-    ctx: &mut GeneratedOperationGraphContext<'_>,
+fn vertical_grid_alternative_operation(
     operation: &VerticalOperationRecord,
-    code: u32,
-    horizontal: GeneratedVerticalHorizontalCodes,
-) -> Option<VerticalOperationRecord> {
-    let original_grid_name = grid_name_by_id(ctx.grid_resources, operation.grid_id)?;
-    let alternative = supported_grid_alternative(
-        ctx.conn,
-        &original_grid_name,
-        VERTICAL_GRID_ALTERNATIVE_METHODS,
-    )?;
-    let method_key = generated_grid_method_key(&alternative);
-    let generated_grid_id = intern_grid_resource(
-        ctx.grid_resources,
-        ctx.grid_resource_ids,
-        &method_key,
-        &alternative.proj_grid_name,
-        "",
-        alternative.format,
-    );
-
-    Some(VerticalOperationRecord {
-        table_name: "generated_operation",
-        code,
+    grid_id: u32,
+    format: u8,
+) -> VerticalOperationRecord {
+    VerticalOperationRecord {
+        table_name: "grid_alternative",
+        code: generated_operation_code_for_epsg_code(operation.code),
         name: format!(
             "{} (PROJ {} grid)",
             operation.name,
-            grid_format_label(alternative.format)
+            grid_format_label(format)
         ),
+        source_horizontal_crs_code: operation.source_horizontal_crs_code,
+        target_horizontal_crs_code: operation.target_horizontal_crs_code,
+        grid_horizontal_crs_code: operation.grid_horizontal_crs_code,
+        source_vertical_crs_code: operation.source_vertical_crs_code,
+        target_vertical_crs_code: operation.target_vertical_crs_code,
+        source_vertical_datum_code: operation.source_vertical_datum_code,
+        target_vertical_datum_code: operation.target_vertical_datum_code,
+        grid_id,
+        accuracy: operation.accuracy,
+        deprecated: operation.deprecated,
+        area_codes: operation.area_codes.clone(),
+    }
+}
+
+fn generated_vertical_bridge_operation(
+    operation: &VerticalOperationRecord,
+    code: u32,
+    horizontal: GeneratedVerticalHorizontalCodes,
+) -> VerticalOperationRecord {
+    VerticalOperationRecord {
+        table_name: "generated_operation",
+        code,
+        name: format!("{} (generated horizontal CRS bridge)", operation.name),
         source_horizontal_crs_code: horizontal.source_horizontal_crs_code,
         target_horizontal_crs_code: horizontal.target_horizontal_crs_code,
         grid_horizontal_crs_code: horizontal.grid_horizontal_crs_code,
@@ -843,11 +866,11 @@ fn generated_vertical_grid_operation(
         target_vertical_crs_code: operation.target_vertical_crs_code,
         source_vertical_datum_code: operation.source_vertical_datum_code,
         target_vertical_datum_code: operation.target_vertical_datum_code,
-        grid_id: generated_grid_id,
+        grid_id: operation.grid_id,
         accuracy: operation.accuracy,
         deprecated: operation.deprecated,
         area_codes: operation.area_codes.clone(),
-    })
+    }
 }
 
 fn directed_horizontal_edge(operation: &OperationRecord, direction: u8) -> HorizontalGraphEdge {
@@ -882,6 +905,56 @@ fn directed_horizontal_edge(operation: &OperationRecord, direction: u8) -> Horiz
             direction,
         },
     }
+}
+
+fn grid_format_by_id(grid_resources: &[GridRecord], grid_id: u32) -> Option<u8> {
+    grid_resources
+        .iter()
+        .find(|grid| grid.id == grid_id)
+        .map(|grid| grid.format)
+}
+
+fn grid_format_preference(format: u8) -> u8 {
+    match format {
+        GRID_FORMAT_GEOTIFF => 3,
+        GRID_FORMAT_NTV2 | GRID_FORMAT_GTX => 2,
+        _ => 0,
+    }
+}
+
+fn operation_grid_preference(grid_resources: &[GridRecord], operation: &OperationRecord) -> u8 {
+    let OperationPayload::GridShift { grid_id, .. } = &operation.payload else {
+        return 0;
+    };
+    grid_format_by_id(grid_resources, *grid_id)
+        .map(grid_format_preference)
+        .unwrap_or(0)
+}
+
+fn vertical_operation_grid_preference(
+    grid_resources: &[GridRecord],
+    operation: &VerticalOperationRecord,
+) -> u8 {
+    grid_format_by_id(grid_resources, operation.grid_id)
+        .map(grid_format_preference)
+        .unwrap_or(0)
+}
+
+fn operation_uses_supported_grid_resource(
+    grid_resources: &[GridRecord],
+    operation: &OperationRecord,
+) -> bool {
+    let OperationPayload::GridShift { grid_id, .. } = &operation.payload else {
+        return false;
+    };
+    grid_format_by_id(grid_resources, *grid_id).is_some_and(runtime_supports_grid_format)
+}
+
+fn vertical_operation_uses_supported_grid_resource(
+    grid_resources: &[GridRecord],
+    operation: &VerticalOperationRecord,
+) -> bool {
+    grid_format_by_id(grid_resources, operation.grid_id).is_some_and(runtime_supports_grid_format)
 }
 
 fn is_zero_helmert(operation: &OperationRecord) -> bool {
@@ -999,7 +1072,7 @@ fn crs_name(geographic_names: &BTreeMap<u32, String>, code: u32) -> String {
 }
 
 fn add_generated_operation_graph(
-    mut ctx: GeneratedOperationGraphContext<'_>,
+    ctx: GeneratedOperationGraphContext<'_>,
     operations: &mut Vec<OperationRecord>,
     vertical_operations: &mut Vec<VerticalOperationRecord>,
 ) {
@@ -1034,31 +1107,29 @@ fn add_generated_operation_graph(
             .insert(horizontal_base);
     }
 
-    let mut used_operation_codes: BTreeSet<u32> =
-        operations.iter().map(|operation| operation.code).collect();
-    let base_operations = operations.clone();
-    let mut generated_horizontal_operations = Vec::new();
-    for operation in &base_operations {
-        if let Some(generated) =
-            generated_horizontal_grid_operation(&mut ctx, operation, &mut used_operation_codes)
-        {
-            generated_horizontal_operations.push(generated.clone());
-            operations.push(generated);
-        }
-    }
-
-    let datum_equivalences = datum_ensemble_equivalences(ctx.conn);
-    let bridge_edges = identity_bridge_edges(operations, &datum_equivalences);
-    if bridge_edges.is_empty() || generated_horizontal_operations.is_empty() {
-        return;
-    }
+    let mut horizontal_operations = operations
+        .iter()
+        .filter(|operation| operation_uses_supported_grid_resource(ctx.grid_resources, operation))
+        .collect::<Vec<_>>();
+    horizontal_operations.sort_by(|left, right| {
+        operation_grid_preference(ctx.grid_resources, right)
+            .cmp(&operation_grid_preference(ctx.grid_resources, left))
+    });
 
     let mut horizontal_edges = Vec::new();
-    for operation in &generated_horizontal_operations {
+    for operation in horizontal_operations {
         horizontal_edges.push(directed_horizontal_edge(operation, 0));
         horizontal_edges.push(directed_horizontal_edge(operation, 1));
     }
 
+    let datum_equivalences = datum_ensemble_equivalences(ctx.conn);
+    let bridge_edges = identity_bridge_edges(operations, &datum_equivalences);
+    if bridge_edges.is_empty() || horizontal_edges.is_empty() {
+        return;
+    }
+
+    let mut used_operation_codes: BTreeSet<u32> =
+        operations.iter().map(|operation| operation.code).collect();
     let mut existing_pairs = BTreeSet::<(u32, u32)>::new();
     let mut horizontal_path_pairs = BTreeSet::<(u32, u32)>::new();
     let mut next_composed_code = GENERATED_COMPOSED_OPERATION_CODE_BASE;
@@ -1121,10 +1192,17 @@ fn add_generated_operation_graph(
         .iter()
         .map(|operation| operation.code)
         .collect();
-    let base_vertical_operations = vertical_operations.clone();
+    let mut base_vertical_operations = vertical_operations.clone();
+    base_vertical_operations.sort_by(|left, right| {
+        vertical_operation_grid_preference(ctx.grid_resources, right).cmp(
+            &vertical_operation_grid_preference(ctx.grid_resources, left),
+        )
+    });
     let mut next_extra_vertical_code = GENERATED_EXTRA_VERTICAL_OPERATION_CODE_BASE;
     for operation in &base_vertical_operations {
-        if operation.source_horizontal_crs_code == 0 {
+        if operation.source_horizontal_crs_code == 0
+            || !vertical_operation_uses_supported_grid_resource(ctx.grid_resources, operation)
+        {
             continue;
         }
         let Some(target_horizontal_candidates) =
@@ -1145,12 +1223,11 @@ fn add_generated_operation_graph(
                 }
 
                 let code = allocate_generated_code(
-                    generated_grid_alternative_code(operation.code),
+                    generated_operation_code_for_epsg_code(operation.code),
                     &mut used_vertical_operation_codes,
                     &mut next_extra_vertical_code,
                 );
-                if let Some(generated) = generated_vertical_grid_operation(
-                    &mut ctx,
+                vertical_operations.push(generated_vertical_bridge_operation(
                     operation,
                     code,
                     GeneratedVerticalHorizontalCodes {
@@ -1158,9 +1235,7 @@ fn add_generated_operation_graph(
                         target_horizontal_crs_code: *target_horizontal,
                         grid_horizontal_crs_code: bridge.source_crs_code,
                     },
-                ) {
-                    vertical_operations.push(generated);
-                }
+                ));
             }
         }
     }
@@ -1903,6 +1978,8 @@ fn main() {
 
     let mut grid_resources: Vec<GridRecord> = Vec::new();
     let mut grid_resource_ids: BTreeMap<(String, String, String), u32> = BTreeMap::new();
+    let mut pending_horizontal_grid_alternatives = Vec::new();
+    let mut pending_vertical_grid_alternatives = Vec::new();
     let mut operations: Vec<OperationRecord> = Vec::new();
     let mut vertical_operations: Vec<VerticalOperationRecord> = Vec::new();
 
@@ -1967,15 +2044,17 @@ fn main() {
                 continue;
             }
 
+            let original_format = grid_format_from_method(&row.7);
             let grid_id = intern_grid_resource(
                 &mut grid_resources,
                 &mut grid_resource_ids,
                 &row.7,
                 &row.8,
                 &row.9,
-                grid_format_from_method(&row.7),
+                original_format,
             );
 
+            let operation_index = operations.len();
             operations.push(OperationRecord {
                 table_name: "grid_transformation",
                 code,
@@ -1995,6 +2074,25 @@ fn main() {
                     interpolation: GRID_INTERPOLATION_BILINEAR,
                 },
             });
+
+            if let Some(grid) =
+                alternative_grid_resource(&conn, &row.8, HORIZONTAL_GRID_ALTERNATIVE_METHODS)
+            {
+                let grid_id = intern_grid_resource(
+                    &mut grid_resources,
+                    &mut grid_resource_ids,
+                    &grid.method_name,
+                    &grid.grid_name,
+                    &grid.grid2_name,
+                    grid.format,
+                );
+                pending_horizontal_grid_alternatives.push(PendingHorizontalGridAlternative {
+                    operation_index,
+                    grid_id,
+                    direction: grid.direction,
+                    format: grid.format,
+                });
+            }
         }
     }
 
@@ -2070,8 +2168,10 @@ fn main() {
             let Some(target_vertical_datum_code) = row.6 else {
                 continue;
             };
-            let format = grid_format_from_method(&row.9);
-            if format == GRID_FORMAT_UNSUPPORTED {
+            let original_format = grid_format_from_method(&row.9);
+            let alternative_grid =
+                alternative_grid_resource(&conn, &row.10, VERTICAL_GRID_ALTERNATIVE_METHODS);
+            if original_format == GRID_FORMAT_UNSUPPORTED && alternative_grid.is_none() {
                 continue;
             }
 
@@ -2098,9 +2198,10 @@ fn main() {
                 &row.9,
                 &row.10,
                 &row.11,
-                format,
+                original_format,
             );
 
+            let operation_index = vertical_operations.len();
             vertical_operations.push(VerticalOperationRecord {
                 table_name: "grid_transformation",
                 code,
@@ -2117,6 +2218,22 @@ fn main() {
                 deprecated: row.13,
                 area_codes: Vec::new(),
             });
+
+            if let Some(grid) = alternative_grid {
+                let grid_id = intern_grid_resource(
+                    &mut grid_resources,
+                    &mut grid_resource_ids,
+                    &grid.method_name,
+                    &grid.grid_name,
+                    &grid.grid2_name,
+                    grid.format,
+                );
+                pending_vertical_grid_alternatives.push(PendingVerticalGridAlternative {
+                    operation_index,
+                    grid_id,
+                    format: grid.format,
+                });
+            }
         }
     }
 
@@ -2439,11 +2556,27 @@ fn main() {
         operation.area_codes.sort_unstable();
         operation.area_codes.dedup();
     }
+    for pending in pending_horizontal_grid_alternatives {
+        let operation = operations[pending.operation_index].clone();
+        operations.push(horizontal_grid_alternative_operation(
+            &operation,
+            pending.grid_id,
+            pending.direction,
+            pending.format,
+        ));
+    }
+    for pending in pending_vertical_grid_alternatives {
+        let operation = vertical_operations[pending.operation_index].clone();
+        vertical_operations.push(vertical_grid_alternative_operation(
+            &operation,
+            pending.grid_id,
+            pending.format,
+        ));
+    }
     add_generated_operation_graph(
         GeneratedOperationGraphContext {
             conn: &conn,
-            grid_resources: &mut grid_resources,
-            grid_resource_ids: &mut grid_resource_ids,
+            grid_resources: &grid_resources,
             geo_crs: &geo_crs,
             proj_crs: &proj_crs,
             compound_crs: &compound_crs,
