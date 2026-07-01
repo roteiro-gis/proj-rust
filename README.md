@@ -127,6 +127,10 @@ cargo run --manifest-path gen-reference/Cargo.toml --bin gen-registry
 ./scripts/check-registry-generation.sh
 ```
 
+During generation, supported PROJ grid alternatives can be composed with known
+zero/identity bridge operations to create deterministic generated coordinate
+operations when EPSG source or target CRS definitions need bridging.
+
 Reference comparisons and benchmark results are in [docs/benchmark-report.md](docs/benchmark-report.md).
 
 ## License

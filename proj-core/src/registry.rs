@@ -223,7 +223,8 @@ mod tests {
 
         let candidates = operation_candidates_between(&source, &target).unwrap();
         assert!(candidates.iter().any(|candidate| {
-            candidate.name == "WGS 84 to Amersfoort via RDNAPTRANS2018" && candidate.uses_grids
+            candidate.name == "WGS 84 to Amersfoort (generated from EPSG:1149 + EPSG:9909282)"
+                && candidate.uses_grids
         }));
 
         let vertical_operations = vertical_grid_operations_between(&source, &target);
@@ -301,10 +302,12 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 946181);
+        assert_eq!(value["output"]["byte_len"], 983828);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
-        assert_eq!(value["counts"]["vertical_operations"], 26);
+        assert_eq!(value["counts"]["grid_resources"], 403);
+        assert_eq!(value["counts"]["operations"], 2122);
+        assert_eq!(value["counts"]["vertical_operations"], 27);
         assert!(value["output"]["sha256"]
             .as_str()
             .unwrap()

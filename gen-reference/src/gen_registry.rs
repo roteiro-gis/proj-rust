@@ -184,16 +184,12 @@ const HORIZONTAL_CRS_PROJECTED: u8 = 2;
 const VERTICAL_COMPONENT_ELLIPSOIDAL: u8 = 1;
 const VERTICAL_COMPONENT_REGISTRY_CRS: u8 = 2;
 
-const GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION: u32 = 9_909_282;
-const GENERATED_RDNAP_WGS84_TO_AMERSFOORT_OPERATION: u32 = 9_900_001;
-const GENERATED_RDNAP_GEOTIFF_VERTICAL_OPERATION: u32 = 9_909_283;
-const EPSG_ETRS89_TO_WGS84_OPERATION: u32 = 1149;
-const EPSG_RDNAP_HORIZONTAL_OPERATION: u32 = 9282;
-const EPSG_RDNAP_VERTICAL_OPERATION: u32 = 9283;
-const EPSG_WGS84_GEOGRAPHIC_2D: u32 = 4326;
-const EPSG_WGS84_DATUM: u32 = 6326;
-const EPSG_AMERSFOORT_GEOGRAPHIC_2D: u32 = 4289;
-const EPSG_AMERSFOORT_DATUM: u32 = 6289;
+const GENERATED_OPERATION_CODE_OFFSET: u32 = 9_900_000;
+const GENERATED_COMPOSED_OPERATION_CODE_BASE: u32 = 9_900_001;
+const GENERATED_EXTRA_VERTICAL_OPERATION_CODE_BASE: u32 = 9_800_001;
+const KNOWN_IDENTITY_BRIDGE_OPERATION_CODES: &[u32] = &[1149];
+const HORIZONTAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["hgridshift", "gridshift"];
+const VERTICAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["geoid_like"];
 
 // EPSG:32662 is deprecated upstream but remains part of this crate's documented
 // public support set.
@@ -642,156 +638,532 @@ fn intern_grid_resource(
     id
 }
 
-fn grid_alternative(
+struct GridAlternative {
+    proj_grid_name: String,
+    format: u8,
+    inverse_direction: bool,
+    proj_method: String,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+struct GeneratedOperationStep {
+    operation_code: u32,
+    direction: u8,
+}
+
+#[derive(Clone)]
+struct HorizontalGraphEdge {
+    source_crs_code: u32,
+    target_crs_code: u32,
+    source_datum_code: u32,
+    target_datum_code: u32,
+    accuracy: Option<f64>,
+    deprecated: bool,
+    approximate: bool,
+    area_codes: Vec<u32>,
+    step: GeneratedOperationStep,
+}
+
+struct GeneratedOperationGraphContext<'a> {
+    conn: &'a Connection,
+    grid_resources: &'a mut Vec<GridRecord>,
+    grid_resource_ids: &'a mut BTreeMap<(String, String, String), u32>,
+    geo_crs: &'a [GeoCrs],
+    proj_crs: &'a [ProjCrs],
+    compound_crs: &'a [CompoundCrs],
+}
+
+struct GeneratedVerticalHorizontalCodes {
+    source_horizontal_crs_code: u32,
+    target_horizontal_crs_code: u32,
+    grid_horizontal_crs_code: u32,
+}
+
+fn grid_format_label(format: u8) -> &'static str {
+    match format {
+        GRID_FORMAT_GEOTIFF => "GeoTIFF",
+        GRID_FORMAT_GTX => "GTX",
+        GRID_FORMAT_NTV2 => "NTv2",
+        _ => "Unsupported",
+    }
+}
+
+fn grid_format_key(format: u8) -> &'static str {
+    match format {
+        GRID_FORMAT_GEOTIFF => "GTiff",
+        GRID_FORMAT_GTX => "GTX",
+        GRID_FORMAT_NTV2 => "NTv2",
+        _ => "Unsupported",
+    }
+}
+
+fn generated_grid_alternative_code(operation_code: u32) -> u32 {
+    GENERATED_OPERATION_CODE_OFFSET + operation_code
+}
+
+fn supported_grid_alternative(
     conn: &Connection,
     original_grid_name: &str,
-    proj_method: &str,
-) -> Option<(String, u8, bool)> {
+    allowed_proj_methods: &[&str],
+) -> Option<GridAlternative> {
     conn.query_row(
-        "SELECT proj_grid_name, proj_grid_format, inverse_direction
+        "SELECT proj_grid_name, proj_grid_format, inverse_direction, proj_method
          FROM grid_alternatives
          WHERE original_grid_name=?1
-           AND proj_method=?2
            AND proj_grid_name IS NOT NULL
            AND proj_grid_name != ''
          ORDER BY open_license DESC, direct_download DESC, proj_grid_name
          LIMIT 1",
-        params![original_grid_name, proj_method],
+        params![original_grid_name],
         |row| {
-            let name: String = row.get(0)?;
+            let proj_grid_name: String = row.get(0)?;
             let format_name: String = row.get(1)?;
             let inverse_direction: bool = row.get(2)?;
-            Ok((
-                name,
-                grid_format_from_proj_grid_format(&format_name),
+            let proj_method: String = row.get(3)?;
+            Ok(GridAlternative {
+                proj_grid_name,
+                format: grid_format_from_proj_grid_format(&format_name),
                 inverse_direction,
-            ))
+                proj_method,
+            })
         },
     )
     .ok()
-    .filter(|(_, format, _)| *format != GRID_FORMAT_UNSUPPORTED)
+    .filter(|alternative| alternative.format != GRID_FORMAT_UNSUPPORTED)
+    .filter(|alternative| {
+        allowed_proj_methods
+            .iter()
+            .any(|method| alternative.proj_method == *method)
+    })
 }
 
-fn add_generated_rdnap_aliases(
-    conn: &Connection,
-    grid_resources: &mut Vec<GridRecord>,
-    grid_resource_ids: &mut BTreeMap<(String, String, String), u32>,
+fn grid_name_by_id(grid_resources: &[GridRecord], grid_id: u32) -> Option<String> {
+    grid_resources
+        .iter()
+        .find(|grid| grid.id == grid_id)
+        .map(|grid| grid.name.clone())
+}
+
+fn generated_grid_method_key(alternative: &GridAlternative) -> String {
+    format!(
+        "{} {}",
+        grid_format_key(alternative.format),
+        alternative.proj_method
+    )
+}
+
+fn generated_horizontal_grid_operation(
+    ctx: &mut GeneratedOperationGraphContext<'_>,
+    operation: &OperationRecord,
+    used_operation_codes: &mut BTreeSet<u32>,
+) -> Option<OperationRecord> {
+    let OperationPayload::GridShift { grid_id, .. } = &operation.payload else {
+        return None;
+    };
+    let original_grid_name = grid_name_by_id(ctx.grid_resources, *grid_id)?;
+    let alternative = supported_grid_alternative(
+        ctx.conn,
+        &original_grid_name,
+        HORIZONTAL_GRID_ALTERNATIVE_METHODS,
+    )?;
+    let generated_code = generated_grid_alternative_code(operation.code);
+    if !used_operation_codes.insert(generated_code) {
+        return None;
+    }
+
+    let method_key = generated_grid_method_key(&alternative);
+    let generated_grid_id = intern_grid_resource(
+        ctx.grid_resources,
+        ctx.grid_resource_ids,
+        &method_key,
+        &alternative.proj_grid_name,
+        "",
+        alternative.format,
+    );
+
+    Some(OperationRecord {
+        table_name: "generated_operation",
+        code: generated_code,
+        name: format!(
+            "{} (PROJ {} grid)",
+            operation.name,
+            grid_format_label(alternative.format)
+        ),
+        source_crs_code: operation.source_crs_code,
+        target_crs_code: operation.target_crs_code,
+        source_datum_code: operation.source_datum_code,
+        target_datum_code: operation.target_datum_code,
+        accuracy: operation.accuracy,
+        deprecated: operation.deprecated,
+        preferred: operation.preferred,
+        approximate: operation.approximate,
+        area_codes: operation.area_codes.clone(),
+        payload: OperationPayload::GridShift {
+            grid_id: generated_grid_id,
+            direction: if alternative.inverse_direction { 1 } else { 0 },
+            interpolation: GRID_INTERPOLATION_BILINEAR,
+        },
+    })
+}
+
+fn generated_vertical_grid_operation(
+    ctx: &mut GeneratedOperationGraphContext<'_>,
+    operation: &VerticalOperationRecord,
+    code: u32,
+    horizontal: GeneratedVerticalHorizontalCodes,
+) -> Option<VerticalOperationRecord> {
+    let original_grid_name = grid_name_by_id(ctx.grid_resources, operation.grid_id)?;
+    let alternative = supported_grid_alternative(
+        ctx.conn,
+        &original_grid_name,
+        VERTICAL_GRID_ALTERNATIVE_METHODS,
+    )?;
+    let method_key = generated_grid_method_key(&alternative);
+    let generated_grid_id = intern_grid_resource(
+        ctx.grid_resources,
+        ctx.grid_resource_ids,
+        &method_key,
+        &alternative.proj_grid_name,
+        "",
+        alternative.format,
+    );
+
+    Some(VerticalOperationRecord {
+        table_name: "generated_operation",
+        code,
+        name: format!(
+            "{} (PROJ {} grid)",
+            operation.name,
+            grid_format_label(alternative.format)
+        ),
+        source_horizontal_crs_code: horizontal.source_horizontal_crs_code,
+        target_horizontal_crs_code: horizontal.target_horizontal_crs_code,
+        grid_horizontal_crs_code: horizontal.grid_horizontal_crs_code,
+        source_vertical_crs_code: operation.source_vertical_crs_code,
+        target_vertical_crs_code: operation.target_vertical_crs_code,
+        source_vertical_datum_code: operation.source_vertical_datum_code,
+        target_vertical_datum_code: operation.target_vertical_datum_code,
+        grid_id: generated_grid_id,
+        accuracy: operation.accuracy,
+        deprecated: operation.deprecated,
+        area_codes: operation.area_codes.clone(),
+    })
+}
+
+fn directed_horizontal_edge(operation: &OperationRecord, direction: u8) -> HorizontalGraphEdge {
+    let (source_crs_code, target_crs_code, source_datum_code, target_datum_code) = if direction == 0
+    {
+        (
+            operation.source_crs_code,
+            operation.target_crs_code,
+            operation.source_datum_code,
+            operation.target_datum_code,
+        )
+    } else {
+        (
+            operation.target_crs_code,
+            operation.source_crs_code,
+            operation.target_datum_code,
+            operation.source_datum_code,
+        )
+    };
+
+    HorizontalGraphEdge {
+        source_crs_code,
+        target_crs_code,
+        source_datum_code,
+        target_datum_code,
+        accuracy: operation.accuracy,
+        deprecated: operation.deprecated,
+        approximate: operation.approximate,
+        area_codes: operation.area_codes.clone(),
+        step: GeneratedOperationStep {
+            operation_code: operation.code,
+            direction,
+        },
+    }
+}
+
+fn is_zero_helmert(operation: &OperationRecord) -> bool {
+    let OperationPayload::Helmert(params) = &operation.payload else {
+        return false;
+    };
+    params.iter().all(|value| *value == 0.0)
+}
+
+fn datum_ensemble_equivalences(conn: &Connection) -> BTreeMap<u32, BTreeSet<u32>> {
+    let mut ensemble_members = BTreeMap::<u32, Vec<u32>>::new();
+    let mut stmt = conn
+        .prepare(
+            "SELECT CAST(ensemble_code AS TEXT), CAST(member_code AS TEXT)
+             FROM geodetic_datum_ensemble_member
+             WHERE ensemble_auth_name='EPSG'
+               AND member_auth_name='EPSG'
+             ORDER BY CAST(ensemble_code AS INTEGER), sequence",
+        )
+        .unwrap_or_else(|err| fatal(format!("failed to read datum ensemble metadata: {err}")));
+    for row in stmt
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .unwrap_or_else(|err| fatal(format!("failed to query datum ensemble metadata: {err}")))
+        .flatten()
+    {
+        let (Some(ensemble), Some(member)) = (parse_u32_code(&row.0), parse_u32_code(&row.1))
+        else {
+            continue;
+        };
+        ensemble_members.entry(ensemble).or_default().push(member);
+    }
+
+    let mut equivalences = BTreeMap::<u32, BTreeSet<u32>>::new();
+    for (ensemble, members) in ensemble_members {
+        for &member in &members {
+            equivalences.entry(ensemble).or_default().insert(member);
+            equivalences.entry(member).or_default().insert(ensemble);
+            for &other_member in &members {
+                if member != other_member {
+                    equivalences.entry(member).or_default().insert(other_member);
+                }
+            }
+        }
+    }
+    equivalences
+}
+
+fn datums_are_equivalent(
+    datum_equivalences: &BTreeMap<u32, BTreeSet<u32>>,
+    left: u32,
+    right: u32,
+) -> bool {
+    left == right
+        || datum_equivalences
+            .get(&left)
+            .is_some_and(|equivalent| equivalent.contains(&right))
+}
+
+fn identity_bridge_edges(
+    operations: &[OperationRecord],
+    datum_equivalences: &BTreeMap<u32, BTreeSet<u32>>,
+) -> Vec<HorizontalGraphEdge> {
+    let mut edges = Vec::new();
+    for operation in operations {
+        if operation.deprecated || !is_zero_helmert(operation) {
+            continue;
+        }
+        let known_bridge = KNOWN_IDENTITY_BRIDGE_OPERATION_CODES.contains(&operation.code);
+        let equivalent_datums = datums_are_equivalent(
+            datum_equivalences,
+            operation.source_datum_code,
+            operation.target_datum_code,
+        );
+        if !known_bridge && !equivalent_datums {
+            continue;
+        }
+        edges.push(directed_horizontal_edge(operation, 0));
+        edges.push(directed_horizontal_edge(operation, 1));
+    }
+    edges
+}
+
+fn combine_accuracy(left: Option<f64>, right: Option<f64>) -> Option<f64> {
+    match (left, right) {
+        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(value), None) | (None, Some(value)) => Some(value),
+        (None, None) => None,
+    }
+}
+
+fn allocate_generated_code(
+    preferred_code: u32,
+    used_codes: &mut BTreeSet<u32>,
+    next_code: &mut u32,
+) -> u32 {
+    if used_codes.insert(preferred_code) {
+        return preferred_code;
+    }
+    loop {
+        let code = *next_code;
+        *next_code += 1;
+        if used_codes.insert(code) {
+            return code;
+        }
+    }
+}
+
+fn crs_name(geographic_names: &BTreeMap<u32, String>, code: u32) -> String {
+    geographic_names
+        .get(&code)
+        .cloned()
+        .unwrap_or_else(|| format!("EPSG:{code}"))
+}
+
+fn add_generated_operation_graph(
+    mut ctx: GeneratedOperationGraphContext<'_>,
     operations: &mut Vec<OperationRecord>,
     vertical_operations: &mut Vec<VerticalOperationRecord>,
 ) {
-    let Some(horizontal_operation) = operations
+    let geographic_names: BTreeMap<u32, String> = ctx
+        .geo_crs
         .iter()
-        .find(|operation| operation.code == EPSG_RDNAP_HORIZONTAL_OPERATION)
-        .cloned()
-    else {
-        return;
-    };
-    let Some(etrs89_to_wgs84_accuracy) = operations
+        .map(|crs| (crs.code, crs.name.clone()))
+        .collect();
+    let projected_base_geographic: BTreeMap<u32, u32> = ctx
+        .proj_crs
         .iter()
-        .find(|operation| operation.code == EPSG_ETRS89_TO_WGS84_OPERATION)
-        .map(|operation| operation.accuracy)
-    else {
-        return;
-    };
-    let Some((rdtrans_grid_name, rdtrans_format, rdtrans_inverse)) =
-        grid_alternative(conn, "rdtrans2018.gsb", "hgridshift")
-    else {
-        return;
-    };
+        .map(|crs| (crs.code, crs.base_geographic_crs_code))
+        .collect();
+    let mut compound_base_geographic_by_vertical = BTreeMap::<u32, BTreeSet<u32>>::new();
+    for crs in ctx.compound_crs {
+        if crs.vertical_kind != VERTICAL_COMPONENT_REGISTRY_CRS {
+            continue;
+        }
+        let horizontal_base = match crs.horizontal_kind {
+            HORIZONTAL_CRS_GEOGRAPHIC => crs.horizontal_crs_code,
+            HORIZONTAL_CRS_PROJECTED => {
+                match projected_base_geographic.get(&crs.horizontal_crs_code) {
+                    Some(code) => *code,
+                    None => continue,
+                }
+            }
+            _ => continue,
+        };
+        compound_base_geographic_by_vertical
+            .entry(crs.vertical_crs_code)
+            .or_default()
+            .insert(horizontal_base);
+    }
 
-    let rdtrans_grid_id = intern_grid_resource(
-        grid_resources,
-        grid_resource_ids,
-        "GTiff hgridshift",
-        &rdtrans_grid_name,
-        "",
-        rdtrans_format,
-    );
-    let rdtrans_direction = if rdtrans_inverse { 1 } else { 0 };
-    operations.push(OperationRecord {
-        table_name: "generated_operation",
-        code: GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION,
-        name: format!("{} (PROJ GeoTIFF grid)", horizontal_operation.name),
-        source_crs_code: horizontal_operation.source_crs_code,
-        target_crs_code: horizontal_operation.target_crs_code,
-        source_datum_code: horizontal_operation.source_datum_code,
-        target_datum_code: horizontal_operation.target_datum_code,
-        accuracy: horizontal_operation.accuracy,
-        deprecated: horizontal_operation.deprecated,
-        preferred: horizontal_operation.preferred,
-        approximate: horizontal_operation.approximate,
-        area_codes: horizontal_operation.area_codes.clone(),
-        payload: OperationPayload::GridShift {
-            grid_id: rdtrans_grid_id,
-            direction: rdtrans_direction,
-            interpolation: GRID_INTERPOLATION_BILINEAR,
-        },
-    });
+    let mut used_operation_codes: BTreeSet<u32> =
+        operations.iter().map(|operation| operation.code).collect();
+    let base_operations = operations.clone();
+    let mut generated_horizontal_operations = Vec::new();
+    for operation in &base_operations {
+        if let Some(generated) =
+            generated_horizontal_grid_operation(&mut ctx, operation, &mut used_operation_codes)
+        {
+            generated_horizontal_operations.push(generated.clone());
+            operations.push(generated);
+        }
+    }
 
-    operations.push(OperationRecord {
-        table_name: "generated_operation",
-        code: GENERATED_RDNAP_WGS84_TO_AMERSFOORT_OPERATION,
-        name: "WGS 84 to Amersfoort via RDNAPTRANS2018".to_string(),
-        source_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
-        target_crs_code: EPSG_AMERSFOORT_GEOGRAPHIC_2D,
-        source_datum_code: EPSG_WGS84_DATUM,
-        target_datum_code: EPSG_AMERSFOORT_DATUM,
-        accuracy: etrs89_to_wgs84_accuracy.or(horizontal_operation.accuracy),
-        deprecated: false,
-        preferred: true,
-        approximate: false,
-        area_codes: horizontal_operation.area_codes.clone(),
-        payload: OperationPayload::Concatenated {
-            steps: vec![
-                (
-                    EPSG_ETRS89_TO_WGS84_OPERATION,
-                    1, // WGS 84 -> ETRS89.
+    let datum_equivalences = datum_ensemble_equivalences(ctx.conn);
+    let bridge_edges = identity_bridge_edges(operations, &datum_equivalences);
+    if bridge_edges.is_empty() || generated_horizontal_operations.is_empty() {
+        return;
+    }
+
+    let mut horizontal_edges = Vec::new();
+    for operation in &generated_horizontal_operations {
+        horizontal_edges.push(directed_horizontal_edge(operation, 0));
+        horizontal_edges.push(directed_horizontal_edge(operation, 1));
+    }
+
+    let mut existing_pairs = BTreeSet::<(u32, u32)>::new();
+    let mut horizontal_path_pairs = BTreeSet::<(u32, u32)>::new();
+    let mut next_composed_code = GENERATED_COMPOSED_OPERATION_CODE_BASE;
+    for bridge in &bridge_edges {
+        for operation_edge in &horizontal_edges {
+            if bridge.target_crs_code != operation_edge.source_crs_code {
+                continue;
+            }
+            let source = bridge.source_crs_code;
+            let target = operation_edge.target_crs_code;
+            if source == target || !existing_pairs.insert((source.min(target), source.max(target)))
+            {
+                continue;
+            }
+
+            let code = allocate_generated_code(
+                next_composed_code,
+                &mut used_operation_codes,
+                &mut next_composed_code,
+            );
+            operations.push(OperationRecord {
+                table_name: "generated_operation",
+                code,
+                name: format!(
+                    "{} to {} (generated from EPSG:{} + EPSG:{})",
+                    crs_name(&geographic_names, source),
+                    crs_name(&geographic_names, target),
+                    bridge.step.operation_code,
+                    operation_edge.step.operation_code
                 ),
-                (
-                    GENERATED_RDNAP_GEOTIFF_HORIZONTAL_OPERATION,
-                    1, // ETRS89 -> Amersfoort.
-                ),
-            ],
-        },
-    });
+                source_crs_code: source,
+                target_crs_code: target,
+                source_datum_code: bridge.source_datum_code,
+                target_datum_code: operation_edge.target_datum_code,
+                accuracy: combine_accuracy(bridge.accuracy, operation_edge.accuracy),
+                deprecated: bridge.deprecated || operation_edge.deprecated,
+                preferred: true,
+                approximate: bridge.approximate || operation_edge.approximate,
+                area_codes: operation_edge.area_codes.clone(),
+                payload: OperationPayload::Concatenated {
+                    steps: vec![
+                        (bridge.step.operation_code, bridge.step.direction),
+                        (
+                            operation_edge.step.operation_code,
+                            operation_edge.step.direction,
+                        ),
+                    ],
+                },
+            });
+            horizontal_path_pairs.insert((source, target));
+            horizontal_path_pairs.insert((target, source));
+        }
+    }
 
-    let Some(vertical_operation) = vertical_operations
+    if horizontal_path_pairs.is_empty() {
+        return;
+    }
+
+    let mut used_vertical_operation_codes: BTreeSet<u32> = vertical_operations
         .iter()
-        .find(|operation| operation.code == EPSG_RDNAP_VERTICAL_OPERATION)
-        .cloned()
-    else {
-        return;
-    };
-    let Some((nlgeo_grid_name, nlgeo_format, _)) =
-        grid_alternative(conn, "nlgeo2018.gtx", "geoid_like")
-    else {
-        return;
-    };
+        .map(|operation| operation.code)
+        .collect();
+    let base_vertical_operations = vertical_operations.clone();
+    let mut next_extra_vertical_code = GENERATED_EXTRA_VERTICAL_OPERATION_CODE_BASE;
+    for operation in &base_vertical_operations {
+        if operation.source_horizontal_crs_code == 0 {
+            continue;
+        }
+        let Some(target_horizontal_candidates) =
+            compound_base_geographic_by_vertical.get(&operation.target_vertical_crs_code)
+        else {
+            continue;
+        };
+        for bridge in &bridge_edges {
+            if bridge.target_crs_code != operation.source_horizontal_crs_code {
+                continue;
+            }
+            for target_horizontal in target_horizontal_candidates {
+                if *target_horizontal == operation.source_horizontal_crs_code
+                    || !horizontal_path_pairs
+                        .contains(&(bridge.source_crs_code, *target_horizontal))
+                {
+                    continue;
+                }
 
-    let nlgeo_grid_id = intern_grid_resource(
-        grid_resources,
-        grid_resource_ids,
-        "GTiff geoid_like",
-        &nlgeo_grid_name,
-        "",
-        nlgeo_format,
-    );
-    vertical_operations.push(VerticalOperationRecord {
-        table_name: "generated_operation",
-        code: GENERATED_RDNAP_GEOTIFF_VERTICAL_OPERATION,
-        name: format!("{} (PROJ GeoTIFF grid)", vertical_operation.name),
-        source_horizontal_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
-        target_horizontal_crs_code: EPSG_AMERSFOORT_GEOGRAPHIC_2D,
-        grid_horizontal_crs_code: EPSG_WGS84_GEOGRAPHIC_2D,
-        source_vertical_crs_code: vertical_operation.source_vertical_crs_code,
-        target_vertical_crs_code: vertical_operation.target_vertical_crs_code,
-        source_vertical_datum_code: vertical_operation.source_vertical_datum_code,
-        target_vertical_datum_code: vertical_operation.target_vertical_datum_code,
-        grid_id: nlgeo_grid_id,
-        accuracy: vertical_operation.accuracy,
-        deprecated: vertical_operation.deprecated,
-        area_codes: vertical_operation.area_codes,
-    });
+                let code = allocate_generated_code(
+                    generated_grid_alternative_code(operation.code),
+                    &mut used_vertical_operation_codes,
+                    &mut next_extra_vertical_code,
+                );
+                if let Some(generated) = generated_vertical_grid_operation(
+                    &mut ctx,
+                    operation,
+                    code,
+                    GeneratedVerticalHorizontalCodes {
+                        source_horizontal_crs_code: bridge.source_crs_code,
+                        target_horizontal_crs_code: *target_horizontal,
+                        grid_horizontal_crs_code: bridge.source_crs_code,
+                    },
+                ) {
+                    vertical_operations.push(generated);
+                }
+            }
+        }
+    }
 }
 
 fn read_proj_db_metadata(conn: &Connection) -> BTreeMap<String, String> {
@@ -2067,10 +2439,15 @@ fn main() {
         operation.area_codes.sort_unstable();
         operation.area_codes.dedup();
     }
-    add_generated_rdnap_aliases(
-        &conn,
-        &mut grid_resources,
-        &mut grid_resource_ids,
+    add_generated_operation_graph(
+        GeneratedOperationGraphContext {
+            conn: &conn,
+            grid_resources: &mut grid_resources,
+            grid_resource_ids: &mut grid_resource_ids,
+            geo_crs: &geo_crs,
+            proj_crs: &proj_crs,
+            compound_crs: &compound_crs,
+        },
         &mut operations,
         &mut vertical_operations,
     );
