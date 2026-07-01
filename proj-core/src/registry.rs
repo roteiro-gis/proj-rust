@@ -302,12 +302,12 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 983828);
+        assert_eq!(value["output"]["byte_len"], 1082565);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
-        assert_eq!(value["counts"]["grid_resources"], 403);
-        assert_eq!(value["counts"]["operations"], 2122);
-        assert_eq!(value["counts"]["vertical_operations"], 27);
+        assert_eq!(value["counts"]["grid_resources"], 726);
+        assert_eq!(value["counts"]["operations"], 2157);
+        assert_eq!(value["counts"]["vertical_operations"], 716);
         assert!(value["output"]["sha256"]
             .as_str()
             .unwrap()
@@ -513,6 +513,44 @@ mod tests {
                 || (operation.source_datum_epsg == source_datum
                     && operation.target_datum_epsg == target_datum)
         }));
+    }
+
+    #[test]
+    fn grid_alternative_candidate_preserves_epsg_metadata_and_ranks_first() {
+        let source = lookup_epsg(4267).expect("should find NAD27");
+        let target = lookup_epsg(4269).expect("should find NAD83");
+        let original = lookup_operation(CoordinateOperationId(1313)).expect("operation 1313");
+        let alternative =
+            lookup_operation(CoordinateOperationId(9_901_313)).expect("operation 9901313");
+
+        assert_eq!(alternative.source_crs_epsg, original.source_crs_epsg);
+        assert_eq!(alternative.target_crs_epsg, original.target_crs_epsg);
+        assert_eq!(alternative.source_datum_epsg, original.source_datum_epsg);
+        assert_eq!(alternative.target_datum_epsg, original.target_datum_epsg);
+        assert_eq!(alternative.accuracy, original.accuracy);
+        assert_eq!(alternative.areas_of_use, original.areas_of_use);
+
+        let crate::operation::OperationMethod::GridShift { grid_id, .. } = alternative.method
+        else {
+            panic!("expected grid shift");
+        };
+        let grid = lookup_grid_definition(grid_id.0).expect("alternative grid");
+        assert_eq!(grid.format, crate::grid::GridFormat::GeoTiff);
+        assert!(grid
+            .resource_names
+            .iter()
+            .any(|name| name == "ca_nrc_ntv2_0.tif"));
+
+        let candidates = operation_candidates_between(&source, &target).unwrap();
+        let original_position = candidates
+            .iter()
+            .position(|candidate| candidate.id == Some(CoordinateOperationId(1313)))
+            .expect("original candidate");
+        let alternative_position = candidates
+            .iter()
+            .position(|candidate| candidate.id == Some(CoordinateOperationId(9_901_313)))
+            .expect("alternative candidate");
+        assert!(alternative_position < original_position);
     }
 
     #[test]
