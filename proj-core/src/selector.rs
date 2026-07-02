@@ -892,6 +892,38 @@ fn validate_geographic_area_point(point: Coord) -> Result<()> {
 mod tests {
     use super::*;
 
+    fn assert_allowed_candidate_kinds(candidates: &OperationCandidateSet) {
+        assert!(candidates.ranked.iter().all(|candidate| {
+            matches!(
+                candidate.operation,
+                SelectedOperationKind::Identity
+                    | SelectedOperationKind::Registry(_)
+                    | SelectedOperationKind::Custom(_)
+            )
+        }));
+    }
+
+    #[test]
+    fn ranked_default_candidates_are_registry_or_identity_only() {
+        let wgs84 = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let same = rank_operation_candidates(&wgs84, &wgs84, &SelectionOptions::new()).unwrap();
+        assert_allowed_candidate_kinds(&same);
+        assert!(same
+            .ranked
+            .iter()
+            .any(|candidate| matches!(candidate.operation, SelectedOperationKind::Identity)));
+
+        let nad27 = registry::lookup_epsg(4267).expect("EPSG:4267");
+        let nad83 = registry::lookup_epsg(4269).expect("EPSG:4269");
+        let registry_candidates =
+            rank_operation_candidates(&nad27, &nad83, &SelectionOptions::new()).unwrap();
+        assert_allowed_candidate_kinds(&registry_candidates);
+        assert!(registry_candidates
+            .ranked
+            .iter()
+            .any(|candidate| matches!(candidate.operation, SelectedOperationKind::Registry(_))));
+    }
+
     #[test]
     fn geographic_bounds_accumulator_preserves_antimeridian_wrap() {
         let mut bounds = GeographicBoundsAccumulator::new();

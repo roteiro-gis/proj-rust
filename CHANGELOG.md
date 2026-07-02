@@ -3,6 +3,7 @@
 ## Unreleased
 
 - replace the RDNAP-specific registry generator aliases with a generic generated-operation graph pass that composes PROJ grid alternatives with known zero/identity bridge operations
+- document and test the registry-only operation-selection model: selector candidates are limited to registry/generated-registry operations, explicit caller/parser-provided operations, and internal identity behavior
 - reduce datum WGS84 relationship values to definition metadata during operation selection; registry or explicit custom operations now remain authoritative for CRS-to-CRS transforms
 - move parsed PROJ `+nadgrids` horizontal datum shifts out of selector internals and into explicit custom coordinate operations supplied by `proj-wkt` transform construction paths
 - add explicit custom horizontal coordinate operation candidates through `SelectionOptions::with_coordinate_operation` and `SelectionOptions::with_coordinate_operations`, with custom selection diagnostics and direct pipeline compilation
