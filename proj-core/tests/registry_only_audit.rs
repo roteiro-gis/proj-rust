@@ -130,6 +130,11 @@ fn transform_sources_do_not_use_synthetic_operation_helpers() {
 }
 
 #[test]
+fn datum_api_does_not_expose_approximate_helmert_fallback_helper() {
+    assert_no_hits("approximate_helmert_to");
+}
+
+#[test]
 fn coordinate_operation_literals_stay_in_registry_parser_or_custom_paths() {
     assert_hits_allowed("CoordinateOperation {", |hit| {
         matches!(
