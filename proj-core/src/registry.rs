@@ -239,6 +239,40 @@ mod tests {
     }
 
     #[test]
+    fn generated_graph_composes_non_rdnap_horizontal_bridge() {
+        let source = lookup_epsg(4326).expect("should find WGS 84");
+        let target = lookup_epsg(4277).expect("should find OSGB36");
+
+        let candidates = operation_candidates_between(&source, &target).unwrap();
+
+        assert!(candidates.iter().any(|candidate| {
+            candidate.name == "WGS 84 to OSGB36 (generated from EPSG:1149 + EPSG:9907709)"
+                && candidate.source_crs_epsg == Some(4326)
+                && candidate.target_crs_epsg == Some(4277)
+                && candidate.uses_grids
+        }));
+    }
+
+    #[test]
+    fn generated_graph_composes_non_rdnap_vertical_bridge() {
+        let source = lookup_epsg(4979).expect("should find WGS 84 3D");
+        let target = lookup_epsg(7405).expect("should find OSGB36 + ODN height");
+
+        let vertical_operations = vertical_grid_operations_between(&source, &target);
+
+        assert!(vertical_operations.iter().any(|operation| {
+            operation.name.contains("(generated horizontal CRS bridge)")
+                && operation.target_vertical_crs_epsg == Some(5701)
+                && operation.grid.format == crate::grid::GridFormat::GeoTiff
+                && operation
+                    .grid
+                    .resource_names
+                    .iter()
+                    .any(|name| name == "uk_os_OSGM15_GB.tif")
+        }));
+    }
+
+    #[test]
     fn lookup_registry_vertical_grid_operation() {
         let operation = lookup_vertical_grid_operation(CoordinateOperationId(10013))
             .expect("should find NAD83 to NAVD88 vertical grid operation");
