@@ -241,7 +241,7 @@ fn parse_nadgrids(params: &HashMap<String, String>) -> Result<Option<DatumGridSh
         validate_grid_resource_name(resource_name)?;
         entries.push(DatumGridShiftEntry::Grid {
             definition: GridDefinition {
-                id: GridId(synthetic_grid_id(resource_name)),
+                id: GridId(parsed_grid_id(resource_name)),
                 name: resource_name.to_string(),
                 format: infer_grid_format(resource_name),
                 interpolation: GridInterpolation::Bilinear,
@@ -289,7 +289,7 @@ fn infer_grid_format(resource_name: &str) -> GridFormat {
     }
 }
 
-fn synthetic_grid_id(resource_name: &str) -> u32 {
+fn parsed_grid_id(resource_name: &str) -> u32 {
     const FNV_OFFSET: u32 = 0x811c9dc5;
     const FNV_PRIME: u32 = 0x01000193;
     let hash = resource_name

@@ -350,7 +350,8 @@ pub struct CoordinateOperationMetadata {
 
 #[derive(Debug, Clone)]
 pub enum SelectionPolicy {
-    /// Select the best supported registry or exact synthetic operation.
+    /// Select the best supported registry/generated-registry operation,
+    /// explicit custom operation, or internal identity behavior.
     BestAvailable,
     /// Require a grid-backed datum operation whenever a datum shift is needed.
     RequireGrids,
@@ -461,7 +462,8 @@ impl SelectionOptions {
         self
     }
 
-    /// Select the best supported registry or exact synthetic operation.
+    /// Select the best supported registry/generated-registry operation,
+    /// explicit custom operation, or internal identity behavior.
     ///
     /// This is the default policy.
     pub fn best_available(self) -> Self {
