@@ -2,12 +2,18 @@
 
 ## Unreleased
 
+## 0.9.0 - 2026-07-06
+
+- breaking: remove opt-in synthetic Helmert datum-shift fallback selection and related legacy API surface; `SelectionPolicy::AllowApproximateHelmertFallback`, `SelectionOptions::allow_approximate_helmert_fallback`, `Datum::approximate_helmert_to`, and `proj-wkt` compatibility aliases for that option are no longer supported, and CRS pairs without a registry, identity, or supported grid/identity custom datum operation now fail during transform construction
+- add `proj_wkt::to_wkt` for serializing `CrsDef` values to WKT1-style `GEOGCS`, `PROJCS`, and `COMPD_CS` definitions, including datum, spheroid, prime meridian, unit, authority, and vertical CRS metadata
+- add WKT serializer coverage for every `ProjectionMethod` variant currently represented by `proj-core`, including fail-closed errors for invalid projection emission state
+- preserve metre, US survey foot, and international foot linear units in emitted WKT, with round-trip coverage for foot-based State Plane CRS definitions and compound vertical CRS definitions
+- expose datum and ellipsoid authority lookup helpers from `proj-core` so serializers can preserve generated EPSG registry metadata
 - replace the RDNAP-specific registry generator aliases with a generic generated-operation graph pass that composes PROJ grid alternatives with known zero/identity bridge operations
 - document and test the registry-only operation-selection model: selector candidates are limited to registry/generated-registry operations, explicit caller/parser-provided operations, and internal identity behavior
 - reduce datum WGS84 relationship values to definition metadata during operation selection; registry or explicit custom operations now remain authoritative for CRS-to-CRS transforms
 - move parsed PROJ `+nadgrids` horizontal datum shifts out of selector internals and into explicit custom coordinate operations supplied by `proj-wkt` transform construction paths
 - add explicit custom horizontal coordinate operation candidates through `SelectionOptions::with_coordinate_operation` and `SelectionOptions::with_coordinate_operations`, with custom selection diagnostics and direct pipeline compilation
-- breaking: remove opt-in synthetic Helmert datum-shift fallback selection and related legacy API surface; `SelectionPolicy::AllowApproximateHelmertFallback`, `SelectionOptions::allow_approximate_helmert_fallback`, `Datum::approximate_helmert_to`, and `proj-wkt` compatibility aliases for that option are no longer supported, and CRS pairs without a registry, identity, or supported grid/identity custom datum operation now fail during transform construction
 
 ## 0.8.0 - 2026-06-24
 
