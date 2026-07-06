@@ -102,6 +102,7 @@ struct CompoundRecord {
 #[derive(Clone)]
 struct RegistryDb {
     datums: BTreeMap<u32, Datum>,
+    datum_ellipsoid_codes: BTreeMap<u32, u32>,
     geographic_crs: BTreeMap<u32, GeographicRecord>,
     projected_crs: BTreeMap<u32, ProjectedRecord>,
     vertical_crs: BTreeMap<u32, VerticalRecord>,
@@ -164,6 +165,7 @@ fn parse_db() -> RegistryDb {
     }
 
     let mut datums = BTreeMap::new();
+    let mut datum_ellipsoid_codes = BTreeMap::new();
     for _ in 0..num_datums {
         let code = read_u32(EPSG_DATA, offset);
         let ellipsoid_code = read_u32(EPSG_DATA, offset + 4);
@@ -192,6 +194,7 @@ fn parse_db() -> RegistryDb {
             Datum::new(ellipsoid, to_wgs84)
                 .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}")),
         );
+        datum_ellipsoid_codes.insert(code, ellipsoid_code);
         offset += DATUM_RECORD_SIZE;
     }
 
@@ -551,6 +554,7 @@ fn parse_db() -> RegistryDb {
 
     RegistryDb {
         datums,
+        datum_ellipsoid_codes,
         geographic_crs,
         projected_crs,
         vertical_crs,
@@ -707,6 +711,10 @@ fn read_static_string(data: &[u8], offset: usize, len: usize) -> &'static str {
 
 pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
     db().datums.get(&code).cloned()
+}
+
+pub(crate) fn lookup_ellipsoid_code_for_datum(code: u32) -> Option<u32> {
+    db().datum_ellipsoid_codes.get(&code).copied()
 }
 
 pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {

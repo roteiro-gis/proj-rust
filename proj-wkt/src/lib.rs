@@ -13,6 +13,8 @@
 //!   otherwise parses projection parameters
 //! - **WKT2/PROJJSON compound CRS**: parses explicit vertical CRS components for
 //!   equality-checked z preservation and same-reference vertical unit conversion
+//! - **WKT output**: serializes [`proj_core::CrsDef`] values to WKT1-style
+//!   `GEOGCS[...]`, `PROJCS[...]`, and `COMPD_CS[...]` definitions
 //!
 //! Custom CRS definitions are only accepted when their semantics fit the
 //! `proj_core::CrsDef` model: longitude/latitude geographic coordinates in
@@ -43,6 +45,7 @@ mod proj_string;
 mod projjson;
 mod semantics;
 mod wkt;
+mod wkt_writer;
 
 use proj_core::{
     AreaOfInterest, Bounds, Coord, Coord3D, CoordinateOperation, CoordinateOperationId, CrsDef,
@@ -91,6 +94,15 @@ impl ParsedCrs {
 /// - **WKT2**: `GEODCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     Ok(parse_crs_definition(s)?.crs)
+}
+
+/// Serialize a CRS definition as WKT1-style `GEOGCS`, `PROJCS`, or `COMPD_CS`.
+///
+/// Projection false easting/northing parameters are emitted in the CRS native
+/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
+/// meters.
+pub fn to_wkt(crs: &CrsDef) -> Result<String> {
+    wkt_writer::to_wkt(crs)
 }
 
 fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
