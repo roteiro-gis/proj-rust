@@ -88,7 +88,8 @@ pub use operation::{
     VerticalTransformDiagnostics,
 };
 pub use registry::{
-    lookup_authority_code, lookup_datum_epsg, lookup_epsg, lookup_operation, lookup_vertical_epsg,
+    lookup_authority_code, lookup_datum_code_for_crs, lookup_datum_epsg,
+    lookup_ellipsoid_code_for_datum, lookup_epsg, lookup_operation, lookup_vertical_epsg,
     lookup_vertical_grid_operation, operation_candidates_between,
     operation_candidates_between_with_selection_options, operations_between,
     vertical_grid_operations_between,

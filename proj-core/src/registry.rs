@@ -24,6 +24,16 @@ pub fn lookup_datum_epsg(code: u32) -> Option<Datum> {
     epsg_db::lookup_datum(code)
 }
 
+/// Look up the horizontal datum EPSG code for a CRS definition by CRS EPSG code.
+pub fn lookup_datum_code_for_crs(code: u32) -> Option<u32> {
+    epsg_db::lookup_datum_code_for_crs(code)
+}
+
+/// Look up the ellipsoid EPSG code for a datum by datum EPSG code.
+pub fn lookup_ellipsoid_code_for_datum(code: u32) -> Option<u32> {
+    epsg_db::lookup_ellipsoid_code_for_datum(code)
+}
+
 /// Look up a supported vertical CRS definition by EPSG code.
 ///
 /// Standalone vertical CRS values are not valid horizontal transform inputs,

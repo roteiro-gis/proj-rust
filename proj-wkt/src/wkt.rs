@@ -9,7 +9,7 @@ use crate::semantics::{
 };
 use crate::{ParseError, Result};
 use proj_core::{
-    CompoundCrsDef, CrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
+    CompoundCrsDef, CrsDef, Datum, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
     ProjectionMethod, VerticalCrsDef,
 };
 use std::collections::HashMap;
@@ -353,6 +353,11 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let datum = infer_datum_from_geographic_inner(base_geographic_inner)?;
 
     let method = match normalized_method.as_str() {
+        "popularvisualisationpseudomercator"
+        | "popularvisualizationpseudomercator"
+        | "pseudomercator"
+        | "webmercator"
+        | "mercatorauxiliarysphere" => ProjectionMethod::WebMercator,
         "transversemercator" => ProjectionMethod::TransverseMercator {
             lon0,
             lat0,
@@ -529,7 +534,7 @@ fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     let mut horizontal = None;
-    let mut vertical = None;
+    let mut vertical_inner = None;
 
     for_each_top_level_element(root_inner, |name, element_inner| {
         if horizontal.is_none()
@@ -543,12 +548,12 @@ fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
             return;
         }
 
-        if vertical.is_none()
+        if vertical_inner.is_none()
             && (name.eq_ignore_ascii_case("VERT_CS")
                 || name.eq_ignore_ascii_case("VERTCRS")
                 || name.eq_ignore_ascii_case("VERTICALCRS"))
         {
-            vertical = Some(parse_wkt_vertical(element_inner));
+            vertical_inner = Some(element_inner.to_string());
         }
     });
 
@@ -561,13 +566,18 @@ fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
         ));
     }
 
-    let vertical = vertical
-        .ok_or_else(|| ParseError::Parse("WKT compound CRS is missing a vertical CRS".into()))??;
+    let horizontal_datum = horizontal.datum().clone();
+    let vertical_inner = vertical_inner
+        .ok_or_else(|| ParseError::Parse("WKT compound CRS is missing a vertical CRS".into()))?;
+    let vertical = parse_wkt_vertical(&vertical_inner, Some(&horizontal_datum))?;
     let compound = CompoundCrsDef::from_crs_def(0, horizontal, vertical, "")?;
     Ok(CrsDef::Compound(Box::new(compound)))
 }
 
-fn parse_wkt_vertical(inner: &str) -> Result<VerticalCrsDef> {
+fn parse_wkt_vertical(
+    inner: &str,
+    ellipsoidal_height_datum: Option<&Datum>,
+) -> Result<VerticalCrsDef> {
     validate_supported_vertical_coordinate_system(
         "WKT vertical CRS",
         &extract_coordinate_system(inner),
@@ -584,6 +594,33 @@ fn parse_wkt_vertical(inner: &str) -> Result<VerticalCrsDef> {
             .ok_or_else(|| {
                 ParseError::Parse("WKT vertical CRS is missing a vertical datum".into())
             })?;
+    if vertical_datum_type(datum_inner) == Some(2002) {
+        let datum = ellipsoidal_height_datum.ok_or_else(|| {
+            ParseError::UnsupportedSemantics(
+                "WKT ellipsoidal-height vertical CRS requires a compound horizontal datum".into(),
+            )
+        })?;
+        if let Some(vertical_datum_epsg) = extract_top_level_epsg_from_inner(datum_inner) {
+            let authority_datum =
+                proj_core::lookup_datum_epsg(vertical_datum_epsg).ok_or_else(|| {
+                    ParseError::Parse(format!(
+                        "unsupported WKT ellipsoidal-height datum EPSG:{vertical_datum_epsg}"
+                    ))
+                })?;
+            if !datum.same_datum(&authority_datum) {
+                return Err(ParseError::UnsupportedSemantics(
+                    "WKT ellipsoidal-height vertical datum does not match compound horizontal datum"
+                        .into(),
+                ));
+            }
+        }
+        return Ok(VerticalCrsDef::ellipsoidal_height(
+            epsg,
+            datum.clone(),
+            linear_unit,
+            "",
+        ));
+    }
 
     let vertical_datum_epsg = extract_top_level_epsg_from_inner(datum_inner).ok_or_else(|| {
         ParseError::UnsupportedSemantics(
@@ -597,6 +634,12 @@ fn parse_wkt_vertical(inner: &str) -> Result<VerticalCrsDef> {
         linear_unit,
         "",
     )?)
+}
+
+fn vertical_datum_type(datum_inner: &str) -> Option<u32> {
+    split_top_level_fields(datum_inner)
+        .get(1)
+        .and_then(|field| field.trim().parse().ok())
 }
 
 fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
@@ -626,13 +669,291 @@ fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
 fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
     let registry = proj_core::lookup_epsg(epsg)
         .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
-    if parsed.semantically_equivalent(&registry) {
+    if wkt_semantically_equivalent(&parsed, &registry) {
         Ok(registry)
     } else {
         Err(ParseError::UnsupportedSemantics(format!(
             "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
         )))
     }
+}
+
+fn wkt_semantically_equivalent(a: &CrsDef, b: &CrsDef) -> bool {
+    if a.semantically_equivalent(b) {
+        return true;
+    }
+
+    match (a, b) {
+        (CrsDef::Geographic(a), CrsDef::Geographic(b)) => a.datum().same_datum(b.datum()),
+        (CrsDef::Projected(a), CrsDef::Projected(b)) => {
+            a.datum().same_datum(b.datum())
+                && wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
+                && wkt_projection_methods_equivalent(a.method(), b.method())
+        }
+        (CrsDef::Compound(a), CrsDef::Compound(b)) => {
+            wkt_horizontal_semantically_equivalent(a.horizontal(), b.horizontal())
+                && a.vertical_crs().semantically_equivalent(b.vertical_crs())
+        }
+        _ => false,
+    }
+}
+
+fn wkt_horizontal_semantically_equivalent(a: &HorizontalCrsDef, b: &HorizontalCrsDef) -> bool {
+    match (a, b) {
+        (HorizontalCrsDef::Geographic(a), HorizontalCrsDef::Geographic(b)) => {
+            a.datum().same_datum(b.datum())
+        }
+        (HorizontalCrsDef::Projected(a), HorizontalCrsDef::Projected(b)) => {
+            a.datum().same_datum(b.datum())
+                && wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
+                && wkt_projection_methods_equivalent(a.method(), b.method())
+        }
+        _ => false,
+    }
+}
+
+fn wkt_projection_methods_equivalent(a: ProjectionMethod, b: ProjectionMethod) -> bool {
+    match (a, b) {
+        (ProjectionMethod::WebMercator, ProjectionMethod::WebMercator) => true,
+        (
+            ProjectionMethod::TransverseMercator {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::TransverseMercator {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat0, b_lat0)
+                && wkt_approx_eq(a_k0, b_k0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::PolarStereographic {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::PolarStereographic {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat_ts, b_lat_ts)
+                && wkt_approx_eq(a_k0, b_k0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::LambertConformalConic {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                lat1: a_lat1,
+                lat2: a_lat2,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::LambertConformalConic {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                lat1: b_lat1,
+                lat2: b_lat2,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        )
+        | (
+            ProjectionMethod::AlbersEqualArea {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                lat1: a_lat1,
+                lat2: a_lat2,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::AlbersEqualArea {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                lat1: b_lat1,
+                lat2: b_lat2,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat0, b_lat0)
+                && wkt_approx_eq(a_lat1, b_lat1)
+                && wkt_approx_eq(a_lat2, b_lat2)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::LambertAzimuthalEqualArea {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::LambertAzimuthalEqualArea {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        )
+        | (
+            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat0, b_lat0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::ObliqueStereographic {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::ObliqueStereographic {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat0, b_lat0)
+                && wkt_approx_eq(a_k0, b_k0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::HotineObliqueMercator {
+                latc: a_latc,
+                lonc: a_lonc,
+                azimuth: a_azimuth,
+                rectified_grid_angle: a_rectified_grid_angle,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+                variant_b: a_variant_b,
+            },
+            ProjectionMethod::HotineObliqueMercator {
+                latc: b_latc,
+                lonc: b_lonc,
+                azimuth: b_azimuth,
+                rectified_grid_angle: b_rectified_grid_angle,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+                variant_b: b_variant_b,
+            },
+        ) => {
+            a_variant_b == b_variant_b
+                && wkt_approx_eq(a_latc, b_latc)
+                && wkt_approx_eq(a_lonc, b_lonc)
+                && wkt_approx_eq(a_azimuth, b_azimuth)
+                && wkt_approx_eq(a_rectified_grid_angle, b_rectified_grid_angle)
+                && wkt_approx_eq(a_k0, b_k0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::CassiniSoldner {
+                lon0: a_lon0,
+                lat0: a_lat0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::CassiniSoldner {
+                lon0: b_lon0,
+                lat0: b_lat0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat0, b_lat0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::Mercator {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                k0: a_k0,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::Mercator {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                k0: b_k0,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat_ts, b_lat_ts)
+                && wkt_approx_eq(a_k0, b_k0)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        (
+            ProjectionMethod::EquidistantCylindrical {
+                lon0: a_lon0,
+                lat_ts: a_lat_ts,
+                false_easting: a_false_easting,
+                false_northing: a_false_northing,
+            },
+            ProjectionMethod::EquidistantCylindrical {
+                lon0: b_lon0,
+                lat_ts: b_lat_ts,
+                false_easting: b_false_easting,
+                false_northing: b_false_northing,
+            },
+        ) => {
+            wkt_approx_eq(a_lon0, b_lon0)
+                && wkt_approx_eq(a_lat_ts, b_lat_ts)
+                && wkt_approx_eq(a_false_easting, b_false_easting)
+                && wkt_approx_eq(a_false_northing, b_false_northing)
+        }
+        _ => false,
+    }
+}
+
+fn wkt_approx_eq(a: f64, b: f64) -> bool {
+    (a - b).abs() <= 1e-9
 }
 
 fn parse_structured_ellipsoid(inner: &str) -> Option<StructuredEllipsoid> {
@@ -731,7 +1052,7 @@ fn parse_parameter_element(
             continue;
         };
         nested_factor = match unit_name.to_ascii_uppercase().as_str() {
-            "ANGLEUNIT" => Some(radians_to_degrees_factor(parse_wkt_parameter_unit_factor(
+            "ANGLEUNIT" => Some(wkt_angle_unit_factor(parse_wkt_parameter_unit_factor(
                 name, unit_inner,
             )?)),
             "LENGTHUNIT" | "UNIT" | "SCALEUNIT" => {
@@ -846,7 +1167,7 @@ fn extract_top_level_angle_unit_to_degree(inner: &str) -> Option<f64> {
     let mut factor = None;
     for_each_top_level_element(inner, |unit_name, unit_inner| {
         if unit_name.eq_ignore_ascii_case("UNIT") || unit_name.eq_ignore_ascii_case("ANGLEUNIT") {
-            factor = parse_unit_factor(unit_inner).map(radians_to_degrees_factor);
+            factor = parse_unit_factor(unit_inner).map(wkt_angle_unit_factor);
         }
     });
     factor
@@ -896,7 +1217,7 @@ fn extract_prime_meridian_degrees(inner: &str, default_angle_unit_to_degree: f64
                 if unit_name.eq_ignore_ascii_case("UNIT")
                     || unit_name.eq_ignore_ascii_case("ANGLEUNIT")
                 {
-                    parse_unit_factor(unit_inner).map(radians_to_degrees_factor)
+                    parse_unit_factor(unit_inner).map(wkt_angle_unit_factor)
                 } else {
                     None
                 }
@@ -1056,7 +1377,7 @@ fn axis_angle_unit_to_degree(axis_inner: &str) -> Option<f64> {
             let (unit_name, unit_inner, _) = parse_wkt_element(field.trim(), 0)?;
             if unit_name.eq_ignore_ascii_case("ANGLEUNIT") || unit_name.eq_ignore_ascii_case("UNIT")
             {
-                parse_unit_factor(unit_inner).map(radians_to_degrees_factor)
+                parse_unit_factor(unit_inner).map(wkt_angle_unit_factor)
             } else {
                 None
             }
@@ -1121,6 +1442,15 @@ where
 fn parse_unit_factor(inner: &str) -> Option<f64> {
     let fields = split_top_level_fields(inner);
     fields.get(1)?.trim().parse::<f64>().ok()
+}
+
+fn wkt_angle_unit_factor(radians_per_unit: f64) -> f64 {
+    let degrees_per_unit = radians_to_degrees_factor(radians_per_unit);
+    if approx_eq(degrees_per_unit, 1.0) {
+        1.0
+    } else {
+        degrees_per_unit
+    }
 }
 
 fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
