@@ -789,139 +789,34 @@ const KNOWN_DATUMS: &[DatumTemplate] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::process::{Command, Output};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use proj_core::{
         datum, CompoundCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod,
     };
 
     #[test]
-    fn emits_geographic_wkt_with_authorities() {
-        let crs = proj_core::lookup_epsg(4326).expect("EPSG:4326");
+    fn serializer_acceptance_matrix_round_trips() {
+        for case in acceptance_matrix() {
+            let crs = (case.crs)();
+            let wkt = to_wkt(&crs).unwrap_or_else(|err| panic!("{}: {err}", case.label));
+            let parsed = crate::parse_crs(&wkt)
+                .unwrap_or_else(|err| panic!("{}: parse failed: {err}\n{wkt}", case.label));
 
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(wkt.starts_with(r#"GEOGCS["WGS 84""#), "{wkt}");
-        assert!(wkt.contains(r#"DATUM["WGS_1984""#), "{wkt}");
-        assert!(wkt.contains(r#"AUTHORITY["EPSG","6326"]"#), "{wkt}");
-        assert!(
-            wkt.contains(r#"SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]]"#),
-            "{wkt}"
-        );
-        assert!(
-            wkt.contains(r#"PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]]"#),
-            "{wkt}"
-        );
-        assert!(
-            wkt.contains(r#"UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]"#),
-            "{wkt}"
-        );
-        assert!(wkt.ends_with(r#"AUTHORITY["EPSG","4326"]]"#), "{wkt}");
-        assert_round_trips(&crs, &wkt);
-    }
-
-    #[test]
-    fn emits_web_mercator_as_pseudo_mercator() {
-        let crs = proj_core::lookup_epsg(3857).expect("EPSG:3857");
-
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(
-            wkt.starts_with(r#"PROJCS["WGS 84 / Pseudo-Mercator""#),
-            "{wkt}"
-        );
-        assert!(
-            wkt.contains(r#"PROJECTION["Popular_Visualisation_Pseudo_Mercator"]"#),
-            "{wkt}"
-        );
-        assert_round_trips(&crs, &wkt);
-    }
-
-    #[test]
-    fn emits_us_survey_foot_projected_units() {
-        let crs = proj_core::lookup_epsg(2264).expect("EPSG:2264");
-
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(
-            wkt.contains(r#"UNIT["US survey foot","#)
-                && wkt.contains(r#"AUTHORITY["EPSG","9003"]"#),
-            "{wkt}"
-        );
-        assert_round_trips(&crs, &wkt);
-    }
-
-    #[test]
-    fn emits_international_foot_projected_units() {
-        let crs = CrsDef::Projected(ProjectedCrsDef::new_with_base_geographic_crs(
-            0,
-            4326,
-            datum::WGS84,
-            ProjectionMethod::TransverseMercator {
-                lon0: -75.0,
-                lat0: 0.0,
-                k0: 0.9996,
-                false_easting: 304_800.0,
-                false_northing: 0.0,
-            },
-            LinearUnit::foot(),
-            "Custom international foot TM",
-        ));
-
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(
-            wkt.contains(r#"UNIT["foot",0.3048,AUTHORITY["EPSG","9002"]]"#),
-            "{wkt}"
-        );
-        assert!(
-            wkt.contains(r#"PARAMETER["false_easting",1000000]"#),
-            "{wkt}"
-        );
-        assert_round_trips(&crs, &wkt);
-    }
-
-    #[test]
-    fn emits_compound_wkt_with_navd88_vertical_crs() {
-        let horizontal = match proj_core::lookup_epsg(4326).expect("EPSG:4326") {
-            CrsDef::Geographic(geographic) => HorizontalCrsDef::Geographic(geographic),
-            _ => panic!("EPSG:4326 should be geographic"),
-        };
-        let vertical = proj_core::lookup_vertical_epsg(5703).expect("EPSG:5703");
-        let crs = CrsDef::Compound(Box::new(CompoundCrsDef::new(
-            0,
-            horizontal,
-            vertical,
-            "WGS 84 + NAVD88 height",
-        )));
-
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(
-            wkt.starts_with(r#"COMPD_CS["WGS 84 + NAVD88 height""#),
-            "{wkt}"
-        );
-        assert!(wkt.contains(r#"VERT_CS["NAVD88 height""#), "{wkt}");
-        assert!(
-            wkt.contains(
-                r#"VERT_DATUM["North American Vertical Datum 1988",2005,AUTHORITY["EPSG","5103"]]"#
-            ),
-            "{wkt}"
-        );
-        assert!(wkt.contains(r#"AUTHORITY["EPSG","5703"]"#), "{wkt}");
-        assert_round_trips(&crs, &wkt);
-    }
-
-    #[test]
-    fn emits_compound_wkt_for_ellipsoidal_height() {
-        let crs = proj_core::lookup_epsg(4979).expect("EPSG:4979");
-
-        let wkt = to_wkt(&crs).unwrap();
-
-        assert!(wkt.starts_with(r#"COMPD_CS["WGS 84""#), "{wkt}");
-        assert!(
-            wkt.contains(r#"VERT_DATUM["WGS_1984",2002,AUTHORITY["EPSG","6326"]]"#),
-            "{wkt}"
-        );
-        assert_round_trips(&crs, &wkt);
+            assert_same_epsg_and_params(case.label, &crs, &parsed, &wkt);
+            assert_root(case.label, &wkt, case.root);
+            assert_human_readable_name(case.label, &wkt, case.name);
+            assert_authorities(case.label, &wkt, case.authorities);
+            if let Some(unit) = case.projected_unit {
+                assert_projected_unit(case.label, &wkt, unit);
+            }
+            if case.must_carry_vertical {
+                assert_compound_carries_vertical(case.label, &wkt);
+            }
+        }
     }
 
     #[test]
@@ -941,15 +836,576 @@ mod tests {
                 wkt.contains("PROJECTION["),
                 "{label}: missing projection in {wkt}"
             );
-            assert_round_trips(&crs, &wkt);
+            let parsed = crate::parse_crs(&wkt).unwrap_or_else(|err| panic!("{label}: {err}"));
+            assert_same_epsg_and_params(label, &crs, &parsed, &wkt);
         }
     }
 
-    fn assert_round_trips(expected: &CrsDef, wkt: &str) {
-        let parsed = crate::parse_crs(wkt).unwrap_or_else(|err| panic!("{err}\n{wkt}"));
+    #[test]
+    fn projection_emission_fails_closed_for_invalid_projection_state() {
+        let crs = CrsDef::Projected(ProjectedCrsDef::new_with_base_geographic_crs(
+            0,
+            4326,
+            datum::WGS84,
+            ProjectionMethod::TransverseMercator {
+                lon0: f64::NAN,
+                lat0: 0.0,
+                k0: 0.9996,
+                false_easting: 500_000.0,
+                false_northing: 0.0,
+            },
+            LinearUnit::metre(),
+            "Invalid TM",
+        ));
+
+        let err = to_wkt(&crs).expect_err("non-finite projection parameter should fail closed");
+
+        assert!(matches!(err, ParseError::UnsupportedSemantics(_)), "{err}");
         assert!(
-            expected.semantically_equivalent(&parsed),
-            "round-trip mismatch\nexpected: {expected:?}\nparsed: {parsed:?}\nwkt: {wkt}"
+            err.to_string().contains("Transverse_Mercator")
+                && err.to_string().contains("central_meridian")
+                && err.to_string().contains("must be finite"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn external_parsers_accept_sample_emitted_wkt_when_available() {
+        let samples = acceptance_matrix()
+            .into_iter()
+            .filter(|case| case.external_sample)
+            .collect::<Vec<_>>();
+        assert!(
+            !samples.is_empty(),
+            "external parser test must cover at least one emitted WKT sample"
+        );
+
+        let gdalsrsinfo = command_path("gdalsrsinfo");
+        let pdal = command_path("pdal");
+        if gdalsrsinfo.is_none() && pdal.is_none() {
+            return;
+        }
+
+        for case in samples {
+            let crs = (case.crs)();
+            let wkt = to_wkt(&crs).unwrap_or_else(|err| panic!("{}: {err}", case.label));
+            if let Some(command) = gdalsrsinfo.as_deref() {
+                assert_gdal_accepts_wkt(command, case.label, &wkt);
+            }
+            if let Some(command) = pdal.as_deref() {
+                assert_pdal_accepts_wkt(command, case.label, &wkt);
+            }
+        }
+    }
+
+    #[derive(Clone, Copy)]
+    struct AcceptanceCase {
+        label: &'static str,
+        crs: fn() -> CrsDef,
+        root: &'static str,
+        name: &'static str,
+        authorities: &'static [u32],
+        projected_unit: Option<ExpectedUnit>,
+        must_carry_vertical: bool,
+        external_sample: bool,
+    }
+
+    #[derive(Clone, Copy)]
+    struct ExpectedUnit {
+        name: &'static str,
+        factor: &'static str,
+        authority: u32,
+    }
+
+    const METRE: ExpectedUnit = ExpectedUnit {
+        name: "metre",
+        factor: "1",
+        authority: 9001,
+    };
+    const FOOT: ExpectedUnit = ExpectedUnit {
+        name: "foot",
+        factor: "0.3048",
+        authority: 9002,
+    };
+    const US_SURVEY_FOOT: ExpectedUnit = ExpectedUnit {
+        name: "US survey foot",
+        factor: "0.30480060960122",
+        authority: 9003,
+    };
+
+    fn acceptance_matrix() -> Vec<AcceptanceCase> {
+        vec![
+            AcceptanceCase {
+                label: "geographic WGS 84",
+                crs: epsg_4326,
+                root: "GEOGCS",
+                name: "WGS 84",
+                authorities: &[4326, 6326, 7030, 8901, 9122],
+                projected_unit: None,
+                must_carry_vertical: false,
+                external_sample: true,
+            },
+            AcceptanceCase {
+                label: "geographic NAD83",
+                crs: epsg_4269,
+                root: "GEOGCS",
+                name: "NAD83",
+                authorities: &[4269, 6269, 7019],
+                projected_unit: None,
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "geographic NAD27",
+                crs: epsg_4267,
+                root: "GEOGCS",
+                name: "NAD27",
+                authorities: &[4267, 6267, 7008],
+                projected_unit: None,
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "geographic ETRS89",
+                crs: epsg_4258,
+                root: "GEOGCS",
+                name: "ETRS89",
+                authorities: &[4258, 6258, 7019],
+                projected_unit: None,
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "3D geographic as compound ellipsoidal height",
+                crs: epsg_4979,
+                root: "COMPD_CS",
+                name: "WGS 84",
+                authorities: &[4979, 4326, 6326],
+                projected_unit: None,
+                must_carry_vertical: true,
+                external_sample: true,
+            },
+            AcceptanceCase {
+                label: "compound WGS 84 plus NAVD88 height",
+                crs: custom_wgs84_navd88,
+                root: "COMPD_CS",
+                name: "WGS 84 + NAVD88 height",
+                authorities: &[4326, 5703, 5103],
+                projected_unit: None,
+                must_carry_vertical: true,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "compound RD New plus NAP height",
+                crs: epsg_7415,
+                root: "COMPD_CS",
+                name: "Amersfoort / RD New + NAP height",
+                authorities: &[7415, 28992, 5709, 5109],
+                projected_unit: Some(METRE),
+                must_carry_vertical: true,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Web Mercator",
+                crs: epsg_3857,
+                root: "PROJCS",
+                name: "WGS 84 / Pseudo-Mercator",
+                authorities: &[3857, 4326],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: true,
+            },
+            AcceptanceCase {
+                label: "Transverse Mercator UTM",
+                crs: epsg_32618,
+                root: "PROJCS",
+                name: "WGS 84 / UTM zone 18N",
+                authorities: &[32618, 4326],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Polar Stereographic",
+                crs: epsg_3413,
+                root: "PROJCS",
+                name: "WGS 84 / NSIDC Sea Ice Polar Stereographic North",
+                authorities: &[3413],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Lambert Conformal Conic 2SP",
+                crs: epsg_2154,
+                root: "PROJCS",
+                name: "RGF93 v1 / Lambert-93",
+                authorities: &[2154],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Lambert Conformal Conic 1SP",
+                crs: custom_lcc_1sp,
+                root: "PROJCS",
+                name: "Custom LCC 1SP",
+                authorities: &[4326, 6326],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Albers Equal Area",
+                crs: epsg_5070,
+                root: "PROJCS",
+                name: "NAD83 / Conus Albers",
+                authorities: &[5070],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Lambert Azimuthal Equal Area",
+                crs: epsg_3035,
+                root: "PROJCS",
+                name: "ETRS89-extended / LAEA Europe",
+                authorities: &[3035],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Lambert Azimuthal Equal Area spherical",
+                crs: epsg_3408,
+                root: "PROJCS",
+                name: "NSIDC EASE-Grid North",
+                authorities: &[3408],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Oblique Stereographic",
+                crs: epsg_28992,
+                root: "PROJCS",
+                name: "Amersfoort / RD New",
+                authorities: &[28992],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Hotine Oblique Mercator",
+                crs: epsg_2056,
+                root: "PROJCS",
+                name: "CH1903+ / LV95",
+                authorities: &[2056],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Cassini-Soldner",
+                crs: epsg_30200,
+                root: "PROJCS",
+                name: "Trinidad 1903 / Trinidad Grid",
+                authorities: &[30200],
+                projected_unit: None,
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Mercator",
+                crs: epsg_3395,
+                root: "PROJCS",
+                name: "WGS 84 / World Mercator",
+                authorities: &[3395],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "Equidistant Cylindrical",
+                crs: epsg_32662,
+                root: "PROJCS",
+                name: "WGS 84 / Plate Carree",
+                authorities: &[32662],
+                projected_unit: Some(METRE),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "State Plane international foot",
+                crs: epsg_2222,
+                root: "PROJCS",
+                name: "NAD83 / Arizona East (ft)",
+                authorities: &[2222, 4269],
+                projected_unit: Some(FOOT),
+                must_carry_vertical: false,
+                external_sample: false,
+            },
+            AcceptanceCase {
+                label: "State Plane US survey foot",
+                crs: epsg_2264,
+                root: "PROJCS",
+                name: "NAD83 / North Carolina (ftUS)",
+                authorities: &[2264, 4269],
+                projected_unit: Some(US_SURVEY_FOOT),
+                must_carry_vertical: false,
+                external_sample: true,
+            },
+        ]
+    }
+
+    fn assert_same_epsg_and_params(label: &str, expected: &CrsDef, parsed: &CrsDef, wkt: &str) {
+        if expected.epsg() != 0 {
+            assert_eq!(
+                parsed.epsg(),
+                expected.epsg(),
+                "{label}: EPSG did not round-trip\n{wkt}"
+            );
+            return;
+        }
+        assert!(
+            expected.semantically_equivalent(parsed),
+            "{label}: parameters did not round-trip\nexpected: {expected:?}\nparsed: {parsed:?}\nwkt: {wkt}"
+        );
+    }
+
+    fn assert_root(label: &str, wkt: &str, root: &str) {
+        assert!(
+            wkt.starts_with(&format!("{root}[")),
+            "{label}: expected {root} root\n{wkt}"
+        );
+    }
+
+    fn assert_human_readable_name(label: &str, wkt: &str, name: &str) {
+        assert!(
+            wkt.contains(&quote(name)),
+            "{label}: missing human-readable name `{name}`\n{wkt}"
+        );
+    }
+
+    fn assert_authorities(label: &str, wkt: &str, authorities: &[u32]) {
+        for authority in authorities {
+            assert!(
+                wkt.contains(&format_authority(*authority)),
+                "{label}: missing EPSG:{authority} authority\n{wkt}"
+            );
+        }
+    }
+
+    fn assert_projected_unit(label: &str, wkt: &str, unit: ExpectedUnit) {
+        assert!(
+            wkt.contains(&format!(
+                r#"UNIT["{}",{},{}]"#,
+                unit.name,
+                unit.factor,
+                format_authority(unit.authority)
+            )),
+            "{label}: missing projected unit {}\n{wkt}",
+            unit.name
+        );
+    }
+
+    fn assert_compound_carries_vertical(label: &str, wkt: &str) {
+        assert!(wkt.starts_with("COMPD_CS["), "{label}: not compound\n{wkt}");
+        assert!(
+            wkt.contains("VERT_CS[") && wkt.contains("VERT_DATUM["),
+            "{label}: missing vertical CRS component\n{wkt}"
+        );
+    }
+
+    fn epsg_4326() -> CrsDef {
+        epsg(4326)
+    }
+
+    fn epsg_4269() -> CrsDef {
+        epsg(4269)
+    }
+
+    fn epsg_4267() -> CrsDef {
+        epsg(4267)
+    }
+
+    fn epsg_4258() -> CrsDef {
+        epsg(4258)
+    }
+
+    fn epsg_4979() -> CrsDef {
+        epsg(4979)
+    }
+
+    fn epsg_7415() -> CrsDef {
+        epsg(7415)
+    }
+
+    fn epsg_3857() -> CrsDef {
+        epsg(3857)
+    }
+
+    fn epsg_32618() -> CrsDef {
+        epsg(32618)
+    }
+
+    fn epsg_3413() -> CrsDef {
+        epsg(3413)
+    }
+
+    fn epsg_2154() -> CrsDef {
+        epsg(2154)
+    }
+
+    fn epsg_5070() -> CrsDef {
+        epsg(5070)
+    }
+
+    fn epsg_3035() -> CrsDef {
+        epsg(3035)
+    }
+
+    fn epsg_3408() -> CrsDef {
+        epsg(3408)
+    }
+
+    fn epsg_28992() -> CrsDef {
+        epsg(28992)
+    }
+
+    fn epsg_2056() -> CrsDef {
+        epsg(2056)
+    }
+
+    fn epsg_30200() -> CrsDef {
+        epsg(30200)
+    }
+
+    fn epsg_3395() -> CrsDef {
+        epsg(3395)
+    }
+
+    fn epsg_32662() -> CrsDef {
+        epsg(32662)
+    }
+
+    fn epsg_2222() -> CrsDef {
+        epsg(2222)
+    }
+
+    fn epsg_2264() -> CrsDef {
+        epsg(2264)
+    }
+
+    fn epsg(code: u32) -> CrsDef {
+        proj_core::lookup_epsg(code).unwrap_or_else(|| panic!("EPSG:{code}"))
+    }
+
+    fn custom_wgs84_navd88() -> CrsDef {
+        let horizontal = match epsg_4326() {
+            CrsDef::Geographic(geographic) => HorizontalCrsDef::Geographic(geographic),
+            _ => panic!("EPSG:4326 should be geographic"),
+        };
+        let vertical = proj_core::lookup_vertical_epsg(5703).expect("EPSG:5703");
+        CrsDef::Compound(Box::new(CompoundCrsDef::new(
+            0,
+            horizontal,
+            vertical,
+            "WGS 84 + NAVD88 height",
+        )))
+    }
+
+    fn custom_lcc_1sp() -> CrsDef {
+        CrsDef::Projected(ProjectedCrsDef::new_with_base_geographic_crs(
+            0,
+            4326,
+            datum::WGS84,
+            ProjectionMethod::LambertConformalConic {
+                lon0: -96.0,
+                lat0: 33.0,
+                lat1: 33.0,
+                lat2: 33.0,
+                false_easting: 0.0,
+                false_northing: 0.0,
+            },
+            LinearUnit::metre(),
+            "Custom LCC 1SP",
+        ))
+    }
+
+    fn command_path(command: &str) -> Option<String> {
+        let output = Command::new(command).arg("--version").output().ok()?;
+        output.status.success().then(|| command.to_string())
+    }
+
+    fn assert_gdal_accepts_wkt(command: &str, label: &str, wkt: &str) {
+        let path = write_temp_file(label, "wkt", wkt);
+        let output = Command::new(command)
+            .arg("-o")
+            .arg("wkt")
+            .arg(&path)
+            .output()
+            .unwrap_or_else(|err| panic!("{label}: failed to run {command}: {err}"));
+        let _ = fs::remove_file(&path);
+        assert_success(label, command, output);
+    }
+
+    fn assert_pdal_accepts_wkt(command: &str, label: &str, wkt: &str) {
+        let escaped_wkt =
+            serde_json::to_string(wkt).expect("emitted WKT should serialize as JSON string");
+        let pipeline = format!(
+            r#"{{
+                "pipeline": [
+                    {{
+                        "type": "readers.faux",
+                        "bounds": "([0,1],[0,1],[0,1])",
+                        "count": 1,
+                        "mode": "constant"
+                    }},
+                    {{
+                        "type": "filters.reprojection",
+                        "in_srs": "EPSG:4326",
+                        "out_srs": {escaped_wkt}
+                    }},
+                    {{ "type": "writers.null" }}
+                ]
+            }}"#
+        );
+        let path = write_temp_file(label, "json", &pipeline);
+        let output = Command::new(command)
+            .arg("pipeline")
+            .arg("--validate")
+            .arg(&path)
+            .output()
+            .unwrap_or_else(|err| panic!("{label}: failed to run {command}: {err}"));
+        let _ = fs::remove_file(&path);
+        assert_success(label, command, output);
+    }
+
+    fn write_temp_file(label: &str, extension: &str, contents: &str) -> PathBuf {
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system clock should be after epoch")
+            .as_nanos();
+        let sanitized = label
+            .chars()
+            .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
+            .collect::<String>();
+        let path = std::env::temp_dir().join(format!(
+            "proj_wkt_{sanitized}_{stamp}_{pid}.{extension}",
+            pid = std::process::id()
+        ));
+        fs::write(&path, contents)
+            .unwrap_or_else(|err| panic!("{label}: failed to write {}: {err}", path.display()));
+        path
+    }
+
+    fn assert_success(label: &str, command: &str, output: Output) {
+        assert!(
+            output.status.success(),
+            "{label}: {command} rejected emitted WKT\nstdout:\n{}\nstderr:\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
         );
     }
 

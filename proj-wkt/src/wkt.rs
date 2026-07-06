@@ -9,8 +9,8 @@ use crate::semantics::{
 };
 use crate::{ParseError, Result};
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, GeographicCrsDef, HorizontalCrsDef, LinearUnit, ProjectedCrsDef,
-    ProjectionMethod, VerticalCrsDef,
+    CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
+    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
 };
 use std::collections::HashMap;
 
@@ -684,9 +684,11 @@ fn wkt_semantically_equivalent(a: &CrsDef, b: &CrsDef) -> bool {
     }
 
     match (a, b) {
-        (CrsDef::Geographic(a), CrsDef::Geographic(b)) => a.datum().same_datum(b.datum()),
+        (CrsDef::Geographic(a), CrsDef::Geographic(b)) => {
+            wkt_datums_equivalent(a.datum(), b.datum())
+        }
         (CrsDef::Projected(a), CrsDef::Projected(b)) => {
-            a.datum().same_datum(b.datum())
+            wkt_datums_equivalent(a.datum(), b.datum())
                 && wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
                 && wkt_projection_methods_equivalent(a.method(), b.method())
         }
@@ -701,10 +703,10 @@ fn wkt_semantically_equivalent(a: &CrsDef, b: &CrsDef) -> bool {
 fn wkt_horizontal_semantically_equivalent(a: &HorizontalCrsDef, b: &HorizontalCrsDef) -> bool {
     match (a, b) {
         (HorizontalCrsDef::Geographic(a), HorizontalCrsDef::Geographic(b)) => {
-            a.datum().same_datum(b.datum())
+            wkt_datums_equivalent(a.datum(), b.datum())
         }
         (HorizontalCrsDef::Projected(a), HorizontalCrsDef::Projected(b)) => {
-            a.datum().same_datum(b.datum())
+            wkt_datums_equivalent(a.datum(), b.datum())
                 && wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
                 && wkt_projection_methods_equivalent(a.method(), b.method())
         }
@@ -954,6 +956,21 @@ fn wkt_projection_methods_equivalent(a: ProjectionMethod, b: ProjectionMethod) -
 
 fn wkt_approx_eq(a: f64, b: f64) -> bool {
     (a - b).abs() <= 1e-9
+}
+
+fn wkt_datums_equivalent(a: &Datum, b: &Datum) -> bool {
+    if a.same_datum(b) {
+        return true;
+    }
+
+    matches!(a.to_wgs84(), DatumToWgs84::Unknown)
+        && matches!(b.to_wgs84(), DatumToWgs84::Unknown)
+        && wkt_ellipsoids_equivalent(a.ellipsoid(), b.ellipsoid())
+}
+
+fn wkt_ellipsoids_equivalent(a: proj_core::Ellipsoid, b: proj_core::Ellipsoid) -> bool {
+    wkt_approx_eq(a.semi_major_axis(), b.semi_major_axis())
+        && wkt_approx_eq(a.flattening(), b.flattening())
 }
 
 fn parse_structured_ellipsoid(inner: &str) -> Option<StructuredEllipsoid> {
