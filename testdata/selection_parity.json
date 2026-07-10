@@ -1,0 +1,2251 @@
+[
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4258,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 3914,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4258,
+    "probe_lon": 16.43,
+    "probe_lat": 44.44,
+    "expected_operation_epsg": 8680,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to ETRS89 (7) + axis order change (2D)",
+    "probe_extent_name": "Croatia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4258,
+    "probe_lon": 21.744999999999997,
+    "probe_lat": 41.605000000000004,
+    "expected_operation_epsg": 6205,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to ETRS89 (5) + axis order change (2D)",
+    "probe_extent_name": "North Macedonia"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4258,
+    "probe_lon": 20.91,
+    "probe_lat": 44.209999999999994,
+    "expected_operation_epsg": 7675,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to ETRS89 (6) + axis order change (2D)",
+    "probe_extent_name": "Serbia"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4258,
+    "probe_lon": 17.68,
+    "probe_lat": 43.915000000000006,
+    "expected_operation_epsg": 8680,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to ETRS89 (7) + axis order change (2D)",
+    "probe_extent_name": "Bosnia and Herzegovina"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 8688,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (16) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 8688,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (16) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 18.21,
+    "probe_lat": 43.865,
+    "expected_operation_epsg": 8823,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Europe - former Yugoslavia onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 16.43,
+    "probe_lat": 44.44,
+    "expected_operation_epsg": 8823,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Croatia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 19.415,
+    "probe_lat": 42.675,
+    "expected_operation_epsg": 8823,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Montenegro - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 21.744999999999997,
+    "probe_lat": 41.605000000000004,
+    "expected_operation_epsg": 6206,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (10) + axis order change (2D)",
+    "probe_extent_name": "North Macedonia"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 20.91,
+    "probe_lat": 44.209999999999994,
+    "expected_operation_epsg": 9486,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Serbia"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 8688,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (16) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 17.68,
+    "probe_lat": 43.915000000000006,
+    "expected_operation_epsg": 8823,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Bosnia and Herzegovina"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 20.884999999999998,
+    "probe_lat": 42.55,
+    "expected_operation_epsg": 9143,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (14) + axis order change (2D)",
+    "probe_extent_name": "Kosovo"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4326,
+    "probe_lon": 20.91,
+    "probe_lat": 44.209999999999994,
+    "expected_operation_epsg": 9486,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Serbia"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 3928,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (11) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 13.98,
+    "probe_lat": 45.985,
+    "expected_operation_epsg": 3927,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (10) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - west of 14°30'E onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 15.575,
+    "probe_lat": 46.510000000000005,
+    "expected_operation_epsg": 3924,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (7) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - NE"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 15.14,
+    "probe_lat": 45.82,
+    "expected_operation_epsg": 3923,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (6) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - SE"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.945,
+    "probe_lat": 45.595,
+    "expected_operation_epsg": 3922,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (5) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - southeastern"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 15.100000000000001,
+    "probe_lat": 45.91,
+    "expected_operation_epsg": 3928,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (11) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - Dolenjska"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 15.504999999999999,
+    "probe_lat": 46.43,
+    "expected_operation_epsg": 3924,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (7) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - Stajerska"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 16.285,
+    "probe_lat": 46.675,
+    "expected_operation_epsg": 3925,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (8) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - Pomurje"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.100000000000001,
+    "probe_lat": 46.29,
+    "expected_operation_epsg": 3926,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (9) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - Gorenjska and N Primorsko"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.025,
+    "probe_lat": 45.76,
+    "expected_operation_epsg": 3927,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (10) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - Primorska and Notranjska onshore"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.745000000000001,
+    "probe_lat": 46.11,
+    "expected_operation_epsg": 3928,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (11) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - central"
+  },
+  {
+    "source_epsg": 3906,
+    "target_epsg": 4765,
+    "probe_lon": 14.995000000000001,
+    "probe_lat": 46.150000000000006,
+    "expected_operation_epsg": 3928,
+    "expected_operation_name": "axis order change (2D) + MGI 1901 to Slovenia 1996 (11) + axis order change (2D)",
+    "probe_extent_name": "Slovenia - onshore"
+  },
+  {
+    "source_epsg": 4123,
+    "target_epsg": 4326,
+    "probe_lon": 25.415,
+    "probe_lat": 64.92,
+    "expected_operation_epsg": 10099,
+    "expected_operation_name": "axis order change (2D) + KKJ to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Finland - onshore"
+  },
+  {
+    "source_epsg": 4123,
+    "target_epsg": 4326,
+    "probe_lon": 25.415,
+    "probe_lat": 64.92,
+    "expected_operation_epsg": 10099,
+    "expected_operation_name": "axis order change (2D) + KKJ to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Finland - onshore"
+  },
+  {
+    "source_epsg": 4124,
+    "target_epsg": 4326,
+    "probe_lon": 17.1,
+    "probe_lat": 62.015,
+    "expected_operation_epsg": 1896,
+    "expected_operation_name": "axis order change (2D) + RT90 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Sweden"
+  },
+  {
+    "source_epsg": 4124,
+    "target_epsg": 4326,
+    "probe_lon": 17.1,
+    "probe_lat": 62.015,
+    "expected_operation_epsg": 1896,
+    "expected_operation_name": "axis order change (2D) + RT90 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Sweden"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4130,
+    "probe_lon": 35.555,
+    "probe_lat": -18.645,
+    "expected_operation_epsg": 1300,
+    "expected_operation_name": "axis order change (2D) + Tete to Moznet (4) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - onshore"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4130,
+    "probe_lon": 33.205,
+    "probe_lat": -25.39,
+    "expected_operation_epsg": 1298,
+    "expected_operation_name": "axis order change (2D) + Tete to Moznet (2) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - A"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4130,
+    "probe_lon": 33.47,
+    "probe_lat": -22.325,
+    "expected_operation_epsg": 1299,
+    "expected_operation_name": "axis order change (2D) + Tete to Moznet (3) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - B"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4130,
+    "probe_lon": 34.695,
+    "probe_lat": -16.96,
+    "expected_operation_epsg": 1300,
+    "expected_operation_name": "axis order change (2D) + Tete to Moznet (4) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - C"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4130,
+    "probe_lon": 37.629999999999995,
+    "probe_lat": -13.68,
+    "expected_operation_epsg": 1301,
+    "expected_operation_name": "axis order change (2D) + Tete to Moznet (5) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - D"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 35.555,
+    "probe_lat": -18.645,
+    "expected_operation_epsg": 1686,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - onshore"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 33.205,
+    "probe_lat": -25.39,
+    "expected_operation_epsg": 1684,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - A"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 33.47,
+    "probe_lat": -22.325,
+    "expected_operation_epsg": 1685,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - B"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 34.695,
+    "probe_lat": -16.96,
+    "expected_operation_epsg": 1686,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - C"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 37.629999999999995,
+    "probe_lat": -13.68,
+    "expected_operation_epsg": 1687,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - D"
+  },
+  {
+    "source_epsg": 4127,
+    "target_epsg": 4326,
+    "probe_lon": 35.555,
+    "probe_lat": -18.645,
+    "expected_operation_epsg": 1686,
+    "expected_operation_name": "axis order change (2D) + Tete to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Mozambique - onshore"
+  },
+  {
+    "source_epsg": 4131,
+    "target_epsg": 4326,
+    "probe_lon": 107.485,
+    "probe_lat": 16.005000000000003,
+    "expected_operation_epsg": 1542,
+    "expected_operation_name": "axis order change (2D) + Indian 1960 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Vietnam - 14°N to 18°N onshore"
+  },
+  {
+    "source_epsg": 4131,
+    "target_epsg": 4326,
+    "probe_lon": 106.64,
+    "probe_lat": 8.7,
+    "expected_operation_name": "axis order change (2D) + Indian 1960 to WGS 72BE (1) + WGS 72BE to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Vietnam - Con Son Island"
+  },
+  {
+    "source_epsg": 4132,
+    "target_epsg": 4326,
+    "probe_lon": 52.405,
+    "probe_lat": 27.75,
+    "expected_operation_epsg": 1513,
+    "expected_operation_name": "axis order change (2D) + FD58 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Iran - Kangan district"
+  },
+  {
+    "source_epsg": 4132,
+    "target_epsg": 4326,
+    "probe_lon": 52.96,
+    "probe_lat": 26.54,
+    "expected_operation_epsg": 1854,
+    "expected_operation_name": "axis order change (2D) + FD58 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Iran - Lavan Island and Balal field"
+  },
+  {
+    "source_epsg": 4132,
+    "target_epsg": 4326,
+    "probe_lon": 50.32,
+    "probe_lat": 29.275,
+    "expected_operation_epsg": 1855,
+    "expected_operation_name": "axis order change (2D) + FD58 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Iran - Kharg Island"
+  },
+  {
+    "source_epsg": 4134,
+    "target_epsg": 4326,
+    "probe_lon": 55.95,
+    "probe_lat": 21.585,
+    "expected_operation_epsg": 1439,
+    "expected_operation_name": "axis order change (2D) + PSD93 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Oman - onshore"
+  },
+  {
+    "source_epsg": 4134,
+    "target_epsg": 4326,
+    "probe_lon": 57.760000000000005,
+    "probe_lat": 20.375,
+    "expected_operation_epsg": 1617,
+    "expected_operation_name": "axis order change (2D) + PSD93 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Oman - block 4"
+  },
+  {
+    "source_epsg": 4135,
+    "target_epsg": 4326,
+    "probe_lon": -157.52,
+    "probe_lat": 20.58,
+    "expected_operation_epsg": 15824,
+    "expected_operation_name": "axis order change (2D) + Old Hawaiian to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "USA - Hawaii - onshore"
+  },
+  {
+    "source_epsg": 4135,
+    "target_epsg": 4326,
+    "probe_lon": -155.42000000000002,
+    "probe_lat": 19.6,
+    "expected_operation_epsg": 15824,
+    "expected_operation_name": "axis order change (2D) + Old Hawaiian to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "USA - Hawaii - island of Hawaii - onshore"
+  },
+  {
+    "source_epsg": 4135,
+    "target_epsg": 4326,
+    "probe_lon": -159.54,
+    "probe_lat": 22.049999999999997,
+    "expected_operation_epsg": 15826,
+    "expected_operation_name": "axis order change (2D) + Old Hawaiian to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "USA - Hawaii - Kauai - onshore"
+  },
+  {
+    "source_epsg": 4135,
+    "target_epsg": 4326,
+    "probe_lon": -156.645,
+    "probe_lat": 20.855,
+    "expected_operation_epsg": 15824,
+    "expected_operation_name": "axis order change (2D) + Old Hawaiian to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "USA - Hawaii - Maui; Kahoolawe; Lanai; Molokai - onshore"
+  },
+  {
+    "source_epsg": 4135,
+    "target_epsg": 4326,
+    "probe_lon": -157.97000000000003,
+    "probe_lat": 21.475,
+    "expected_operation_epsg": 15828,
+    "expected_operation_name": "axis order change (2D) + Old Hawaiian to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "USA - Hawaii - Oahu - onshore"
+  },
+  {
+    "source_epsg": 4141,
+    "target_epsg": 4326,
+    "probe_lon": 34.93,
+    "probe_lat": 31.365000000000002,
+    "expected_operation_epsg": 9676,
+    "expected_operation_name": "axis order change (2D) + Israel 1993 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Asia - Middle East - Israel and Palestine onshore"
+  },
+  {
+    "source_epsg": 4141,
+    "target_epsg": 4326,
+    "probe_lon": 34.93,
+    "probe_lat": 31.365000000000002,
+    "expected_operation_epsg": 9676,
+    "expected_operation_name": "axis order change (2D) + Israel 1993 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Asia - Middle East - Israel and Palestine onshore"
+  },
+  {
+    "source_epsg": 4143,
+    "target_epsg": 4326,
+    "probe_lon": -5.545,
+    "probe_lat": 5.88,
+    "expected_operation_epsg": 1470,
+    "expected_operation_name": "axis order change (2D) + Abidjan 1987 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Cote d'Ivoire (Ivory Coast)"
+  },
+  {
+    "source_epsg": 4143,
+    "target_epsg": 4326,
+    "probe_lon": -5.33,
+    "probe_lat": 3.1050000000000004,
+    "expected_operation_epsg": 1470,
+    "expected_operation_name": "axis order change (2D) + Abidjan 1987 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Cote d'Ivoire (Ivory Coast) - offshore"
+  },
+  {
+    "source_epsg": 4144,
+    "target_epsg": 4326,
+    "probe_lon": 90.34,
+    "probe_lat": 23.58,
+    "expected_operation_epsg": 1155,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1937 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Bangladesh - onshore"
+  },
+  {
+    "source_epsg": 4144,
+    "target_epsg": 4326,
+    "probe_lon": 96.8,
+    "probe_lat": 13.675,
+    "expected_operation_epsg": 1533,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1937 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Myanmar (Burma) - Moattama area"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 69.345,
+    "probe_lat": 30.355,
+    "expected_operation_epsg": 1247,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - onshore"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 69.705,
+    "probe_lat": 26.384999999999998,
+    "expected_operation_epsg": 9234,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - East Sind"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 68.77,
+    "probe_lat": 26.775,
+    "expected_operation_epsg": 15494,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - Gambat"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 66.12,
+    "probe_lat": 23.22,
+    "expected_operation_epsg": 15701,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - offshore Indus"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 68.805,
+    "probe_lat": 24.82,
+    "expected_operation_epsg": 15702,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - Badin and Mehran"
+  },
+  {
+    "source_epsg": 4145,
+    "target_epsg": 4326,
+    "probe_lon": 67.41499999999999,
+    "probe_lat": 25.225,
+    "expected_operation_epsg": 15701,
+    "expected_operation_name": "axis order change (2D) + Kalianpur 1962 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Pakistan - Karachi"
+  },
+  {
+    "source_epsg": 4149,
+    "target_epsg": 4326,
+    "probe_lon": 8.225,
+    "probe_lat": 46.81,
+    "expected_operation_epsg": 1766,
+    "expected_operation_name": "axis order change (2D) + CH1903 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Europe - Liechtenstein and Switzerland"
+  },
+  {
+    "source_epsg": 4149,
+    "target_epsg": 4326,
+    "probe_lon": 8.225,
+    "probe_lat": 46.81,
+    "expected_operation_epsg": 1766,
+    "expected_operation_name": "axis order change (2D) + CH1903 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Europe - Liechtenstein and Switzerland"
+  },
+  {
+    "source_epsg": 4152,
+    "target_epsg": 4326,
+    "probe_lon": -139.965,
+    "probe_lat": 28.405,
+    "expected_operation_epsg": 1580,
+    "expected_operation_name": "axis order change (2D) + NAD83(HARN) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "USA - HARN"
+  },
+  {
+    "source_epsg": 4152,
+    "target_epsg": 4326,
+    "probe_lon": -95.85,
+    "probe_lat": 36.895,
+    "expected_operation_epsg": 1901,
+    "expected_operation_name": "axis order change (2D) + NAD83(HARN) to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "USA - CONUS - onshore"
+  },
+  {
+    "source_epsg": 4152,
+    "target_epsg": 4326,
+    "probe_lon": -95.85,
+    "probe_lat": 36.895,
+    "expected_operation_epsg": 1901,
+    "expected_operation_name": "axis order change (2D) + NAD83(HARN) to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "USA - CONUS - onshore"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 53.685,
+    "probe_lat": 31.560000000000002,
+    "expected_operation_epsg": 1514,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Iran"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 53.685,
+    "probe_lat": 31.560000000000002,
+    "expected_operation_epsg": 1514,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Iran"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 52.175,
+    "probe_lat": 26.645,
+    "expected_operation_epsg": 1856,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Iran - South Pars blocks 2 and 3"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 52.96,
+    "probe_lat": 26.54,
+    "expected_operation_epsg": 1857,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Iran - Lavan Island and Balal field"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 50.32,
+    "probe_lat": 29.275,
+    "expected_operation_epsg": 1858,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Iran - Kharg Island"
+  },
+  {
+    "source_epsg": 4154,
+    "target_epsg": 4326,
+    "probe_lon": 52.315,
+    "probe_lat": 26.55,
+    "expected_operation_epsg": 15745,
+    "expected_operation_name": "axis order change (2D) + ED50(ED77) to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Iran - South Pars block 11"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4258,
+    "probe_lon": 15.475,
+    "probe_lat": 49.82,
+    "expected_operation_epsg": 1622,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to ETRS89 (1) + axis order change (2D)",
+    "probe_extent_name": "Czechia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4258,
+    "probe_lon": 19.7,
+    "probe_lat": 48.67,
+    "expected_operation_epsg": 4829,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Slovakia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4258,
+    "probe_lon": 19.7,
+    "probe_lat": 48.67,
+    "expected_operation_epsg": 4829,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Slovakia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4326,
+    "probe_lon": 15.475,
+    "probe_lat": 49.82,
+    "expected_operation_epsg": 5239,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Czechia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4326,
+    "probe_lon": 19.7,
+    "probe_lat": 48.67,
+    "expected_operation_epsg": 4836,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Slovakia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4326,
+    "probe_lon": 15.475,
+    "probe_lat": 49.82,
+    "expected_operation_epsg": 5239,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Czechia"
+  },
+  {
+    "source_epsg": 4156,
+    "target_epsg": 4326,
+    "probe_lon": 17.325,
+    "probe_lat": 49.394999999999996,
+    "expected_operation_epsg": 4836,
+    "expected_operation_name": "axis order change (2D) + S-JTSK to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Europe - Czechoslovakia"
+  },
+  {
+    "source_epsg": 4158,
+    "target_epsg": 4326,
+    "probe_lon": -61.415,
+    "probe_lat": 10.445,
+    "expected_operation_epsg": 1555,
+    "expected_operation_name": "axis order change (2D) + Naparima 1955 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Trinidad and Tobago - Trinidad - onshore"
+  },
+  {
+    "source_epsg": 4158,
+    "target_epsg": 4326,
+    "probe_lon": -61.415,
+    "probe_lat": 10.445,
+    "expected_operation_epsg": 1555,
+    "expected_operation_name": "axis order change (2D) + Naparima 1955 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Trinidad and Tobago - Trinidad - onshore"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 18.545,
+    "probe_lat": 27.495,
+    "expected_operation_epsg": 1860,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Libya - Murzuq and En Naga"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 18.545,
+    "probe_lat": 27.495,
+    "expected_operation_epsg": 1860,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Libya - Murzuq and En Naga"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 17.32,
+    "probe_lat": 29.84,
+    "expected_operation_epsg": 1862,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Libya - Mabruk"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 17.32,
+    "probe_lat": 29.84,
+    "expected_operation_epsg": 1862,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Libya - Mabruk"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 17.32,
+    "probe_lat": 29.84,
+    "expected_operation_epsg": 1862,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Libya - Mabruk"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 21.1,
+    "probe_lat": 29.450000000000003,
+    "expected_operation_epsg": 15909,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (8) + axis order change (2D)",
+    "probe_extent_name": "Libya - Amal"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 21.42,
+    "probe_lat": 27.785,
+    "expected_operation_epsg": 15778,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Libya - Sirte NC192"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 17.26,
+    "probe_lat": 26.365,
+    "expected_operation_epsg": 15909,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (8) + axis order change (2D)",
+    "probe_extent_name": "Libya - onshore"
+  },
+  {
+    "source_epsg": 4159,
+    "target_epsg": 4326,
+    "probe_lon": 22.744999999999997,
+    "probe_lat": 32.4,
+    "expected_operation_epsg": 15923,
+    "expected_operation_name": "axis order change (2D) + ELD79 to WGS 84 (9) + axis order change (2D)",
+    "probe_extent_name": "Libya - Cyrenaica"
+  },
+  {
+    "source_epsg": 4160,
+    "target_epsg": 4326,
+    "probe_lon": -67.91,
+    "probe_lat": -34.165,
+    "expected_operation_epsg": 9257,
+    "expected_operation_name": "axis order change (2D) + Chos Malal 1914 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Argentina - Mendoza - Cuyo basin"
+  },
+  {
+    "source_epsg": 4160,
+    "target_epsg": 4326,
+    "probe_lon": -68.85499999999999,
+    "probe_lat": -37.215,
+    "expected_operation_epsg": 9258,
+    "expected_operation_name": "axis order change (2D) + Chos Malal 1914 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Argentina - Neuquen province"
+  },
+  {
+    "source_epsg": 4168,
+    "target_epsg": 4326,
+    "probe_lon": -0.845,
+    "probe_lat": 6.28,
+    "expected_operation_epsg": 6896,
+    "expected_operation_name": "axis order change (2D) + Accra to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Ghana"
+  },
+  {
+    "source_epsg": 4168,
+    "target_epsg": 4326,
+    "probe_lon": -1.01,
+    "probe_lat": 7.915,
+    "expected_operation_epsg": 6896,
+    "expected_operation_name": "axis order change (2D) + Accra to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Ghana - onshore"
+  },
+  {
+    "source_epsg": 4168,
+    "target_epsg": 4326,
+    "probe_lon": -0.845,
+    "probe_lat": 3.7299999999999995,
+    "expected_operation_epsg": 1569,
+    "expected_operation_name": "axis order change (2D) + Accra to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Ghana - offshore"
+  },
+  {
+    "source_epsg": 4178,
+    "target_epsg": 4258,
+    "probe_lon": 12.48,
+    "probe_lat": 52.47,
+    "expected_operation_epsg": 1775,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(83) to ETRS89 (2) + axis order change (2D)",
+    "probe_extent_name": "Germany - East Germany all states"
+  },
+  {
+    "source_epsg": 4178,
+    "target_epsg": 4258,
+    "probe_lon": 12.48,
+    "probe_lat": 52.47,
+    "expected_operation_epsg": 1775,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(83) to ETRS89 (2) + axis order change (2D)",
+    "probe_extent_name": "Germany - East Germany all states"
+  },
+  {
+    "source_epsg": 4178,
+    "target_epsg": 4326,
+    "probe_lon": 12.48,
+    "probe_lat": 52.47,
+    "expected_operation_epsg": 1675,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(83) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Germany - East Germany all states"
+  },
+  {
+    "source_epsg": 4178,
+    "target_epsg": 4326,
+    "probe_lon": 19.505,
+    "probe_lat": 47.16,
+    "expected_operation_epsg": 15996,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(83) to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Hungary"
+  },
+  {
+    "source_epsg": 4178,
+    "target_epsg": 4326,
+    "probe_lon": 17.325,
+    "probe_lat": 49.394999999999996,
+    "expected_operation_epsg": 15998,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(83) to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Europe - Czechoslovakia"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4258,
+    "probe_lon": 19.145,
+    "probe_lat": 51.945,
+    "expected_operation_epsg": 1644,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to ETRS89 (1) + axis order change (2D)",
+    "probe_extent_name": "Poland - onshore"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4258,
+    "probe_lon": 25.835,
+    "probe_lat": 45.855000000000004,
+    "expected_operation_epsg": 15994,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to ETRS89 (4) + axis order change (2D)",
+    "probe_extent_name": "Romania"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4258,
+    "probe_lon": 25.835,
+    "probe_lat": 45.855000000000004,
+    "expected_operation_epsg": 15994,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to ETRS89 (4) + axis order change (2D)",
+    "probe_extent_name": "Romania"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 19.145,
+    "probe_lat": 51.945,
+    "expected_operation_epsg": 1645,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Poland - onshore"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 19.884999999999998,
+    "probe_lat": 41.985,
+    "expected_operation_epsg": 7835,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (22) + axis order change (2D)",
+    "probe_extent_name": "Albania - north of 41°18'N and east of 19°09'E"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 25.835,
+    "probe_lat": 45.855000000000004,
+    "expected_operation_epsg": 15995,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Romania"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 25.835,
+    "probe_lat": 45.855000000000004,
+    "expected_operation_epsg": 15995,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Romania"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 25.835,
+    "probe_lat": 45.855000000000004,
+    "expected_operation_epsg": 15995,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Romania"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 19.145,
+    "probe_lat": 51.945,
+    "expected_operation_epsg": 1645,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Poland - onshore"
+  },
+  {
+    "source_epsg": 4179,
+    "target_epsg": 4326,
+    "probe_lon": 20.14,
+    "probe_lat": 41.155,
+    "expected_operation_epsg": 15999,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1942(58) to WGS 84 (8) + axis order change (2D)",
+    "probe_extent_name": "Albania - onshore"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4258,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 9938,
+    "expected_operation_name": "axis order change (2D) + LUREF to ETRS89 (8) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4326,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 5484,
+    "expected_operation_name": "axis order change (2D) + LUREF to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4326,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 5484,
+    "expected_operation_name": "axis order change (2D) + LUREF to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4326,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 5484,
+    "expected_operation_name": "axis order change (2D) + LUREF to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4181,
+    "target_epsg": 4326,
+    "probe_lon": 6.130000000000001,
+    "probe_lat": 49.815,
+    "expected_operation_epsg": 5484,
+    "expected_operation_name": "axis order change (2D) + LUREF to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Luxembourg"
+  },
+  {
+    "source_epsg": 4182,
+    "target_epsg": 4326,
+    "probe_lon": -31.18,
+    "probe_lat": 39.535,
+    "expected_operation_epsg": 1982,
+    "expected_operation_name": "axis order change (2D) + Azores Occidental 1939 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Portugal - Azores W - onshore"
+  },
+  {
+    "source_epsg": 4182,
+    "target_epsg": 4326,
+    "probe_lon": -31.18,
+    "probe_lat": 39.535,
+    "expected_operation_epsg": 1982,
+    "expected_operation_name": "axis order change (2D) + Azores Occidental 1939 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Portugal - Azores W - onshore"
+  },
+  {
+    "source_epsg": 4182,
+    "target_epsg": 5013,
+    "probe_lon": -31.18,
+    "probe_lat": 39.535,
+    "expected_operation_epsg": 5034,
+    "expected_operation_name": "axis order change (2D) + Azores Occidental 1939 to PTRA08 (2) + axis order change (2D)",
+    "probe_extent_name": "Portugal - Azores W - onshore"
+  },
+  {
+    "source_epsg": 4182,
+    "target_epsg": 5013,
+    "probe_lon": -31.205,
+    "probe_lat": 39.44,
+    "expected_operation_epsg": 5034,
+    "expected_operation_name": "axis order change (2D) + Azores Occidental 1939 to PTRA08 (2) + axis order change (2D)",
+    "probe_extent_name": "Portugal - Azores W - Flores onshore"
+  },
+  {
+    "source_epsg": 4182,
+    "target_epsg": 5013,
+    "probe_lon": -31.1,
+    "probe_lat": 39.7,
+    "expected_operation_epsg": 5035,
+    "expected_operation_name": "axis order change (2D) + Azores Occidental 1939 to PTRA08 (3) + axis order change (2D)",
+    "probe_extent_name": "Portugal - Azores W - Corvo onshore"
+  },
+  {
+    "source_epsg": 4194,
+    "target_epsg": 4326,
+    "probe_lon": -57.905,
+    "probe_lat": 69.37,
+    "expected_operation_epsg": 1798,
+    "expected_operation_name": "axis order change (2D) + Qornoq 1927 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Greenland - west coast"
+  },
+  {
+    "source_epsg": 4194,
+    "target_epsg": 4326,
+    "probe_lon": -57.905,
+    "probe_lat": 69.37,
+    "expected_operation_epsg": 1798,
+    "expected_operation_name": "axis order change (2D) + Qornoq 1927 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Greenland - west coast"
+  },
+  {
+    "source_epsg": 4200,
+    "target_epsg": 4326,
+    "probe_lon": 104.975,
+    "probe_lat": 62.53,
+    "expected_operation_epsg": 5043,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1995 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Russia"
+  },
+  {
+    "source_epsg": 4200,
+    "target_epsg": 4326,
+    "probe_lon": 104.975,
+    "probe_lat": 62.53,
+    "expected_operation_epsg": 5043,
+    "expected_operation_name": "axis order change (2D) + Pulkovo 1995 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Russia"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": 34.905,
+    "probe_lat": 12.819999999999999,
+    "expected_operation_epsg": 1103,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Africa - Eritrea, Ethiopia, South Sudan and Sudan"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": -1.5650000000000002,
+    "probe_lat": 12.24,
+    "expected_operation_epsg": 1100,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Burkina Faso"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": 12.33,
+    "probe_lat": 7.37,
+    "expected_operation_epsg": 1100,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Cameroon - onshore"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": 40.49,
+    "probe_lat": 9.145,
+    "expected_operation_epsg": 1103,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Ethiopia"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": -3.995,
+    "probe_lat": 17.575000000000003,
+    "expected_operation_epsg": 1100,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Mali"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": -14.475,
+    "probe_lat": 14.495,
+    "expected_operation_epsg": 1100,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Senegal - onshore"
+  },
+  {
+    "source_epsg": 4201,
+    "target_epsg": 4326,
+    "probe_lon": 30.24,
+    "probe_lat": 12.864999999999998,
+    "expected_operation_epsg": 1106,
+    "expected_operation_name": "axis order change (2D) + Adindan to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Africa - South Sudan and Sudan onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 133.26999999999998,
+    "probe_lat": -26.78,
+    "expected_operation_epsg": 15979,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (12) + axis order change (2D)",
+    "probe_extent_name": "Australia - onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 149.07999999999998,
+    "probe_lat": -35.525,
+    "expected_operation_epsg": 5827,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (19) + axis order change (2D)",
+    "probe_extent_name": "Australia - Australian Capital Territory"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 146.16000000000003,
+    "probe_lat": -41.61,
+    "expected_operation_epsg": 1594,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (8) + axis order change (2D)",
+    "probe_extent_name": "Australia - Tasmania"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 147.325,
+    "probe_lat": -33.675,
+    "expected_operation_epsg": 1460,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (4) + axis order change (2D)",
+    "probe_extent_name": "Australia - New South Wales and Victoria"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 146.16000000000003,
+    "probe_lat": -41.61,
+    "expected_operation_epsg": 1594,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (8) + axis order change (2D)",
+    "probe_extent_name": "Australia - Tasmania"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 133.495,
+    "probe_lat": -18.435000000000002,
+    "expected_operation_epsg": 1595,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (9) + axis order change (2D)",
+    "probe_extent_name": "Australia - Northern Territory"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 149.07999999999998,
+    "probe_lat": -35.525,
+    "expected_operation_epsg": 5827,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (19) + axis order change (2D)",
+    "probe_extent_name": "Australia - Australian Capital Territory"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4283,
+    "probe_lon": 136.215,
+    "probe_lat": -28.040000000000003,
+    "expected_operation_epsg": 15979,
+    "expected_operation_name": "axis order change (2D) + AGD66 to GDA94 (12) + axis order change (2D)",
+    "probe_extent_name": "Australia - offshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 133.26999999999998,
+    "probe_lat": -26.78,
+    "expected_operation_epsg": 15980,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Australia - onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 149.07999999999998,
+    "probe_lat": -35.525,
+    "expected_operation_epsg": 1665,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (12) + axis order change (2D)",
+    "probe_extent_name": "Australia - Australian Capital Territory"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 147.325,
+    "probe_lat": -33.675,
+    "expected_operation_epsg": 1666,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Australia - New South Wales and Victoria"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 146.16000000000003,
+    "probe_lat": -41.61,
+    "expected_operation_epsg": 1667,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (14) + axis order change (2D)",
+    "probe_extent_name": "Australia - Tasmania"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 133.495,
+    "probe_lat": -18.435000000000002,
+    "expected_operation_epsg": 1668,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Australia - Northern Territory"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 143.495,
+    "probe_lat": -6.935,
+    "expected_operation_epsg": 5841,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - PFTB"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 133.26999999999998,
+    "probe_lat": -26.78,
+    "expected_operation_epsg": 15980,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Australia - onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 145.905,
+    "probe_lat": -6.645,
+    "expected_operation_epsg": 6943,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (21) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - mainland onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 143.495,
+    "probe_lat": -6.935,
+    "expected_operation_epsg": 5841,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - PFTB"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 141.21499999999997,
+    "probe_lat": -5.824999999999999,
+    "expected_operation_epsg": 6945,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (23) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - North Fly"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 133.26999999999998,
+    "probe_lat": -26.78,
+    "expected_operation_epsg": 15980,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Australia - onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 4326,
+    "probe_lon": 136.215,
+    "probe_lat": -28.040000000000003,
+    "expected_operation_epsg": 15980,
+    "expected_operation_name": "axis order change (2D) + AGD66 to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Australia - offshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 143.495,
+    "probe_lat": -6.935,
+    "expected_operation_epsg": 6939,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (4) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - PFTB"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 145.905,
+    "probe_lat": -6.645,
+    "expected_operation_epsg": 6937,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (2) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - mainland onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 145.905,
+    "probe_lat": -6.645,
+    "expected_operation_epsg": 6937,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (2) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - mainland onshore"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 143.495,
+    "probe_lat": -6.935,
+    "expected_operation_epsg": 6939,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (4) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - PFTB"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 143.495,
+    "probe_lat": -6.935,
+    "expected_operation_epsg": 6939,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (4) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - PFTB"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 141.21499999999997,
+    "probe_lat": -5.824999999999999,
+    "expected_operation_epsg": 6941,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (6) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - North Fly"
+  },
+  {
+    "source_epsg": 4202,
+    "target_epsg": 5546,
+    "probe_lon": 141.21499999999997,
+    "probe_lat": -5.824999999999999,
+    "expected_operation_epsg": 6941,
+    "expected_operation_name": "axis order change (2D) + AGD66 to PNG94 (6) + axis order change (2D)",
+    "probe_extent_name": "Papua New Guinea - North Fly"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4283,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1280,
+    "expected_operation_name": "axis order change (2D) + AGD84 to GDA94 (2) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4283,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1280,
+    "expected_operation_name": "axis order change (2D) + AGD84 to GDA94 (2) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4326,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1669,
+    "expected_operation_name": "axis order change (2D) + AGD84 to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4326,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1669,
+    "expected_operation_name": "axis order change (2D) + AGD84 to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4326,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1669,
+    "expected_operation_name": "axis order change (2D) + AGD84 to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4203,
+    "target_epsg": 4326,
+    "probe_lon": 131.42000000000002,
+    "probe_lat": -23.95,
+    "expected_operation_epsg": 1669,
+    "expected_operation_name": "axis order change (2D) + AGD84 to WGS 84 (7) + axis order change (2D)",
+    "probe_extent_name": "Australia - AGD84"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 47.51,
+    "probe_lat": 29.310000000000002,
+    "expected_operation_epsg": 1058,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Kuwait - onshore"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 47.51,
+    "probe_lat": 29.310000000000002,
+    "expected_operation_epsg": 1058,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Kuwait - onshore"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 47.480000000000004,
+    "probe_lat": 29.595,
+    "expected_operation_epsg": 1057,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Kuwait - north of 29.25°N"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 47.51,
+    "probe_lat": 28.990000000000002,
+    "expected_operation_epsg": 1058,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Kuwait - south of 29.25°N"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 50.620000000000005,
+    "probe_lat": 25.935000000000002,
+    "expected_operation_epsg": 1111,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Bahrain - onshore"
+  },
+  {
+    "source_epsg": 4204,
+    "target_epsg": 4326,
+    "probe_lon": 45.09,
+    "probe_lat": 24.265,
+    "expected_operation_epsg": 1111,
+    "expected_operation_name": "axis order change (2D) + Ain el Abd to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Saudi Arabia - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4258,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 5038,
+    "expected_operation_name": "axis order change (2D) + Lisbon to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4258,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 5038,
+    "expected_operation_name": "axis order change (2D) + Lisbon to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4258,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 5038,
+    "expected_operation_name": "axis order change (2D) + Lisbon to ETRS89 (3) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4326,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 1988,
+    "expected_operation_name": "axis order change (2D) + Lisbon to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4326,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 1988,
+    "expected_operation_name": "axis order change (2D) + Lisbon to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4326,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 1988,
+    "expected_operation_name": "axis order change (2D) + Lisbon to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4207,
+    "target_epsg": 4326,
+    "probe_lon": -7.875,
+    "probe_lat": 39.555,
+    "expected_operation_epsg": 1988,
+    "expected_operation_name": "axis order change (2D) + Lisbon to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Portugal - mainland - onshore"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -38.065,
+    "probe_lat": -9.095,
+    "expected_operation_epsg": 5061,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Tucano basin north"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -38.565,
+    "probe_lat": -10.2,
+    "expected_operation_epsg": 5061,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Tucano basin central"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -38.525,
+    "probe_lat": -11.434999999999999,
+    "expected_operation_epsg": 5061,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Tucano basin south"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -46.790000000000006,
+    "probe_lat": -29.185000000000002,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Santos and Pelotas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -39.575,
+    "probe_lat": -23.18,
+    "expected_operation_epsg": 5053,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (14) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Campos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -37.775,
+    "probe_lat": -19.814999999999998,
+    "expected_operation_epsg": 5055,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Espirito Santo and Mucuri"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -36.91,
+    "probe_lat": -15.355,
+    "expected_operation_epsg": 5057,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (16) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Cumuruxatiba, Jequitinhonha and Camamu-Almada"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -37.2,
+    "probe_lat": -12.375,
+    "expected_operation_epsg": 5063,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Reconcavo and Jacuipe"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -38.115,
+    "probe_lat": -10.33,
+    "expected_operation_epsg": 5061,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (18) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Tucano and Jatoba"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -34.675,
+    "probe_lat": -11.155000000000001,
+    "expected_operation_epsg": 5063,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (19) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Sergipe and Alagoas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -32.115,
+    "probe_lat": -7.385,
+    "expected_operation_epsg": 5065,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (20) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Paraiba-Pernambuco"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -35.394999999999996,
+    "probe_lat": -1.12,
+    "expected_operation_epsg": 5067,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (21) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Potiguar, Ceara and Barreirinhas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -44.5,
+    "probe_lat": -25.535,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Santos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -39.575,
+    "probe_lat": -23.18,
+    "expected_operation_epsg": 5053,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (14) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Campos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -37.775,
+    "probe_lat": -19.814999999999998,
+    "expected_operation_epsg": 5055,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Espirito Santo and Mucuri"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -49.045,
+    "probe_lat": -31.91,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Pelotas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -44.285,
+    "probe_lat": -26.0,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - offshore 18°S to 34°S"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -39.575,
+    "probe_lat": -23.18,
+    "expected_operation_epsg": 5053,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (14) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Campos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -44.5,
+    "probe_lat": -25.535,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Santos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -37.775,
+    "probe_lat": -19.814999999999998,
+    "expected_operation_epsg": 5055,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (15) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Espirito Santo and Mucuri"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4326,
+    "probe_lon": -41.989999999999995,
+    "probe_lat": -23.0,
+    "expected_operation_epsg": 5051,
+    "expected_operation_name": "axis order change (2D) + Aratu to WGS 84 (13) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Campos; Espirito Santo and Santos basins"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -46.790000000000006,
+    "probe_lat": -29.185000000000002,
+    "expected_operation_epsg": 5050,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (1) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Santos and Pelotas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -39.575,
+    "probe_lat": -23.18,
+    "expected_operation_epsg": 5052,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (2) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Campos"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -37.775,
+    "probe_lat": -19.814999999999998,
+    "expected_operation_epsg": 5054,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (3) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Espirito Santo and Mucuri"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -36.91,
+    "probe_lat": -15.355,
+    "expected_operation_epsg": 5056,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (4) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Cumuruxatiba, Jequitinhonha and Camamu-Almada"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -37.2,
+    "probe_lat": -12.375,
+    "expected_operation_epsg": 5062,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (7) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Reconcavo and Jacuipe"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -38.115,
+    "probe_lat": -10.33,
+    "expected_operation_epsg": 5060,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (6) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Tucano and Jatoba"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -34.675,
+    "probe_lat": -11.155000000000001,
+    "expected_operation_epsg": 5062,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (7) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Sergipe and Alagoas"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -32.115,
+    "probe_lat": -7.385,
+    "expected_operation_epsg": 5064,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (8) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Paraiba-Pernambuco"
+  },
+  {
+    "source_epsg": 4208,
+    "target_epsg": 4674,
+    "probe_lon": -35.394999999999996,
+    "probe_lat": -1.12,
+    "expected_operation_epsg": 5066,
+    "expected_operation_name": "axis order change (2D) + Aratu to SIRGAS 2000 (9) + axis order change (2D)",
+    "probe_extent_name": "Brazil - Potiguar, Ceara and Barreirinhas"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 27.96,
+    "probe_lat": -19.425,
+    "expected_operation_epsg": 1114,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Africa - Botswana, Eswatini, Lesotho, Malawi, Zambia, Zimbabwe"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 24.685,
+    "probe_lat": -22.33,
+    "expected_operation_epsg": 1114,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Botswana"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 28.235,
+    "probe_lat": -29.615000000000002,
+    "expected_operation_epsg": 1113,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Lesotho"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 34.305,
+    "probe_lat": -13.254999999999999,
+    "expected_operation_epsg": 1117,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Malawi"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 31.465,
+    "probe_lat": -26.52,
+    "expected_operation_epsg": 1118,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Eswatini"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 27.85,
+    "probe_lat": -13.134999999999998,
+    "expected_operation_epsg": 1120,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (8) + axis order change (2D)",
+    "probe_extent_name": "Zambia"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 29.155,
+    "probe_lat": -19.015,
+    "expected_operation_epsg": 1114,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Zimbabwe"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 34.305,
+    "probe_lat": -13.254999999999999,
+    "expected_operation_epsg": 1117,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Malawi"
+  },
+  {
+    "source_epsg": 4209,
+    "target_epsg": 4326,
+    "probe_lon": 29.155,
+    "probe_lat": -19.015,
+    "expected_operation_epsg": 1114,
+    "expected_operation_name": "axis order change (2D) + Arc 1950 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Zimbabwe"
+  },
+  {
+    "source_epsg": 4210,
+    "target_epsg": 4326,
+    "probe_lon": 35.625,
+    "probe_lat": -3.56,
+    "expected_operation_epsg": 1284,
+    "expected_operation_name": "axis order change (2D) + Arc 1960 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Africa - Kenya and Tanzania"
+  },
+  {
+    "source_epsg": 4210,
+    "target_epsg": 4326,
+    "probe_lon": 37.905,
+    "probe_lat": -0.04499999999999993,
+    "expected_operation_epsg": 1284,
+    "expected_operation_name": "axis order change (2D) + Arc 1960 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Kenya - onshore"
+  },
+  {
+    "source_epsg": 4210,
+    "target_epsg": 4326,
+    "probe_lon": 34.91,
+    "probe_lat": -6.37,
+    "expected_operation_epsg": 1285,
+    "expected_operation_name": "axis order change (2D) + Arc 1960 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Tanzania - onshore"
+  },
+  {
+    "source_epsg": 4210,
+    "target_epsg": 4326,
+    "probe_lon": 29.92,
+    "probe_lat": -3.375,
+    "expected_operation_epsg": 1285,
+    "expected_operation_name": "axis order change (2D) + Arc 1960 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Burundi"
+  },
+  {
+    "source_epsg": 4211,
+    "target_epsg": 4326,
+    "probe_lon": 107.89,
+    "probe_lat": -5.48,
+    "expected_operation_epsg": 1813,
+    "expected_operation_name": "axis order change (2D) + Batavia to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Indonesia - Java Sea - offshore northwest Java"
+  },
+  {
+    "source_epsg": 4211,
+    "target_epsg": 4326,
+    "probe_lon": 114.905,
+    "probe_lat": -7.630000000000001,
+    "expected_operation_epsg": 8452,
+    "expected_operation_name": "axis order change (2D) + Batavia to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Indonesia - Bali Sea west"
+  },
+  {
+    "source_epsg": 4211,
+    "target_epsg": 4326,
+    "probe_lon": 105.465,
+    "probe_lat": -1.4700000000000002,
+    "expected_operation_epsg": 8452,
+    "expected_operation_name": "axis order change (2D) + Batavia to WGS 84 (1) + axis order change (2D)",
+    "probe_extent_name": "Indonesia - Bali, Java and western Sumatra onshore"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 108.505,
+    "probe_lat": 37.0,
+    "expected_operation_epsg": 15936,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "China - Ordos basin"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 122.14500000000001,
+    "probe_lat": 34.315,
+    "expected_operation_epsg": 15919,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "China - offshore - Yellow Sea"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 113.445,
+    "probe_lat": 20.6,
+    "expected_operation_epsg": 15920,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "China - offshore - Pearl River basin"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 82.725,
+    "probe_lat": 39.495000000000005,
+    "expected_operation_epsg": 15921,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "China - Tarim - 77.5°E to 88°E and 37°N to 42°N"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 108.66,
+    "probe_lat": 19.75,
+    "expected_operation_epsg": 15935,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "China - offshore - Bei Bu"
+  },
+  {
+    "source_epsg": 4214,
+    "target_epsg": 4326,
+    "probe_lon": 108.505,
+    "probe_lat": 37.0,
+    "expected_operation_epsg": 15936,
+    "expected_operation_name": "axis order change (2D) + Beijing 1954 to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "China - Ordos basin"
+  },
+  {
+    "source_epsg": 4216,
+    "target_epsg": 4326,
+    "probe_lon": -64.75,
+    "probe_lat": 32.32,
+    "expected_operation_epsg": 15970,
+    "expected_operation_name": "axis order change (2D) + Bermuda 1957 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Bermuda - onshore"
+  },
+  {
+    "source_epsg": 4216,
+    "target_epsg": 4326,
+    "probe_lon": -64.75,
+    "probe_lat": 32.32,
+    "expected_operation_epsg": 15970,
+    "expected_operation_name": "axis order change (2D) + Bermuda 1957 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Bermuda - onshore"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -72.985,
+    "probe_lat": 4.725,
+    "expected_operation_epsg": 15729,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (10) + axis order change (2D)",
+    "probe_extent_name": "Colombia - mainland and offshore Caribbean"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -72.625,
+    "probe_lat": 5.215,
+    "expected_operation_epsg": 1597,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (2) + axis order change (2D)",
+    "probe_extent_name": "Colombia - Cusiana"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -72.03,
+    "probe_lat": 11.16,
+    "expected_operation_epsg": 15715,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (3) + axis order change (2D)",
+    "probe_extent_name": "Colombia region 1"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -74.53999999999999,
+    "probe_lat": 10.49,
+    "expected_operation_epsg": 15717,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (4) + axis order change (2D)",
+    "probe_extent_name": "Colombia region 2"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -75.935,
+    "probe_lat": 8.7,
+    "expected_operation_epsg": 15719,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (5) + axis order change (2D)",
+    "probe_extent_name": "Colombia region 3"
+  },
+  {
+    "source_epsg": 4218,
+    "target_epsg": 4326,
+    "probe_lon": -73.195,
+    "probe_lat": 7.2,
+    "expected_operation_epsg": 15721,
+    "expected_operation_name": "axis order change (2D) + Bogota 1975 to WGS 84 (6) + axis order change (2D)",
+    "probe_extent_name": "Colombia region 4"
+  }
+]

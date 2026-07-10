@@ -21,7 +21,7 @@
 //! `corpus_matches_c_proj` and exercised by the ignored
 //! `corpus_pending_fixes_resolved` test.
 
-use proj_core::Transform;
+use proj_core::{AreaOfInterest, Coord, SelectionOptions, Transform};
 use serde::Deserialize;
 
 #[derive(Deserialize)]
@@ -55,8 +55,22 @@ fn load_corpus() -> Vec<ReferencePoint> {
 }
 
 /// Check one reference point; returns a failure message on mismatch.
+///
+/// The transform is constructed with the input point as area of interest:
+/// the reference values come from C PROJ's per-point late-binding operation
+/// selection, so location-aware selection is the comparable configuration.
 fn check_point(r: &ReferencePoint) -> Result<(), String> {
-    let t = Transform::from_epsg(r.from_epsg, r.to_epsg).map_err(|e| {
+    let point = Coord::new(r.input_x, r.input_y);
+    let options = SelectionOptions {
+        area_of_interest: Some(AreaOfInterest::source_crs_point(point)),
+        ..SelectionOptions::default()
+    };
+    let t = Transform::with_selection_options(
+        &format!("EPSG:{}", r.from_epsg),
+        &format!("EPSG:{}", r.to_epsg),
+        options,
+    )
+    .map_err(|e| {
         format!(
             "{}: unexpected transform construction failure for EPSG:{}→EPSG:{}: {e}",
             r.description, r.from_epsg, r.to_epsg

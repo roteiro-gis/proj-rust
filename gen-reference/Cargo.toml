@@ -22,3 +22,7 @@ path = "src/gen_registry.rs"
 [[bin]]
 name = "inspect-schema"
 path = "src/inspect_schema.rs"
+
+[[bin]]
+name = "gen-selection-parity"
+path = "src/gen_selection_parity.rs"
