@@ -31,16 +31,15 @@ struct ParityEntry {
 }
 
 /// Documented selection divergences from C PROJ: (source, target, probe
-/// extent, C PROJ's choice). In every case below C PROJ prefers a different
-/// same-accuracy variant of the operation, driven by EPSG supersession
-/// records (newer variants supersede older ones) that the registry does not
-/// model yet, or by proj-core composing a more specific multi-step path.
-/// Modeling supersession rides the next registry regeneration; each entry is
-/// a candidate to disappear then.
+/// extent, C PROJ's choice). EPSG supersession is modeled (superseded
+/// variants rank below their same-pair replacements); the residual cases
+/// below come from tie-break semantics the registry does not carry —
+/// replacement chains without a supersession row for the specific variant,
+/// C PROJ preferring a direct ballpark operation where proj-core composes a
+/// more specific multi-step path, and epoch/variant preferences among
+/// equal-accuracy candidates. Each entry is a candidate for future ranking
+/// work; new divergences fail the test.
 const KNOWN_DIVERGENCES: &[(u32, u32, &str, &str)] = &[
-    (3906, 4326, "Serbia", "C PROJ uses EPSG:9486"),
-    (3906, 4326, "Slovenia - onshore", "C PROJ uses EPSG:8688"),
-    (4124, 4326, "Sweden", "C PROJ uses EPSG:1896"),
     (
         4143,
         4326,
@@ -54,22 +53,14 @@ const KNOWN_DIVERGENCES: &[(u32, u32, &str, &str)] = &[
         "C PROJ uses EPSG:1766",
     ),
     (4152, 4326, "USA - CONUS - onshore", "C PROJ uses EPSG:1901"),
+    (4156, 4258, "Slovakia", "C PROJ uses EPSG:4829"),
     (4156, 4326, "Czechia", "C PROJ uses EPSG:5239"),
     (4168, 4326, "Ghana - offshore", "C PROJ uses EPSG:1569"),
     (4181, 4258, "Luxembourg", "C PROJ uses EPSG:9938"),
-    (4181, 4326, "Luxembourg", "C PROJ uses EPSG:5484"),
-    (4200, 4326, "Russia", "C PROJ uses EPSG:5043"),
     (4201, 4326, "Burkina Faso", "C PROJ uses EPSG:1100"),
     (4201, 4326, "Cameroon - onshore", "C PROJ uses EPSG:1100"),
     (4201, 4326, "Mali", "C PROJ uses EPSG:1100"),
     (4201, 4326, "Senegal - onshore", "C PROJ uses EPSG:1100"),
-    (4202, 4283, "Australia - Tasmania", "C PROJ uses EPSG:1594"),
-    (
-        4207,
-        4258,
-        "Portugal - mainland - onshore",
-        "C PROJ uses EPSG:5038",
-    ),
     (
         4208,
         4326,

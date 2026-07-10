@@ -136,9 +136,9 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
 use proj_epsg_format::{
     COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_HELMERT, DATUM_SHIFT_IDENTITY,
     DATUM_SHIFT_UNKNOWN, ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED,
-    GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
-    GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC,
-    METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
+    FLAG_SUPERSEDED, GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX,
+    GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC,
+    HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
     METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
     METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
@@ -1368,6 +1368,73 @@ fn supported_grid_formats() -> BTreeMap<String, u8> {
     ])
 }
 
+/// The hand-curated lists above are seeds of correctness; re-derive their
+/// premises from proj.db so upstream changes fail generation instead of
+/// silently drifting.
+fn validate_curated_lists(conn: &Connection) {
+    for &code in KNOWN_IDENTITY_BRIDGE_OPERATION_CODES {
+        let (tx, ty, tz, deprecated): (f64, f64, f64, bool) = conn
+            .query_row(
+                "SELECT tx, ty, tz, deprecated FROM helmert_transformation
+                 WHERE auth_name = 'EPSG' AND code = ?1",
+                [code],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap_or_else(|err| {
+                fatal(format!(
+                    "identity bridge operation EPSG:{code} is missing from proj.db: {err}"
+                ))
+            });
+        if deprecated || tx != 0.0 || ty != 0.0 || tz != 0.0 {
+            fatal(format!(
+                "identity bridge operation EPSG:{code} is no longer a non-deprecated zero                  translation (tx={tx}, ty={ty}, tz={tz}, deprecated={deprecated}); update                  KNOWN_IDENTITY_BRIDGE_OPERATION_CODES"
+            ));
+        }
+    }
+
+    for &code in EXPLICITLY_SUPPORTED_DEPRECATED_PROJECTED_CRS {
+        let deprecated: bool = conn
+            .query_row(
+                "SELECT deprecated FROM projected_crs WHERE auth_name = 'EPSG' AND code = ?1",
+                [code],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|err| {
+                fatal(format!(
+                    "explicitly supported projected CRS EPSG:{code} is missing from proj.db: {err}"
+                ))
+            });
+        if !deprecated {
+            fatal(format!(
+                "projected CRS EPSG:{code} is no longer deprecated upstream; drop it from                  EXPLICITLY_SUPPORTED_DEPRECATED_PROJECTED_CRS"
+            ));
+        }
+    }
+}
+
+/// Operations with a same-CRS-pair EPSG replacement (`supersession` table);
+/// ranking prefers the replacement, so these are flagged in the registry.
+fn load_superseded_operations(conn: &Connection) -> BTreeSet<(String, u32)> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT DISTINCT superseded_table_name, CAST(superseded_code AS TEXT)
+             FROM supersession
+             WHERE superseded_auth_name = 'EPSG'
+               AND replacement_auth_name = 'EPSG'
+               AND same_source_target_crs = 1
+               AND superseded_table_name IN
+                   ('helmert_transformation', 'grid_transformation', 'concatenated_operation')",
+        )
+        .expect("prepare supersession query");
+    stmt.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+    })
+    .expect("query supersession")
+    .flatten()
+    .filter_map(|(table, code)| code.parse::<u32>().ok().map(|code| (table, code)))
+    .collect()
+}
+
 fn supported_operation_payloads() -> BTreeMap<String, u8> {
     named_codes(&[
         ("Concatenated", OP_CONCATENATED),
@@ -1396,6 +1463,8 @@ fn main() {
     let db_sha256 = normalized_proj_db_sha256(&conn)
         .unwrap_or_else(|err| fatal(format!("failed to digest proj.db content: {err}")));
     let proj_db_metadata = read_proj_db_metadata(&conn);
+    let superseded_operations = load_superseded_operations(&conn);
+    validate_curated_lists(&conn);
 
     let mut ellipsoids: BTreeMap<u32, (f64, f64)> = BTreeMap::new();
     {
@@ -2722,6 +2791,9 @@ fn main() {
         }
         if operation.approximate {
             flags |= FLAG_APPROXIMATE;
+        }
+        if superseded_operations.contains(&(operation.table_name.to_string(), operation.code)) {
+            flags |= FLAG_SUPERSEDED;
         }
         buf.push(flags);
         buf.extend_from_slice(&(operation.area_codes.len() as u16).to_le_bytes());

@@ -61,6 +61,9 @@ pub const OP_CONCATENATED: u8 = 3;
 pub const FLAG_DEPRECATED: u8 = 1 << 0;
 pub const FLAG_PREFERRED: u8 = 1 << 1;
 pub const FLAG_APPROXIMATE: u8 = 1 << 2;
+/// EPSG records a same-CRS-pair replacement for this operation
+/// (`supersession` table); ranking prefers the replacement.
+pub const FLAG_SUPERSEDED: u8 = 1 << 3;
 
 // Grid resource tags.
 pub const GRID_FORMAT_NTV2: u8 = 1;

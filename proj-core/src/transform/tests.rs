@@ -40,6 +40,7 @@ fn custom_nad27_to_wgs84_operation(name: &str) -> CoordinateOperation {
         deprecated: false,
         preferred: true,
         approximate: false,
+        superseded: false,
         method: OperationMethod::Helmert {
             params: *datum::NAD27.helmert_to_wgs84().unwrap(),
         },

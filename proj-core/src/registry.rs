@@ -627,6 +627,7 @@ mod tests {
             deprecated: false,
             preferred: true,
             approximate: false,
+            superseded: false,
             method: crate::operation::OperationMethod::Identity,
         };
         let options = SelectionOptions::new().with_coordinate_operation(custom);
