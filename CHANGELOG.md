@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- breaking (behavior): 3D transforms between CRSs without vertical components now propagate datum-shift-induced ellipsoidal height changes instead of preserving the caller's `z`, matching C PROJ's promoted-3D CRS semantics; compound-CRS transforms with gravity-related vertical components are unchanged
+- breaking (behavior): polar stereographic extends the conformal-latitude formula continuously across the equator, so opposite-hemisphere inputs map to their true large-radius coordinates (matching C PROJ) instead of silently mirroring into the projection's hemisphere
+- breaking (behavior): iterative inverse computations (Mercator, Lambert Conformal Conic, Polar Stereographic, Hotine Oblique Mercator, Albers, Oblique Stereographic, geocentric-to-geodetic, NTv2 inverse shift) return a typed error on non-convergence instead of silently returning the last iterate; a shared convergence helper replaces four duplicated latitude iterations
+- replace the Snyder transverse Mercator series with the exact Poder/Engsager formulation C PROJ uses by default: near-pole inverses no longer lose longitude to cancellation, and coordinates beyond the conformal-easting domain produce a typed error
+- compute the exact closed-form Helmert inverse instead of the first-order parameter negation; forward/inverse roundtrips now hold to machine precision at any rotation magnitude
+- wrap out-of-branch longitudes into the grid frame during NTv2 sampling (e.g. 358° resolves like -2°), matching existing GTX behavior
+- rank equally accurate area-matched operations by area-of-use specificity (smaller extent first), as C PROJ does
+- add a committed operation-selection parity corpus generated from C PROJ's late-binding choices (`gen-selection-parity`), asserted by a default-run test with documented known divergences (EPSG supersession-driven variant preferences are not modeled yet)
+- expand the reference corpus (161 → 192 points) with precision points for LCC/Albers/Cassini/Mercator/Equidistant Cylindrical, near-pole transverse Mercator inverses, wrong-hemisphere polar stereographic inputs, and promoted-3D cross-datum height references; corpus schema gains optional `z` fields and a `pending_fix` divergence marker
+- fix the property-test RNG seed for deterministic runs and verify the declared MSRV (1.85) in CI
+
 ## 0.9.0 - 2026-07-06
 
 - breaking: remove opt-in synthetic Helmert datum-shift fallback selection and related legacy API surface; `SelectionPolicy::AllowApproximateHelmertFallback`, `SelectionOptions::allow_approximate_helmert_fallback`, `Datum::approximate_helmert_to`, and `proj-wkt` compatibility aliases for that option are no longer supported, and CRS pairs without a registry, identity, or supported grid/identity custom datum operation now fail during transform construction
