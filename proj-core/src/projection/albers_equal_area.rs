@@ -11,6 +11,7 @@ use crate::projection::{
 /// EPSG examples: 5070 (CONUS Albers), 3005 (BC Albers).
 pub(crate) struct AlbersEqualArea {
     a: f64,
+    e: f64,
     e2: f64,
     lon0: f64,
     n: f64,
@@ -38,11 +39,12 @@ impl AlbersEqualArea {
         validate_offset("false northing", false_northing)?;
 
         let e2 = ellipsoid.e2();
+        let e = e2.sqrt();
         let m1 = m_func(lat1, e2);
         let m2 = m_func(lat2, e2);
-        let q0 = q_func(lat0, e2);
-        let q1 = q_func(lat1, e2);
-        let q2 = q_func(lat2, e2);
+        let q0 = q_func(lat0, e, e2);
+        let q1 = q_func(lat1, e, e2);
+        let q2 = q_func(lat2, e, e2);
 
         let n = if (lat1 - lat2).abs() < 1e-10 {
             lat1.sin()
@@ -60,6 +62,7 @@ impl AlbersEqualArea {
 
         Ok(Self {
             a: ellipsoid.semi_major_axis(),
+            e,
             e2,
             lon0,
             n,
@@ -76,8 +79,7 @@ fn m_func(lat: f64, e2: f64) -> f64 {
     lat.cos() / (1.0 - e2 * sin_lat * sin_lat).sqrt()
 }
 
-fn q_func(lat: f64, e2: f64) -> f64 {
-    let e = e2.sqrt();
+fn q_func(lat: f64, e: f64, e2: f64) -> f64 {
     let sin_lat = lat.sin();
     let e_sin = e * sin_lat;
     (1.0 - e2)
@@ -85,8 +87,7 @@ fn q_func(lat: f64, e2: f64) -> f64 {
             - (1.0 / (2.0 * e)) * ((1.0 - e_sin) / (1.0 + e_sin)).ln())
 }
 
-fn lat_from_q(q: f64, e2: f64) -> Result<f64> {
-    let e = e2.sqrt();
+fn lat_from_q(q: f64, e: f64, e2: f64) -> Result<f64> {
     super::converge(
         "Albers Equal Area inverse latitude",
         (q / 2.0).asin(),
@@ -106,7 +107,7 @@ fn lat_from_q(q: f64, e2: f64) -> Result<f64> {
 impl super::ProjectionImpl for AlbersEqualArea {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
-        let q = q_func(lat, self.e2);
+        let q = q_func(lat, self.e, self.e2);
         let rho = self.a * (self.c - self.n * q).abs().sqrt() / self.n;
         let theta = self.n * normalize_longitude(lon - self.lon0);
 
@@ -124,7 +125,7 @@ impl super::ProjectionImpl for AlbersEqualArea {
         let theta = dx.atan2(dy);
 
         let q = (self.c - rho * rho * self.n * self.n / (self.a * self.a)) / self.n;
-        let lat = lat_from_q(q, self.e2)?;
+        let lat = lat_from_q(q, self.e, self.e2)?;
         let lon = self.lon0 + theta / self.n;
 
         ensure_finite_lon_lat("Albers Equal Area", lon, lat)

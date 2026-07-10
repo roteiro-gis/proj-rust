@@ -26,6 +26,8 @@ pub(crate) struct PolarStereographic {
     // Precomputed constants
     e: f64,
     two_a_k0: f64,
+    /// t evaluated at the pole, `((1-e)/(1+e))^(e/2)`.
+    t_polar: f64,
 }
 
 impl PolarStereographic {
@@ -85,6 +87,7 @@ impl PolarStereographic {
             false_northing,
             e,
             two_a_k0,
+            t_polar: compute_t_polar(e),
         })
     }
 }
@@ -109,7 +112,7 @@ impl super::ProjectionImpl for PolarStereographic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
         let e = self.e;
-        let t_polar = compute_t_polar(e);
+        let t_polar = self.t_polar;
 
         // For north polar: use latitude directly.
         // For south polar: negate latitude to work with formulas designed for north.
@@ -133,7 +136,7 @@ impl super::ProjectionImpl for PolarStereographic {
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
         let e = self.e;
-        let t_polar = compute_t_polar(e);
+        let t_polar = self.t_polar;
 
         let dx = x - self.false_easting;
         let dy = y - self.false_northing;
