@@ -123,6 +123,7 @@ name = "gen-reference"
 version = "0.3.0"
 dependencies = [
  "proj",
+ "proj-epsg-format",
  "proj-sys",
  "rusqlite",
  "serde",
@@ -273,6 +274,10 @@ dependencies = [
  "proj-sys",
  "thiserror",
 ]
+
+[[package]]
+name = "proj-epsg-format"
+version = "0.9.0"
 
 [[package]]
 name = "proj-sys"
