@@ -6,9 +6,12 @@ usage() {
 Usage: ./scripts/verify-release-packaging.sh [--offline]
 
 Verifies the release packaging flow by:
-1. packaging and verifying `proj-core`
-2. staging the `proj-wkt` package file set in an isolated temporary workspace
-3. testing staged `proj-wkt` against the packaged `proj-core` contents via a crates.io patch
+1. packaging and verifying `proj-epsg-format`
+2. packaging `proj-core` (verified via step 3, since its unpublished
+   `proj-epsg-format` dependency cannot resolve in cargo's isolated verify)
+3. staging the `proj-wkt` package file set in an isolated temporary workspace
+   and testing it against the packaged `proj-core` and `proj-epsg-format`
+   contents via crates.io patches
 EOF
 }
 
@@ -39,12 +42,13 @@ workspace_field() {
   awk -F'"' -v key="$key" '$1 == key " = " { print $2; exit }' "$workspace_root/Cargo.toml"
 }
 
-copy_proj_wkt_package_files() {
-  local stage_dir="$1"
+copy_crate_package_files() {
+  local crate="$1"
+  local stage_dir="$2"
   local rel src
   local package_files=()
 
-  mapfile -t package_files < <(cargo package -p proj-wkt --list --allow-dirty "${cargo_flags[@]}")
+  mapfile -t package_files < <(cargo package -p "$crate" --list --allow-dirty "${cargo_flags[@]}")
 
   for rel in "${package_files[@]}"; do
     case "$rel" in
@@ -53,17 +57,17 @@ copy_proj_wkt_package_files() {
         ;;
     esac
 
-    src="$workspace_root/proj-wkt/$rel"
+    src="$workspace_root/$crate/$rel"
     if [[ ! -e "$src" ]]; then
       src="$workspace_root/$rel"
     fi
     if [[ ! -e "$src" ]]; then
-      echo "missing source file for packaged proj-wkt path: $rel" >&2
+      echo "missing source file for packaged $crate path: $rel" >&2
       exit 1
     fi
 
-    mkdir -p "$stage_dir/proj-wkt/$(dirname "$rel")"
-    cp "$src" "$stage_dir/proj-wkt/$rel"
+    mkdir -p "$stage_dir/$crate/$(dirname "$rel")"
+    cp "$src" "$stage_dir/$crate/$rel"
   done
 }
 
@@ -74,24 +78,29 @@ workspace_license="$(workspace_field license)"
 workspace_repository="$(workspace_field repository)"
 workspace_homepage="$(workspace_field homepage)"
 
-cargo package -p proj-core --allow-dirty "${cargo_flags[@]}"
+cargo package -p proj-epsg-format --allow-dirty "${cargo_flags[@]}"
 
-packaged_proj_core_dir="$workspace_root/target/package/proj-core-$workspace_version"
-if [[ ! -d "$packaged_proj_core_dir" ]]; then
-  echo "missing packaged proj-core directory: $packaged_proj_core_dir" >&2
+packaged_proj_epsg_format_dir="$workspace_root/target/package/proj-epsg-format-$workspace_version"
+if [[ ! -d "$packaged_proj_epsg_format_dir" ]]; then
+  echo "missing packaged proj-epsg-format directory: $packaged_proj_epsg_format_dir" >&2
   exit 1
 fi
 
 stage_dir="$(mktemp -d "${TMPDIR:-/tmp}/proj-rust-release-check.XXXXXX")"
 trap 'rm -rf "$stage_dir"' EXIT
 
-copy_proj_wkt_package_files "$stage_dir"
+# proj-core depends on the not-yet-published proj-epsg-format, so cargo's
+# isolated package verification cannot resolve it; stage proj-core's package
+# file set instead and let the staged proj-wkt test build it against the
+# packaged proj-epsg-format, which verifies the same thing end to end.
+copy_crate_package_files proj-core "$stage_dir"
+copy_crate_package_files proj-wkt "$stage_dir"
 cp "$workspace_root/Cargo.lock" "$stage_dir/Cargo.lock"
 cp "$workspace_root/README.md" "$stage_dir/README.md"
 
 cat > "$stage_dir/Cargo.toml" <<EOF
 [workspace]
-members = ["proj-wkt"]
+members = ["proj-core", "proj-wkt"]
 resolver = "2"
 
 [workspace.package]
@@ -103,10 +112,11 @@ repository = "$workspace_repository"
 homepage = "$workspace_homepage"
 
 [workspace.dependencies]
-proj-core = { version = "$workspace_version" }
+proj-core = { version = "$workspace_version", path = "proj-core" }
+proj-epsg-format = { version = "$workspace_version" }
 
 [patch.crates-io]
-proj-core = { path = "$packaged_proj_core_dir" }
+proj-epsg-format = { path = "$packaged_proj_epsg_format_dir" }
 EOF
 
 cargo test -p proj-wkt --manifest-path "$stage_dir/Cargo.toml" "${cargo_flags[@]}"

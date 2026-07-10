@@ -1,0 +1,11 @@
+[package]
+name = "proj-epsg-format"
+description = "Binary format definition for proj-rust's embedded EPSG registry"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+
+[dependencies]

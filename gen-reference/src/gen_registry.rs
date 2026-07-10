@@ -131,58 +131,28 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
     results
 }
 
-const MAGIC: u32 = 0x4550_5347;
-const VERSION: u16 = 8;
+// The container layout is defined once in `proj-epsg-format`, shared with
+// the `proj-core` reader.
+use proj_epsg_format::{
+    COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_HELMERT, DATUM_SHIFT_IDENTITY,
+    DATUM_SHIFT_UNKNOWN, ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED,
+    GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
+    GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC,
+    METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
+    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
+    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
+    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
+    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
+    VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
+    VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
+};
+
 const PROVENANCE_SCHEMA_VERSION: u16 = 4;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 const CANONICAL_FLOAT_DECIMAL_PLACES: usize = 13;
 
-const ELLIPSOID_RECORD_SIZE: usize = 20;
-const DATUM_RECORD_SIZE: usize = 72;
-const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
-const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
-const VERTICAL_CRS_RECORD_BASE_SIZE: usize = 16;
-const COMPOUND_CRS_RECORD_BASE_SIZE: usize = 28;
-
-const METHOD_WEB_MERCATOR: u8 = 1;
-const METHOD_TRANSVERSE_MERCATOR: u8 = 2;
-const METHOD_MERCATOR: u8 = 3;
-const METHOD_LCC: u8 = 4;
-const METHOD_ALBERS: u8 = 5;
-const METHOD_POLAR_STEREO: u8 = 6;
-const METHOD_EQUIDISTANT_CYL: u8 = 7;
-const METHOD_LAEA: u8 = 8;
-const METHOD_OBLIQUE_STEREO: u8 = 9;
-const METHOD_HOTINE_OBLIQUE_MERCATOR_A: u8 = 10;
-const METHOD_HOTINE_OBLIQUE_MERCATOR_B: u8 = 11;
-const METHOD_CASSINI_SOLDNER: u8 = 12;
-const METHOD_LAEA_SPHERICAL: u8 = 13;
-
-const DATUM_SHIFT_UNKNOWN: u8 = 0;
-const DATUM_SHIFT_IDENTITY: u8 = 1;
-const DATUM_SHIFT_HELMERT: u8 = 2;
-
-const OP_HELMERT: u8 = 1;
-const OP_GRID_SHIFT: u8 = 2;
-const OP_CONCATENATED: u8 = 3;
-
-const VERTICAL_OFFSET_GEOID_HEIGHT_METERS: u8 = 1;
-
-const FLAG_DEPRECATED: u8 = 1 << 0;
-const FLAG_PREFERRED: u8 = 1 << 1;
-const FLAG_APPROXIMATE: u8 = 1 << 2;
-
-const GRID_FORMAT_NTV2: u8 = 1;
-const GRID_FORMAT_GTX: u8 = 2;
-const GRID_FORMAT_GEOTIFF: u8 = 3;
+// Writer-internal marker for grid formats the registry does not carry.
 const GRID_FORMAT_UNSUPPORTED: u8 = 255;
-
-const GRID_INTERPOLATION_BILINEAR: u8 = 1;
-
-const HORIZONTAL_CRS_GEOGRAPHIC: u8 = 1;
-const HORIZONTAL_CRS_PROJECTED: u8 = 2;
-const VERTICAL_COMPONENT_ELLIPSOIDAL: u8 = 1;
-const VERTICAL_COMPONENT_REGISTRY_CRS: u8 = 2;
 
 const GENERATED_OPERATION_CODE_OFFSET: u32 = 9_900_000;
 const GENERATED_COMPOSED_OPERATION_CODE_BASE: u32 = 9_900_001;
@@ -2882,12 +2852,7 @@ fn main() {
     }
 }
 
-fn write_string_u16(buf: &mut Vec<u8>, value: &str) {
-    let bytes = value.as_bytes();
-    let len = u16::try_from(bytes.len()).expect("string too long for embedded registry");
-    buf.extend_from_slice(&len.to_le_bytes());
-    buf.extend_from_slice(bytes);
-}
+use proj_epsg_format::write::string_u16 as write_string_u16;
 
 fn write_f64(buf: &mut Vec<u8>, value: f64) {
     buf.extend_from_slice(&canonical_f64(value).to_le_bytes());

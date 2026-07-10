@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+- add coverage-guided fuzzing (workspace-excluded `fuzz/` crate) for the CRS parsers, the WKT parse→emit→reparse cycle, and the NTv2/GTX/GeoTIFF grid parsers, with seed corpora and a nightly/PR CI workflow
+- fix WKT serialization of compound ellipsoidal-height CRSs: the vertical datum authority is now resolved from the horizontal CRS instead of emitting `VERT_DATUM["Unknown datum"]`, and definition-identity cross-checks no longer reuse the fail-closed operation-selection datum equality (found by the new `wkt_roundtrip` fuzz target)
+- add `proj-epsg-format`, a zero-dependency crate that is now the single source of truth for the embedded registry's binary layout, shared by the `proj-core` reader and the `gen-registry` writer (previously ~40 hand-synced constant definitions); registry bytes are unchanged and the source-audit test forbids redefinitions
+- replace the hand-rolled SHA-256 grid checksum implementation with the `sha2` crate (unchanged output, FIPS 180-4 vectors added)
+- gate supply-chain health with cargo-deny in CI (advisories/licenses/bans/sources); updated crossbeam-epoch past RUSTSEC-2026-0204
+- add a CI coverage job (cargo-llvm-cov) and a linear-parse-time regression test for adversarial WKT parameter lists; the live C PROJ parity workflow gains a weekly schedule and path-filtered PR triggers
+
 - breaking (behavior): 3D transforms between CRSs without vertical components now propagate datum-shift-induced ellipsoidal height changes instead of preserving the caller's `z`, matching C PROJ's promoted-3D CRS semantics; compound-CRS transforms with gravity-related vertical components are unchanged
 - breaking (behavior): polar stereographic extends the conformal-latitude formula continuously across the equator, so opposite-hemisphere inputs map to their true large-radius coordinates (matching C PROJ) instead of silently mirroring into the projection's hemisphere
 - breaking (behavior): iterative inverse computations (Mercator, Lambert Conformal Conic, Polar Stereographic, Hotine Oblique Mercator, Albers, Oblique Stereographic, geocentric-to-geodetic, NTv2 inverse shift) return a typed error on non-convergence instead of silently returning the last iterate; a shared convergence helper replaces four duplicated latitude iterations

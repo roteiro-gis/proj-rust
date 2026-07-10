@@ -845,6 +845,7 @@ dependencies = [
  "geo-types",
  "geotiff-reader",
  "proj",
+ "proj-epsg-format",
  "proj-sys",
  "proptest",
  "rayon",
@@ -856,6 +857,10 @@ dependencies = [
  "thiserror",
  "tiff-core",
 ]
+
+[[package]]
+name = "proj-epsg-format"
+version = "0.9.0"
 
 [[package]]
 name = "proj-sys"

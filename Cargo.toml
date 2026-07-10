@@ -1,5 +1,5 @@
 [workspace]
-members = ["proj-core", "proj-wkt"]
+members = ["proj-core", "proj-epsg-format", "proj-wkt"]
 exclude = ["gen-reference", "fuzz"]
 resolver = "2"
 
@@ -13,3 +13,4 @@ homepage = "https://github.com/roteiro-gis/proj-rust"
 
 [workspace.dependencies]
 proj-core = { version = "0.9.0", path = "proj-core" }
+proj-epsg-format = { version = "0.9.0", path = "proj-epsg-format" }
