@@ -57,6 +57,22 @@ jobs:
       - name: Registry reproducibility
         run: ./scripts/check-registry-generation.sh
 
+  msrv:
+    name: MSRV
+    runs-on: ubuntu-24.04
+    env:
+      # Must match rust-version in Cargo.toml; overrides rust-toolchain.toml.
+      RUSTUP_TOOLCHAIN: "1.85.0"
+      # MSRV verifies compilability only; newer-toolchain lints are enforced
+      # by the Check job.
+      RUSTFLAGS: ""
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust
+        run: rustup toolchain install 1.85.0 --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo check --workspace --all-targets --locked
+
   no-default-features:
     name: No Default Features
     runs-on: ubuntu-24.04
