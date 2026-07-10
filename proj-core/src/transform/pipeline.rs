@@ -200,7 +200,7 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
         }
         CompiledStep::GeocentricToGeodetic { ellipsoid } => {
             let (lon, lat, h) =
-                geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z);
+                geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z)?;
             Coord3D::new(lon, lat, h)
         }
     };

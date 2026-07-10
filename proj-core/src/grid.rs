@@ -1560,7 +1560,15 @@ impl Ntv2GridSet {
             }
         }
 
-        Ok((estimate_lon, estimate_lat))
+        // Matches C PROJ's nad_cvt, which fails the point after MAX_TRY
+        // instead of returning a non-converged estimate. A wandering fixed
+        // point means the pull-back left reliable coverage, so surface it as
+        // a coverage error and let grid fallbacks handle it.
+        Err(GridError::OutsideCoverage(format!(
+            "NTv2 inverse shift did not converge at longitude {:.8} latitude {:.8}",
+            lon_radians.to_degrees(),
+            lat_radians.to_degrees()
+        )))
     }
 
     fn grid_at(

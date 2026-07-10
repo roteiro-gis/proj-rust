@@ -101,20 +101,6 @@ fn compute_t(lat: f64, e: f64) -> f64 {
     ((FRAC_PI_2 - lat.abs()) / 2.0).tan() / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)
 }
 
-/// Iterative computation of latitude from t (isometric latitude → geodetic latitude).
-fn lat_from_t(t: f64, e: f64) -> f64 {
-    let mut lat = FRAC_PI_2 - 2.0 * t.atan();
-    for _ in 0..15 {
-        let e_sin = e * lat.sin();
-        let new_lat = FRAC_PI_2 - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan();
-        if (new_lat - lat).abs() < 1e-14 {
-            return new_lat;
-        }
-        lat = new_lat;
-    }
-    lat
-}
-
 impl super::ProjectionImpl for PolarStereographic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
@@ -163,7 +149,8 @@ impl super::ProjectionImpl for PolarStereographic {
         }
 
         let t = rho * t_polar / self.two_a_k0;
-        let lat_unsigned = lat_from_t(t, e);
+        let lat_unsigned =
+            super::latitude_from_conformal_t("Polar Stereographic inverse latitude", t, e)?;
         let lat = sign * lat_unsigned;
 
         let lon = self.lon0 + dx.atan2(dy_eff);

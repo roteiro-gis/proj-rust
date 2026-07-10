@@ -81,19 +81,7 @@ impl super::ProjectionImpl for Mercator {
         validate_projected(x, y)?;
         let lon = self.lon0 + (x - self.false_easting) / self.a_k0;
         let t = (-(y - self.false_northing) / self.a_k0).exp();
-
-        // Iterative latitude from isometric latitude
-        let mut lat = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
-        for _ in 0..15 {
-            let e_sin = self.e * lat.sin();
-            let new_lat = std::f64::consts::FRAC_PI_2
-                - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(self.e / 2.0)).atan();
-            if (new_lat - lat).abs() < 1e-14 {
-                lat = new_lat;
-                break;
-            }
-            lat = new_lat;
-        }
+        let lat = super::latitude_from_conformal_t("Mercator inverse latitude", t, self.e)?;
 
         ensure_finite_lon_lat("Mercator", lon, lat)
     }

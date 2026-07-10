@@ -93,7 +93,7 @@ mod tests {
         let (x2, y2, z2) = helmert_forward(nad27_params, x, y, z);
 
         // Convert back to geodetic on WGS84
-        let (lon2, lat2, _h2) = geocentric_to_geodetic(&ellipsoid::WGS84, x2, y2, z2);
+        let (lon2, lat2, _h2) = geocentric_to_geodetic(&ellipsoid::WGS84, x2, y2, z2).unwrap();
 
         // The shift should be small (tens of meters -> fraction of arcseconds)
         let d_lon = (lon2 - lon).to_degrees() * 3600.0; // arcseconds
