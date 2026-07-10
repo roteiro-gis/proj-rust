@@ -1752,4 +1752,40 @@ mod tests {
             .to_string()
             .contains("unsupported or unrecognized WKT datum"));
     }
+
+    #[test]
+    fn adversarial_parameter_scans_stay_linear() {
+        // Parameter scanning must stay amortized-linear: with quadratic
+        // rescanning these inputs would take minutes, not milliseconds. The
+        // generous bound only trips on complexity regressions, not slow CI.
+        let deadline = std::time::Duration::from_secs(20);
+
+        let mut wkt = String::from(
+            "PROJCS[\"adv\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",\
+             SPHEROID[\"WGS 84\",6378137,298.257223563]],\
+             PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]],\
+             PROJECTION[\"Transverse_Mercator\"]",
+        );
+        for i in 0..30_000 {
+            wkt.push_str(&format!(",PARAMETER[\"p{i}\",{i}]"));
+        }
+        wkt.push_str(",UNIT[\"metre\",1]]");
+        let start = std::time::Instant::now();
+        let _ = parse_wkt_structure(&wkt);
+        assert!(
+            start.elapsed() < deadline,
+            "dense PARAMETER parse took {:?}",
+            start.elapsed()
+        );
+
+        let mut dangling = String::from("PROJCS[\"x\",");
+        dangling.push_str(&"PARAMETER[".repeat(60_000));
+        let start = std::time::Instant::now();
+        let _ = parse_wkt_structure(&dangling);
+        assert!(
+            start.elapsed() < deadline,
+            "dangling-marker parse took {:?}",
+            start.elapsed()
+        );
+    }
 }
