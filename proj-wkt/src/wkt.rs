@@ -10,7 +10,7 @@ use crate::semantics::{
 use crate::{ParseError, Result};
 use proj_core::{
     CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
-    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
+    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
 };
 use std::collections::HashMap;
 
@@ -607,7 +607,7 @@ fn parse_wkt_vertical(
                         "unsupported WKT ellipsoidal-height datum EPSG:{vertical_datum_epsg}"
                     ))
                 })?;
-            if !datum.same_datum(&authority_datum) {
+            if !wkt_datums_equivalent(datum, &authority_datum) {
                 return Err(ParseError::UnsupportedSemantics(
                     "WKT ellipsoidal-height vertical datum does not match compound horizontal datum"
                         .into(),
@@ -694,7 +694,7 @@ fn wkt_semantically_equivalent(a: &CrsDef, b: &CrsDef) -> bool {
         }
         (CrsDef::Compound(a), CrsDef::Compound(b)) => {
             wkt_horizontal_semantically_equivalent(a.horizontal(), b.horizontal())
-                && a.vertical_crs().semantically_equivalent(b.vertical_crs())
+                && wkt_verticals_equivalent(a.vertical_crs(), b.vertical_crs())
         }
         _ => false,
     }
@@ -966,6 +966,30 @@ fn wkt_datums_equivalent(a: &Datum, b: &Datum) -> bool {
     matches!(a.to_wgs84(), DatumToWgs84::Unknown)
         && matches!(b.to_wgs84(), DatumToWgs84::Unknown)
         && wkt_ellipsoids_equivalent(a.ellipsoid(), b.ellipsoid())
+}
+
+/// Definition-level vertical CRS equivalence for WKT authority cross-checks.
+///
+/// `Datum::same_datum` deliberately never equates two `Unknown`-to-WGS84
+/// datums (fail-closed for operation selection), but comparing a parsed WKT
+/// definition against the registry definition it is tagged with is an
+/// identity check, so ellipsoidal-height verticals compare their datums with
+/// the same relaxed rule the horizontal arms use.
+fn wkt_verticals_equivalent(a: &VerticalCrsDef, b: &VerticalCrsDef) -> bool {
+    if a.semantically_equivalent(b) {
+        return true;
+    }
+
+    match (a.kind(), b.kind()) {
+        (
+            VerticalCrsKind::EllipsoidalHeight { datum: a_datum },
+            VerticalCrsKind::EllipsoidalHeight { datum: b_datum },
+        ) => {
+            wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
+                && wkt_datums_equivalent(a_datum, b_datum)
+        }
+        _ => false,
+    }
 }
 
 fn wkt_ellipsoids_equivalent(a: proj_core::Ellipsoid, b: proj_core::Ellipsoid) -> bool {
@@ -1790,8 +1814,10 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "pending: WKT serializer loses the vertical datum identity for compound ellipsoidal-height CRSs, so the authority cross-check rejects the reparse (found by the wkt_roundtrip fuzz target)"]
     fn compound_ellipsoidal_height_wkt_roundtrips() {
+        // Found by the wkt_roundtrip fuzz target: the serializer emitted
+        // VERT_DATUM["Unknown datum"] for ellipsoidal-height verticals and
+        // the authority cross-check rejected the reparse.
         let crs = crate::parse_crs("EPSG:7678").unwrap();
         let wkt = crate::to_wkt(&crs).unwrap();
         let reparsed = crate::parse_crs(&wkt)
