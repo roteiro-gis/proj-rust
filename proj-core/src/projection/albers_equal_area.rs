@@ -9,6 +9,7 @@ use crate::projection::{
 ///
 /// Used for statistical mapping, USGS, and large-area equal-area maps.
 /// EPSG examples: 5070 (CONUS Albers), 3005 (BC Albers).
+#[derive(Clone)]
 pub(crate) struct AlbersEqualArea {
     a: f64,
     e: f64,

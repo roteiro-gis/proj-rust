@@ -71,6 +71,7 @@ pub(crate) trait ProjectionImpl: Send + Sync {
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)>;
 }
 
+#[derive(Clone)]
 pub(crate) enum Projection {
     WebMercator(web_mercator::WebMercator),
     TransverseMercator(transverse_mercator::TransverseMercator),

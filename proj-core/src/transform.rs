@@ -39,6 +39,7 @@ use pipeline::PARALLEL_MIN_ITEMS_PER_THREAD;
 use pipeline::{PipelineSourceXyUnits, PipelineTargetXyUnits};
 
 /// A reusable coordinate transformation between two CRS.
+#[derive(Clone)]
 pub struct Transform {
     source: CrsDef,
     target: CrsDef,
@@ -50,6 +51,27 @@ pub struct Transform {
     selection_options: SelectionOptions,
     pipeline: CompiledOperationPipeline,
     fallback_pipelines: Vec<CompiledOperationFallback>,
+}
+
+impl std::fmt::Debug for Transform {
+    /// Summary form: compiled pipelines and grid data are internals; the
+    /// CRS pair and the selected operation identify the transform.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transform")
+            .field("source", &self.source)
+            .field("target", &self.target)
+            .field("selected_operation", &self.selected_operation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `Transform` must stay cheaply shareable across threads and duplicable;
+/// a field losing one of these auto traits is a semver break, so fail the
+/// build instead.
+#[allow(dead_code)]
+fn assert_transform_auto_traits() {
+    fn assert_traits<T: Send + Sync + Clone + std::fmt::Debug>() {}
+    assert_traits::<Transform>();
 }
 
 /// Trait for `geo-types` geometries that can be transformed as whole values.

@@ -9,6 +9,7 @@ use crate::projection::{
 ///
 /// Used by many national and regional grids including US State Plane zones,
 /// European grids (France Lambert, etc.).
+#[derive(Clone)]
 pub(crate) struct LambertConformalConic {
     a: f64,
     e: f64,
