@@ -23,7 +23,7 @@ const ITERATION_ECCENTRICITY_EPSILON: f64 = 1e-15;
 /// Unlike the fixed-count loops this replaces, exhausting `max_iterations`
 /// is an error instead of silently returning a non-converged iterate.
 pub(crate) fn converge(
-    context: &str,
+    context: &'static str,
     initial: f64,
     max_iterations: usize,
     tolerance: f64,
@@ -37,16 +37,17 @@ pub(crate) fn converge(
         }
         value = next;
     }
-    Err(Error::OutOfRange(format!(
-        "{context} did not converge after {max_iterations} iterations"
-    )))
+    Err(Error::NonConvergence {
+        context,
+        iterations: max_iterations,
+    })
 }
 
 /// Geodetic latitude from the conformal parameter
 /// `t = tan(π/4 − φ/2) / ((1 − e·sinφ)/(1 + e·sinφ))^(e/2)`
 /// (EPSG Guidance Note 7-2), shared by the Mercator, Lambert Conformal
 /// Conic, Polar Stereographic, and Hotine Oblique Mercator inverses.
-pub(crate) fn latitude_from_conformal_t(context: &str, t: f64, e: f64) -> Result<f64> {
+pub(crate) fn latitude_from_conformal_t(context: &'static str, t: f64, e: f64) -> Result<f64> {
     let initial = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
     if e.abs() < ITERATION_ECCENTRICITY_EPSILON {
         return Ok(initial);

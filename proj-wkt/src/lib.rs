@@ -57,7 +57,10 @@ use proj_core::{
 };
 
 /// Parse error.
+///
+/// `#[non_exhaustive]`: match the variants you handle and keep a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ParseError {
     #[error("failed to parse CRS string: {0}")]
     Parse(String),

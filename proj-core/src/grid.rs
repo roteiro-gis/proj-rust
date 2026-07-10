@@ -70,6 +70,7 @@ pub struct VerticalGridSample {
 }
 
 #[derive(Debug, Error, Clone)]
+#[non_exhaustive]
 pub enum GridError {
     #[error("grid not found: {0}")]
     NotFound(String),
