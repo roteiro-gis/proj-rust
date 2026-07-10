@@ -2218,6 +2218,113 @@ mod tests {
         bytes
     }
 
+    /// Write one NTv2 subfile (header + constant-shift data) at `offset`.
+    ///
+    /// Extents are in degrees; the file stores positive-west arcseconds.
+    /// Every node gets the same latitude shift (`lat_shift_arcsec`) and a zero
+    /// longitude shift, so subgrid selection is observable through the value.
+    #[allow(clippy::too_many_arguments)]
+    fn write_ntv2_subfile(
+        bytes: &mut [u8],
+        offset: usize,
+        name: &str,
+        parent: &str,
+        west_deg: f64,
+        east_deg: f64,
+        south_deg: f64,
+        north_deg: f64,
+        res_deg: f64,
+        lat_shift_arcsec: f32,
+    ) -> usize {
+        let nodes_x = ((east_deg - west_deg) / res_deg).round() as usize + 1;
+        let nodes_y = ((north_deg - south_deg) / res_deg).round() as usize + 1;
+        let gs_count = nodes_x * nodes_y;
+
+        let header = &mut bytes[offset..offset + NTV2_HEADER_LEN];
+        header[0..8].copy_from_slice(b"SUB_NAME");
+        write_ntv2_label(header, 8, name);
+        write_ntv2_label(header, 24, parent);
+        write_ntv2_f64(header, 72, south_deg * 3600.0);
+        write_ntv2_f64(header, 88, north_deg * 3600.0);
+        write_ntv2_f64(header, 104, -east_deg * 3600.0);
+        write_ntv2_f64(header, 120, -west_deg * 3600.0);
+        write_ntv2_f64(header, 136, res_deg * 3600.0);
+        write_ntv2_f64(header, 152, res_deg * 3600.0);
+        write_ntv2_u32(header, 168, gs_count as u32);
+
+        let data_start = offset + NTV2_HEADER_LEN;
+        for record in 0..gs_count {
+            write_ntv2_f32(
+                bytes,
+                data_start + record * NTV2_RECORD_LEN,
+                lat_shift_arcsec,
+            );
+        }
+        data_start + gs_count * NTV2_RECORD_LEN
+    }
+
+    /// A three-level NTv2 hierarchy with distinct constant latitude shifts:
+    /// root AA (1″) ⊃ child BB (2″) ⊃ grandchild CC (3″).
+    fn nested_ntv2_bytes() -> Vec<u8> {
+        let mut bytes = vec![0u8; NTV2_HEADER_LEN * 4 + 3 * 25 * NTV2_RECORD_LEN];
+        write_ntv2_global_header(&mut bytes[..NTV2_HEADER_LEN], 3);
+
+        let mut offset = NTV2_HEADER_LEN;
+        offset = write_ntv2_subfile(
+            &mut bytes, offset, "AA", "NONE", -4.0, 0.0, 0.0, 4.0, 1.0, 1.0,
+        );
+        offset = write_ntv2_subfile(
+            &mut bytes, offset, "BB", "AA", -3.0, -1.0, 1.0, 3.0, 0.5, 2.0,
+        );
+        offset = write_ntv2_subfile(
+            &mut bytes, offset, "CC", "BB", -2.5, -1.5, 1.5, 2.5, 0.25, 3.0,
+        );
+        assert_eq!(offset, bytes.len());
+
+        bytes
+    }
+
+    #[test]
+    fn ntv2_selects_deepest_nested_subgrid() {
+        let set = Ntv2GridSet::parse(&nested_ntv2_bytes()).unwrap();
+        let arcsec = PI / 180.0 / 3600.0;
+
+        let cases = [
+            (-2.0, 2.0, 3.0, "inside grandchild CC"),
+            (-2.8, 1.2, 2.0, "inside child BB, outside CC"),
+            (-0.5, 0.5, 1.0, "inside root AA only"),
+        ];
+        for (lon_deg, lat_deg, expected_arcsec, label) in cases {
+            let sample = set
+                .sample(f64::to_radians(lon_deg), f64::to_radians(lat_deg))
+                .unwrap_or_else(|e| panic!("{label}: {e}"));
+            assert!(
+                (sample.lat_shift_radians - expected_arcsec * arcsec).abs() < 1e-12,
+                "{label}: got {} arcsec",
+                sample.lat_shift_radians / arcsec
+            );
+        }
+    }
+
+    #[test]
+    #[ignore = "P1.2 pending: NTv2 sampling must wrap out-of-branch longitudes into the grid frame"]
+    fn ntv2_wraps_out_of_branch_longitude() {
+        let set = Ntv2GridSet::parse(&nested_ntv2_bytes()).unwrap();
+
+        // 358°E is the same meridian as -2°E; GTX grids already wrap this way.
+        let in_branch = set
+            .sample(f64::to_radians(-2.0), f64::to_radians(2.0))
+            .unwrap();
+        let wrapped = set
+            .sample(f64::to_radians(358.0), f64::to_radians(2.0))
+            .expect("out-of-branch longitude should resolve to the same grid cell");
+        assert!(
+            (wrapped.lat_shift_radians - in_branch.lat_shift_radians).abs() < 1e-15
+                && (wrapped.lon_shift_radians - in_branch.lon_shift_radians).abs() < 1e-15,
+            "wrapped sample must match in-branch sample"
+        );
+    }
+
     fn grid_handle_parse_error(bytes: &[u8]) -> String {
         match GridHandle::from_bytes(test_grid_definition(), bytes) {
             Ok(_) => panic!("expected NTv2 parse failure"),

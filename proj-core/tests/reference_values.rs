@@ -11,7 +11,15 @@
 //! - Forward and inverse transforms
 //! - Cross-datum transforms (NAD27→WGS84, OSGB36→WGS84, ED50→WGS84)
 //! - Roundtrip verification (forward then inverse)
-//! - Edge cases (poles, antimeridian, equator, projection zone boundaries)
+//! - Edge cases (poles, antimeridian, equator, projection zone boundaries,
+//!   near-pole inverses, wrong-hemisphere polar stereographic inputs)
+//! - 3D points through promoted 3D CRSs, including cross-datum ellipsoidal
+//!   height changes
+//!
+//! Points carrying a `pending_fix` marker are known divergences from C PROJ
+//! that are tracked until the named fix lands; they are skipped by
+//! `corpus_matches_c_proj` and exercised by the ignored
+//! `corpus_pending_fixes_resolved` test.
 
 use proj_core::Transform;
 use serde::Deserialize;
@@ -22,10 +30,18 @@ struct ReferencePoint {
     to_epsg: u32,
     input_x: f64,
     input_y: f64,
+    #[serde(default)]
+    input_z: Option<f64>,
     expected_x: f64,
     expected_y: f64,
+    #[serde(default)]
+    expected_z: Option<f64>,
     tolerance: f64,
+    #[serde(default)]
+    tolerance_z: Option<f64>,
     description: String,
+    #[serde(default)]
+    pending_fix: Option<String>,
 }
 
 fn load_corpus() -> Vec<ReferencePoint> {
@@ -38,52 +54,76 @@ fn load_corpus() -> Vec<ReferencePoint> {
     serde_json::from_str(&data).unwrap_or_else(|e| panic!("failed to parse {path}: {e}"))
 }
 
+/// Check one reference point; returns a failure message on mismatch.
+fn check_point(r: &ReferencePoint) -> Result<(), String> {
+    let t = Transform::from_epsg(r.from_epsg, r.to_epsg).map_err(|e| {
+        format!(
+            "{}: unexpected transform construction failure for EPSG:{}→EPSG:{}: {e}",
+            r.description, r.from_epsg, r.to_epsg
+        )
+    })?;
+
+    match (r.input_z, r.expected_z) {
+        (Some(iz), Some(ez)) => {
+            let (rx, ry, rz) = t
+                .convert_3d((r.input_x, r.input_y, iz))
+                .map_err(|e| format!("{}: 3D transform failed: {e}", r.description))?;
+            let (dx, dy, dz) = (
+                (rx - r.expected_x).abs(),
+                (ry - r.expected_y).abs(),
+                (rz - ez).abs(),
+            );
+            let tol_z = r.tolerance_z.unwrap_or(r.tolerance);
+            if dx > r.tolerance || dy > r.tolerance || dz > tol_z {
+                return Err(format!(
+                    "{}: expected ({}, {}, {}), got ({}, {}, {}), delta ({:e}, {:e}, {:e}), tol {:e}, tol_z {:e}",
+                    r.description, r.expected_x, r.expected_y, ez, rx, ry, rz, dx, dy, dz,
+                    r.tolerance, tol_z
+                ));
+            }
+        }
+        _ => {
+            let (rx, ry) = t
+                .convert((r.input_x, r.input_y))
+                .map_err(|e| format!("{}: transform failed: {e}", r.description))?;
+            let (dx, dy) = ((rx - r.expected_x).abs(), (ry - r.expected_y).abs());
+            if dx > r.tolerance || dy > r.tolerance {
+                return Err(format!(
+                    "{}: expected ({}, {}), got ({}, {}), delta ({:e}, {:e}), tol {:e}",
+                    r.description, r.expected_x, r.expected_y, rx, ry, dx, dy, r.tolerance
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[test]
 fn corpus_matches_c_proj() {
     let corpus = load_corpus();
     assert!(!corpus.is_empty(), "corpus is empty");
 
     let mut pass = 0;
+    let mut pending = 0;
     let mut failures = Vec::new();
 
     for r in &corpus {
-        let t = match Transform::from_epsg(r.from_epsg, r.to_epsg) {
-            Ok(t) => t,
-            Err(e) => {
-                failures.push(format!(
-                    "{}: unexpected transform construction failure for EPSG:{}→EPSG:{}: {e}",
-                    r.description, r.from_epsg, r.to_epsg
-                ));
-                continue;
-            }
-        };
-
-        let result = match t.convert((r.input_x, r.input_y)) {
-            Ok(r) => r,
-            Err(e) => {
-                failures.push(format!("{}: transform failed: {e}", r.description));
-                continue;
-            }
-        };
-
-        let (rx, ry) = result;
-        let dx = (rx - r.expected_x).abs();
-        let dy = (ry - r.expected_y).abs();
-
-        if dx > r.tolerance || dy > r.tolerance {
-            failures.push(format!(
-                "{}: expected ({}, {}), got ({}, {}), delta ({:e}, {:e}), tol {:e}",
-                r.description, r.expected_x, r.expected_y, rx, ry, dx, dy, r.tolerance
-            ));
-        } else {
-            pass += 1;
+        if let Some(fix) = &r.pending_fix {
+            eprintln!("Skipping pending point ({fix}): {}", r.description);
+            pending += 1;
+            continue;
+        }
+        match check_point(r) {
+            Ok(()) => pass += 1,
+            Err(msg) => failures.push(msg),
         }
     }
 
     eprintln!(
-        "Corpus results: {} passed, {} failed out of {} total",
+        "Corpus results: {} passed, {} failed, {} pending out of {} total",
         pass,
         failures.len(),
+        pending,
         corpus.len()
     );
 
@@ -92,6 +132,34 @@ fn corpus_matches_c_proj() {
             "{} of {} reference values failed:\n{}",
             failures.len(),
             corpus.len(),
+            failures.join("\n")
+        );
+    }
+}
+
+/// Tracks known divergences from C PROJ. Every corpus point marked
+/// `pending_fix` fails here until the named fix lands; once a fix lands, the
+/// corpus is regenerated (dropping the marker) and the point moves into
+/// `corpus_matches_c_proj`. Run with `--ignored` to see remaining divergence.
+#[test]
+#[ignore = "documents pending fixes; run explicitly to measure remaining divergence"]
+fn corpus_pending_fixes_resolved() {
+    let corpus = load_corpus();
+    let mut failures = Vec::new();
+    let mut checked = 0;
+
+    for r in corpus.iter().filter(|r| r.pending_fix.is_some()) {
+        checked += 1;
+        if let Err(msg) = check_point(r) {
+            failures.push(format!("[{}] {msg}", r.pending_fix.as_deref().unwrap()));
+        }
+    }
+
+    eprintln!("Pending points checked: {checked}");
+    if !failures.is_empty() {
+        panic!(
+            "{} pending points still diverge:\n{}",
+            failures.len(),
             failures.join("\n")
         );
     }
@@ -143,6 +211,24 @@ fn corpus_has_adequate_coverage() {
     // Verify inverse transforms
     assert!(from_epsgs.contains(&3857), "missing 3857→4326 inverse");
     assert!(from_epsgs.contains(&3413), "missing 3413→4326 inverse");
+
+    // Verify 3D coverage (promoted 3D CRS references)
+    assert!(
+        corpus.iter().any(|r| r.input_z.is_some()),
+        "missing 3D reference points"
+    );
+    assert!(
+        corpus
+            .iter()
+            .any(|r| r.input_z.is_some() && r.pending_fix.is_none()),
+        "missing non-pending 3D reference points"
+    );
+
+    // Verify near-pole and wrong-hemisphere edge coverage
+    assert!(
+        corpus.iter().any(|r| r.input_y.abs() > 89.99),
+        "missing near-pole points"
+    );
 
     // Verify corpus size is substantial
     assert!(

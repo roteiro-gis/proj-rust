@@ -7,10 +7,21 @@ struct ReferencePoint {
     to_epsg: u32,
     input_x: f64,
     input_y: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    input_z: Option<f64>,
     expected_x: f64,
     expected_y: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    expected_z: Option<f64>,
     tolerance: f64,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    tolerance_z: Option<f64>,
     description: String,
+    /// When set, proj-core is known to diverge from this reference value until
+    /// the named fix lands; the default corpus test skips the point and the
+    /// ignored `corpus_pending_fixes_resolved` test tracks it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pending_fix: Option<String>,
 }
 
 fn transform(from: u32, to: u32, x: f64, y: f64, tol: f64, desc: &str) -> Option<ReferencePoint> {
@@ -45,10 +56,183 @@ fn transform(from: u32, to: u32, x: f64, y: f64, tol: f64, desc: &str) -> Option
         to_epsg: to,
         input_x: x,
         input_y: y,
+        input_z: None,
         expected_x: ox,
         expected_y: oy,
+        expected_z: None,
         tolerance: tol,
+        tolerance_z: None,
         description: desc.to_string(),
+        pending_fix: None,
+    })
+}
+
+/// Transform through the 3D promotions of both CRSs (`proj_crs_promote_to_3D`),
+/// so datum-shift-induced ellipsoidal height changes appear in the reference
+/// values instead of C PROJ's 2D `push/pop v_3` height passthrough.
+mod promoted_3d {
+    use std::ffi::CString;
+    use std::ptr;
+
+    use proj_sys::{
+        proj_area_create, proj_area_destroy, proj_context_create, proj_context_destroy,
+        proj_context_errno, proj_create, proj_create_crs_to_crs_from_pj, proj_crs_promote_to_3D,
+        proj_destroy, proj_errno, proj_errno_string, proj_normalize_for_visualization, proj_trans,
+        PJ_CONTEXT, PJ_COORD, PJ_DIRECTION_PJ_FWD, PJ_XYZT,
+    };
+
+    fn error_message(err: i32) -> String {
+        unsafe {
+            let ptr = proj_errno_string(err);
+            if ptr.is_null() {
+                return format!("PROJ error code {err}");
+            }
+            std::ffi::CStr::from_ptr(ptr).to_string_lossy().into_owned()
+        }
+    }
+
+    unsafe fn create_promoted_crs(
+        ctx: *mut PJ_CONTEXT,
+        code: u32,
+    ) -> Result<*mut proj_sys::PJ, String> {
+        let def = CString::new(format!("EPSG:{code}")).expect("EPSG code strings have no NUL");
+        let crs = proj_create(ctx, def.as_ptr());
+        if crs.is_null() {
+            return Err(format!(
+                "failed to create CRS EPSG:{code}: {}",
+                error_message(proj_context_errno(ctx))
+            ));
+        }
+        let crs_3d = proj_crs_promote_to_3D(ctx, ptr::null(), crs);
+        proj_destroy(crs);
+        if crs_3d.is_null() {
+            return Err(format!(
+                "failed to promote CRS EPSG:{code} to 3D: {}",
+                error_message(proj_context_errno(ctx))
+            ));
+        }
+        Ok(crs_3d)
+    }
+
+    pub fn convert(from: u32, to: u32, coord: (f64, f64, f64)) -> Result<(f64, f64, f64), String> {
+        unsafe {
+            let ctx = proj_context_create();
+            if ctx.is_null() {
+                return Err("failed to create PROJ context".into());
+            }
+            let result = convert_in_ctx(ctx, from, to, coord);
+            proj_context_destroy(ctx);
+            result
+        }
+    }
+
+    unsafe fn convert_in_ctx(
+        ctx: *mut PJ_CONTEXT,
+        from: u32,
+        to: u32,
+        coord: (f64, f64, f64),
+    ) -> Result<(f64, f64, f64), String> {
+        let from_crs = create_promoted_crs(ctx, from)?;
+        let to_crs = match create_promoted_crs(ctx, to) {
+            Ok(crs) => crs,
+            Err(err) => {
+                proj_destroy(from_crs);
+                return Err(err);
+            }
+        };
+
+        let area = proj_area_create();
+        let raw = proj_create_crs_to_crs_from_pj(ctx, from_crs, to_crs, area, ptr::null());
+        proj_area_destroy(area);
+        proj_destroy(from_crs);
+        proj_destroy(to_crs);
+        if raw.is_null() {
+            return Err(format!(
+                "failed to create promoted 3D transform EPSG:{from}->EPSG:{to}: {}",
+                error_message(proj_context_errno(ctx))
+            ));
+        }
+
+        let pj = proj_normalize_for_visualization(ctx, raw);
+        proj_destroy(raw);
+        if pj.is_null() {
+            return Err(format!(
+                "failed to normalize promoted 3D transform EPSG:{from}->EPSG:{to}: {}",
+                error_message(proj_context_errno(ctx))
+            ));
+        }
+
+        let trans = proj_trans(
+            pj,
+            PJ_DIRECTION_PJ_FWD,
+            PJ_COORD {
+                xyzt: PJ_XYZT {
+                    x: coord.0,
+                    y: coord.1,
+                    z: coord.2,
+                    t: f64::INFINITY,
+                },
+            },
+        );
+        let err = proj_errno(pj);
+        proj_destroy(pj);
+        if err != 0 {
+            return Err(format!(
+                "promoted 3D convert failed: {}",
+                error_message(err)
+            ));
+        }
+        Ok((trans.xyzt.x, trans.xyzt.y, trans.xyzt.z))
+    }
+}
+
+/// Generate a 3D reference point through promoted 3D CRSs.
+///
+/// Points whose reference height differs from a plain passthrough of the input
+/// height are marked `pending_fix`: proj-core currently preserves the caller's
+/// `z` across horizontal datum shifts, so it diverges from these references
+/// until the 3D height fix lands.
+#[allow(clippy::too_many_arguments)]
+fn transform_3d(
+    from: u32,
+    to: u32,
+    x: f64,
+    y: f64,
+    z: f64,
+    tol: f64,
+    tol_z: f64,
+    desc: &str,
+) -> Option<ReferencePoint> {
+    let (ox, oy, oz) = match promoted_3d::convert(from, to, (x, y, z)) {
+        Ok(out) => out,
+        Err(err) => {
+            eprintln!("Skipping 3D reference point {desc}: {err}");
+            return None;
+        }
+    };
+    if !ox.is_finite() || !oy.is_finite() || !oz.is_finite() {
+        eprintln!("Skipping 3D reference point {desc}: non-finite output ({ox}, {oy}, {oz})");
+        return None;
+    }
+
+    let pending_fix = if (oz - z).abs() > tol_z {
+        Some("P1.6 3D cross-datum ellipsoidal height".to_string())
+    } else {
+        None
+    };
+    Some(ReferencePoint {
+        from_epsg: from,
+        to_epsg: to,
+        input_x: x,
+        input_y: y,
+        input_z: Some(z),
+        expected_x: ox,
+        expected_y: oy,
+        expected_z: Some(oz),
+        tolerance: tol,
+        tolerance_z: Some(tol_z),
+        description: desc.to_string(),
+        pending_fix,
     })
 }
 
@@ -576,6 +760,227 @@ fn main() {
                 &format!("roundtrip {name} inverse"),
             ));
         }
+    }
+
+    // =========================================================================
+    // 5. PRECISION points for projections previously covered only by loose
+    //    tolerances or roundtrips: LCC, Albers, Cassini, Mercator, Eq. Cyl.
+    //    Tolerance is 1 mm: proj-core's LCC/Albers forward northing differs
+    //    from C PROJ by a uniform ~0.10 mm (series/precision difference), so
+    //    sub-0.1 mm parity is tracked separately rather than asserted here.
+    // =========================================================================
+
+    let precision_targets: &[(u32, u32, f64, f64, &str)] = &[
+        (4326, 2154, 2.3522, 48.8566, "Paris 4326→2154 LCC precise"),
+        (4326, 2154, 5.0, 44.0, "SE France 4326→2154 LCC precise"),
+        (
+            4326,
+            5070,
+            -96.0,
+            37.0,
+            "US center 4326→5070 Albers precise",
+        ),
+        (4326, 5070, -118.24, 34.05, "LA 4326→5070 Albers precise"),
+        (
+            4302,
+            30200,
+            -61.5,
+            10.5,
+            "Trinidad 4302→30200 Cassini precise",
+        ),
+        (
+            4326,
+            3395,
+            -74.006,
+            40.7128,
+            "NYC 4326→3395 Mercator precise",
+        ),
+        (
+            4326,
+            3395,
+            151.2093,
+            -33.8688,
+            "Sydney 4326→3395 Mercator precise",
+        ),
+        (
+            4326,
+            32662,
+            -74.006,
+            40.7128,
+            "NYC 4326→32662 EqCyl precise",
+        ),
+    ];
+    for &(from_epsg, to_epsg, lon, lat, name) in precision_targets {
+        points.extend(transform(from_epsg, to_epsg, lon, lat, 1e-3, name));
+        if let Some(fwd) = transform(from_epsg, to_epsg, lon, lat, 1e-3, "") {
+            points.extend(transform(
+                to_epsg,
+                from_epsg,
+                fwd.expected_x,
+                fwd.expected_y,
+                1e-9,
+                &format!("{name} inverse"),
+            ));
+        }
+    }
+
+    // =========================================================================
+    // 6. EDGE cases: near-pole inverses and wrong-hemisphere polar stereo
+    // =========================================================================
+
+    // Near-pole inverse points for transverse Mercator: project a point close
+    // to the pole, then record the inverse as its own reference point. Off-CM
+    // inverses diverge from C PROJ today (longitude recovery is
+    // ill-conditioned near the pole) and stay pending until the pole-guard fix.
+    let near_pole_tm: &[(u32, f64, f64, Option<&str>, &str)] = &[
+        (32618, -75.0, 89.9999999, None, "UTM18N near north pole"),
+        (
+            32618,
+            -70.5,
+            89.999999,
+            Some("P1.4 near-pole transverse Mercator inverse"),
+            "UTM18N off-CM near north pole",
+        ),
+        (
+            32718,
+            -72.0,
+            -89.9999999,
+            Some("P1.4 near-pole transverse Mercator inverse"),
+            "UTM18S near south pole",
+        ),
+    ];
+    for &(epsg, lon, lat, pending, name) in near_pole_tm {
+        if let Some(fwd) = transform(4326, epsg, lon, lat, 0.01, &format!("{name} forward")) {
+            points.push(fwd);
+            if let Some(fwd_again) = transform(4326, epsg, lon, lat, 0.01, "") {
+                // Longitude is ill-conditioned at the pole; C PROJ still
+                // recovers it to ~1e-7 deg, so hold the inverse to 1e-4 deg.
+                points.extend(
+                    transform(
+                        epsg,
+                        4326,
+                        fwd_again.expected_x,
+                        fwd_again.expected_y,
+                        1e-4,
+                        &format!("{name} inverse"),
+                    )
+                    .map(|mut point| {
+                        point.pending_fix = pending.map(str::to_string);
+                        point
+                    }),
+                );
+            }
+        }
+    }
+
+    // Wrong-hemisphere inputs for polar stereographic: C PROJ extends the
+    // conformal-latitude formula continuously across the equator; proj-core
+    // currently mirrors via `lat.abs()` and stays pending until the
+    // hemisphere-handling fix.
+    let wrong_hemisphere_ps: &[(u32, f64, f64, Option<&str>, &str)] = &[
+        (
+            3413,
+            -45.0,
+            -30.0,
+            Some("P1.5 polar stereographic hemisphere handling"),
+            "southern point into north polar stereo 4326→3413",
+        ),
+        (
+            3031,
+            0.0,
+            30.0,
+            Some("P1.5 polar stereographic hemisphere handling"),
+            "northern point into south polar stereo 4326→3031",
+        ),
+        (
+            3413,
+            -45.0,
+            0.0,
+            None,
+            "equator into north polar stereo 4326→3413",
+        ),
+    ];
+    for &(epsg, lon, lat, pending, name) in wrong_hemisphere_ps {
+        points.extend(
+            transform(4326, epsg, lon, lat, 0.01, name).map(|mut point| {
+                point.pending_fix = pending.map(str::to_string);
+                point
+            }),
+        );
+    }
+
+    // =========================================================================
+    // 7. 3D points through promoted 3D CRSs. Cross-datum Helmert paths change
+    //    the ellipsoidal height; those emit `pending_fix` markers until the
+    //    3D height fix lands. Same-datum paths must preserve height today.
+    // =========================================================================
+
+    // (from_epsg, to_epsg, lon, lat, height, tolerance, tolerance_z, name)
+    type ThreeDCase = (u32, u32, f64, f64, f64, f64, f64, &'static str);
+    let three_d_points: &[ThreeDCase] = &[
+        (
+            4326,
+            3857,
+            -74.006,
+            40.7128,
+            15.0,
+            0.001,
+            1e-9,
+            "NYC 3D 4326→3857 preserves height",
+        ),
+        (
+            4267,
+            4326,
+            -90.0,
+            45.0,
+            250.0,
+            0.001,
+            0.01,
+            "US Midwest 3D NAD27→WGS84",
+        ),
+        (
+            4277,
+            4326,
+            -0.1278,
+            51.5074,
+            45.0,
+            0.001,
+            0.01,
+            "London 3D OSGB36→WGS84",
+        ),
+        (
+            4230,
+            4326,
+            2.3522,
+            48.8566,
+            100.0,
+            0.001,
+            0.01,
+            "Paris 3D ED50→WGS84",
+        ),
+        (
+            4326,
+            4277,
+            -0.1278,
+            51.5074,
+            95.0,
+            0.001,
+            0.01,
+            "London 3D WGS84→OSGB36 reverse",
+        ),
+        (
+            4326,
+            27700,
+            -0.1278,
+            51.5074,
+            45.0,
+            0.01,
+            0.01,
+            "London 3D WGS84→British National Grid",
+        ),
+    ];
+    for &(from_epsg, to_epsg, x, y, z, tol, tol_z, name) in three_d_points {
+        points.extend(transform_3d(from_epsg, to_epsg, x, y, z, tol, tol_z, name));
     }
 
     eprintln!("Generated {} reference points", points.len());
