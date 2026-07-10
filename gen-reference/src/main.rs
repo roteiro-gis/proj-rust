@@ -866,23 +866,22 @@ fn main() {
         }
     }
 
-    // Wrong-hemisphere inputs for polar stereographic: C PROJ extends the
-    // conformal-latitude formula continuously across the equator; proj-core
-    // currently mirrors via `lat.abs()` and stays pending until the
-    // hemisphere-handling fix.
+    // Wrong-hemisphere inputs for polar stereographic: the conformal-latitude
+    // formula extends continuously across the equator to large-radius points,
+    // matching C PROJ.
     let wrong_hemisphere_ps: &[(u32, f64, f64, Option<&str>, &str)] = &[
         (
             3413,
             -45.0,
             -30.0,
-            Some("P1.5 polar stereographic hemisphere handling"),
+            None,
             "southern point into north polar stereo 4326→3413",
         ),
         (
             3031,
             0.0,
             30.0,
-            Some("P1.5 polar stereographic hemisphere handling"),
+            None,
             "northern point into south polar stereo 4326→3031",
         ),
         (

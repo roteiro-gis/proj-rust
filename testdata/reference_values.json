@@ -1837,8 +1837,7 @@
     "expected_x": 0.0,
     "expected_y": -21285454.792994954,
     "tolerance": 0.01,
-    "description": "southern point into north polar stereo 4326→3413",
-    "pending_fix": "P1.5 polar stereographic hemisphere handling"
+    "description": "southern point into north polar stereo 4326→3413"
   },
   {
     "from_epsg": 4326,
@@ -1848,8 +1847,7 @@
     "expected_x": 0.0,
     "expected_y": 21349338.547079004,
     "tolerance": 0.01,
-    "description": "northern point into south polar stereo 4326→3031",
-    "pending_fix": "P1.5 polar stereographic hemisphere handling"
+    "description": "northern point into south polar stereo 4326→3031"
   },
   {
     "from_epsg": 4326,
