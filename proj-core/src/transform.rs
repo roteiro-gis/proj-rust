@@ -251,7 +251,7 @@ impl Transform {
 
     /// Transform a single coordinate.
     pub fn convert<T: Transformable>(&self, coord: T) -> Result<T> {
-        let c = coord.into_coord();
+        let c = coord.to_coord();
         let result = self.convert_coord(c)?;
         Ok(T::from_coord(result))
     }
@@ -293,7 +293,7 @@ impl Transform {
 
     /// Transform a single 3D coordinate.
     pub fn convert_3d<T: Transformable3D>(&self, coord: T) -> Result<T> {
-        let c = coord.into_coord3d();
+        let c = coord.to_coord3d();
         let result = self.convert_coord3d(c)?;
         Ok(T::from_coord3d(result))
     }
@@ -310,7 +310,7 @@ impl Transform {
         &self,
         coord: T,
     ) -> Result<TransformOutcome<T>> {
-        let c = coord.into_coord();
+        let c = coord.to_coord();
         let outcome = self.convert_coord_with_diagnostics(c)?;
         Ok(TransformOutcome {
             coord: T::from_coord(outcome.coord),
@@ -329,7 +329,7 @@ impl Transform {
         &self,
         coord: T,
     ) -> Result<TransformOutcome<T>> {
-        let c = coord.into_coord3d();
+        let c = coord.to_coord3d();
         let outcome = self.convert_coord3d_with_diagnostics(c)?;
         Ok(TransformOutcome {
             coord: T::from_coord3d(outcome.coord),
@@ -728,13 +728,19 @@ impl Transform {
     }
 
     /// Batch transform (sequential).
-    pub fn convert_batch<T: Transformable + Clone>(&self, coords: &[T]) -> Result<Vec<T>> {
-        coords.iter().map(|c| self.convert(c.clone())).collect()
+    pub fn convert_batch<T: Transformable>(&self, coords: &[T]) -> Result<Vec<T>> {
+        coords
+            .iter()
+            .map(|c| self.convert_coord(c.to_coord()).map(T::from_coord))
+            .collect()
     }
 
     /// Batch transform of 3D coordinates (sequential).
-    pub fn convert_batch_3d<T: Transformable3D + Clone>(&self, coords: &[T]) -> Result<Vec<T>> {
-        coords.iter().map(|c| self.convert_3d(c.clone())).collect()
+    pub fn convert_batch_3d<T: Transformable3D>(&self, coords: &[T]) -> Result<Vec<T>> {
+        coords
+            .iter()
+            .map(|c| self.convert_coord3d(c.to_coord3d()).map(T::from_coord3d))
+            .collect()
     }
 
     /// Transform 2D coordinates in place without allocating.

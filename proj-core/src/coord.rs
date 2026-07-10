@@ -138,7 +138,7 @@ impl From<Coord> for geo_types::Coord<f64> {
 /// The transform returns the same type as the input, so `geo_types::Coord<f64>` in
 /// gives `geo_types::Coord<f64>` out, and `(f64, f64)` in gives `(f64, f64)` out.
 pub trait Transformable: Sized {
-    fn into_coord(self) -> Coord;
+    fn to_coord(&self) -> Coord;
     fn from_coord(c: Coord) -> Self;
 }
 
@@ -148,13 +148,13 @@ pub trait Transformable: Sized {
 /// The transform returns the same type as the input, so `(f64, f64, f64)` in gives
 /// `(f64, f64, f64)` out and [`Coord3D`] in gives [`Coord3D`] out.
 pub trait Transformable3D: Sized {
-    fn into_coord3d(self) -> Coord3D;
+    fn to_coord3d(&self) -> Coord3D;
     fn from_coord3d(c: Coord3D) -> Self;
 }
 
 impl Transformable for Coord {
-    fn into_coord(self) -> Coord {
-        self
+    fn to_coord(&self) -> Coord {
+        *self
     }
     fn from_coord(c: Coord) -> Self {
         c
@@ -162,7 +162,7 @@ impl Transformable for Coord {
 }
 
 impl Transformable for (f64, f64) {
-    fn into_coord(self) -> Coord {
+    fn to_coord(&self) -> Coord {
         Coord {
             x: self.0,
             y: self.1,
@@ -174,8 +174,8 @@ impl Transformable for (f64, f64) {
 }
 
 impl Transformable3D for Coord3D {
-    fn into_coord3d(self) -> Coord3D {
-        self
+    fn to_coord3d(&self) -> Coord3D {
+        *self
     }
 
     fn from_coord3d(c: Coord3D) -> Self {
@@ -184,7 +184,7 @@ impl Transformable3D for Coord3D {
 }
 
 impl Transformable3D for (f64, f64, f64) {
-    fn into_coord3d(self) -> Coord3D {
+    fn to_coord3d(&self) -> Coord3D {
         Coord3D {
             x: self.0,
             y: self.1,
@@ -199,7 +199,7 @@ impl Transformable3D for (f64, f64, f64) {
 
 #[cfg(feature = "geo-types")]
 impl Transformable for geo_types::Coord<f64> {
-    fn into_coord(self) -> Coord {
+    fn to_coord(&self) -> Coord {
         Coord {
             x: self.x,
             y: self.y,
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn transformable_roundtrip_tuple() {
         let original = (10.0, 20.0);
-        let coord = original.into_coord();
+        let coord = original.to_coord();
         let back = <(f64, f64)>::from_coord(coord);
         assert_eq!(original, back);
     }
@@ -252,7 +252,7 @@ mod tests {
     #[test]
     fn transformable3d_roundtrip_tuple() {
         let original = (10.0, 20.0, 30.0);
-        let coord = original.into_coord3d();
+        let coord = original.to_coord3d();
         let back = <(f64, f64, f64)>::from_coord3d(coord);
         assert_eq!(original, back);
     }
