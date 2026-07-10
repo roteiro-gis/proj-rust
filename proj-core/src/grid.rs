@@ -1577,10 +1577,11 @@ impl Ntv2GridSet {
         lat_radians: f64,
     ) -> std::result::Result<(usize, f64, f64), GridError> {
         for &root in &self.roots {
-            if self.grids[root].extent.contains(lon_radians, lat_radians) {
-                let idx = self.deepest_child(root, lon_radians, lat_radians);
+            let lon = self.grids[root].extent.normalize_lon(lon_radians);
+            if self.grids[root].extent.contains(lon, lat_radians) {
+                let idx = self.deepest_child(root, lon, lat_radians);
                 let extent = &self.grids[idx].extent;
-                return Ok((idx, lon_radians - extent.west, lat_radians - extent.south));
+                return Ok((idx, lon - extent.west, lat_radians - extent.south));
             }
         }
         Err(GridError::OutsideCoverage(format!(
@@ -1658,6 +1659,17 @@ impl GridExtent {
             && lon_radians <= self.east + epsilon
             && lat_radians >= self.south - epsilon
             && lat_radians <= self.north + epsilon
+    }
+
+    /// Wrap a longitude into this extent's 360° branch, mirroring the GTX
+    /// grid behavior; longitudes already inside the extent (within its
+    /// epsilon tolerance) are returned unchanged.
+    fn normalize_lon(&self, lon_radians: f64) -> f64 {
+        if self.contains(lon_radians, self.south) {
+            return lon_radians;
+        }
+
+        self.west + (lon_radians - self.west).rem_euclid(std::f64::consts::TAU)
     }
 }
 
@@ -2315,7 +2327,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "P1.2 pending: NTv2 sampling must wrap out-of-branch longitudes into the grid frame"]
     fn ntv2_wraps_out_of_branch_longitude() {
         let set = Ntv2GridSet::parse(&nested_ntv2_bytes()).unwrap();
 
