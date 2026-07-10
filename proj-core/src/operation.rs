@@ -9,14 +9,17 @@ const DEFAULT_AREA_BOUNDS_DENSIFY_POINTS: usize = 21;
 
 /// Stable identifier for a registry-backed coordinate operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CoordinateOperationId(pub u32);
 
 /// Stable identifier for a grid resource referenced by an operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct GridId(pub u32);
 
 /// Ranked area-of-use metadata for an operation or grid.
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct AreaOfUse {
     pub west: f64,
     pub south: f64,
@@ -72,11 +75,13 @@ fn longitude_delta(west: f64, east: f64) -> f64 {
 
 /// Nominal operation accuracy in meters.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct OperationAccuracy {
     pub meters: f64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OperationStepDirection {
     Forward,
     Reverse,
@@ -335,6 +340,7 @@ impl CoordinateOperation {
 }
 
 #[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct CoordinateOperationMetadata {
     pub id: Option<CoordinateOperationId>,
     pub name: String,

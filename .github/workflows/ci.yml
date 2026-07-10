@@ -36,6 +36,9 @@ jobs:
       - name: Test
         run: cargo test --workspace --locked
 
+      - name: Test serde feature
+        run: cargo test -p proj-core --features serde --locked
+
   gen-reference:
     name: Registry Generator
     runs-on: ubuntu-24.04

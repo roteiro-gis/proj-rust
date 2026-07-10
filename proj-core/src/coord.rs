@@ -4,6 +4,7 @@
 /// - **Geographic CRS**: degrees (x = longitude, y = latitude)
 /// - **Projected CRS**: the CRS's native linear unit (x = easting, y = northing)
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord {
     pub x: f64,
     pub y: f64,
@@ -22,6 +23,7 @@ impl Coord {
 /// - **Projected CRS**: x/y are easting/northing in the CRS's native linear unit
 /// - `z` is preserved only when source and target vertical semantics are unchanged
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord3D {
     pub x: f64,
     pub y: f64,
@@ -43,6 +45,7 @@ impl Coord3D {
 /// Bounds transformation APIs accept at most
 /// [`MAX_BOUNDS_DENSIFY_POINTS`] intermediate samples per edge.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Bounds {
     pub min_x: f64,
     pub min_y: f64,
@@ -268,5 +271,25 @@ mod tests {
         assert!(!Bounds::new(-10.0, 20.0, f64::INFINITY, 40.0).is_valid());
         assert!(!Bounds::new(30.0, 20.0, -10.0, 40.0).is_valid());
         assert!(!Bounds::new(-10.0, 40.0, 30.0, 20.0).is_valid());
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn coordinate_types_roundtrip_through_json() {
+        let coord = Coord::new(-74.006, 40.7128);
+        let json = serde_json::to_string(&coord).unwrap();
+        assert_eq!(serde_json::from_str::<Coord>(&json).unwrap(), coord);
+
+        let coord3d = Coord3D::new(-74.006, 40.7128, 15.0);
+        let json = serde_json::to_string(&coord3d).unwrap();
+        assert_eq!(serde_json::from_str::<Coord3D>(&json).unwrap(), coord3d);
+
+        let bounds = Bounds::new(-75.0, 40.0, -73.0, 41.0);
+        let json = serde_json::to_string(&bounds).unwrap();
+        assert_eq!(serde_json::from_str::<Bounds>(&json).unwrap(), bounds);
     }
 }

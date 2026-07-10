@@ -18,6 +18,11 @@ sha2 = "0.10"
 smallvec = "1"
 thiserror = "2"
 
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+optional = true
+
 [dependencies.rayon]
 version = "1"
 optional = true
@@ -78,3 +83,5 @@ c-proj-compat = ["dep:proj", "dep:proj-sys"]
 # in the geotiff-reader/tiff-core crates; off by default to keep the core build
 # dependency-free.
 geotiff = ["dep:geotiff-reader", "dep:tiff-core"]
+# Serialize/Deserialize for coordinate and operation-metadata value types.
+serde = ["dep:serde"]
