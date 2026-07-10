@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- model EPSG supersession: operations with a same-CRS-pair replacement carry a new registry flag (`CoordinateOperation::superseded`) and rank below their replacements during selection, matching C PROJ (selection parity improves from 202 to 218 of 250 probes); the generator also re-derives its hand-curated list premises from proj.db at generation time
 - add coverage-guided fuzzing (workspace-excluded `fuzz/` crate) for the CRS parsers, the WKT parse→emit→reparse cycle, and the NTv2/GTX/GeoTIFF grid parsers, with seed corpora and a nightly/PR CI workflow
 - fix WKT serialization of compound ellipsoidal-height CRSs: the vertical datum authority is now resolved from the horizontal CRS instead of emitting `VERT_DATUM["Unknown datum"]`, and definition-identity cross-checks no longer reuse the fail-closed operation-selection datum equality (found by the new `wkt_roundtrip` fuzz target)
 - add `proj-epsg-format`, a zero-dependency crate that is now the single source of truth for the embedded registry's binary layout, shared by the `proj-core` reader and the `gen-registry` writer (previously ~40 hand-synced constant definitions); registry bytes are unchanged and the source-audit test forbids redefinitions
