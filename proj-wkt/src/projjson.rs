@@ -326,6 +326,7 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
                 false_northing: fn_,
             }
         }
+        "popularvisualisationpseudomercator" | "webmercator" => ProjectionMethod::WebMercator,
         "equidistantcylindrical" | "platecarree" => ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts: first_param(
@@ -464,17 +465,7 @@ fn validate_wrapper_type_matches_registry(declared_type: &str, registry: &CrsDef
     }
 }
 
-fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
-    let registry = proj_core::lookup_epsg(epsg)
-        .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
-    if parsed.semantically_equivalent(&registry) {
-        Ok(registry)
-    } else {
-        Err(ParseError::UnsupportedSemantics(format!(
-            "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
-        )))
-    }
-}
+use crate::wkt::canonicalize_authoritative_crs;
 
 fn infer_datum_from_json_crs(value: &Value) -> Result<proj_core::Datum> {
     let datum_value = value
@@ -808,6 +799,12 @@ fn linear_unit_from_json(value: &Value) -> Option<LinearUnit> {
         return linear_unit_name(unit);
     }
 
+    if let Some(unit_type) = value.get("type").and_then(Value::as_str) {
+        if unit_type.eq_ignore_ascii_case("AngularUnit") {
+            return None;
+        }
+    }
+
     if let Some(factor) = value.get("conversion_factor").and_then(Value::as_f64) {
         return linear_unit_from_meters_per_unit(factor);
     }
@@ -823,6 +820,16 @@ fn linear_unit_from_json(value: &Value) -> Option<LinearUnit> {
 fn angle_unit_to_degree_from_json(value: &Value) -> Option<f64> {
     if let Some(unit) = value.as_str() {
         return angle_unit_name_to_degree(unit);
+    }
+
+    // A unit explicitly typed as non-angular is not an angular unit, no
+    // matter what its conversion factor is (e.g. the metre unit of an
+    // ellipsoidal-height axis).
+    if let Some(unit_type) = value.get("type").and_then(Value::as_str) {
+        if !unit_type.eq_ignore_ascii_case("AngularUnit") && !unit_type.eq_ignore_ascii_case("Unit")
+        {
+            return None;
+        }
     }
 
     if let Some(factor) = value.get("conversion_factor").and_then(Value::as_f64) {

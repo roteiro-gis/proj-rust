@@ -685,7 +685,11 @@ fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
         .ok_or_else(|| ParseError::Parse("unsupported or unrecognized WKT datum".into()))
 }
 
-fn canonicalize_authoritative_crs(parsed: CrsDef, epsg: u32, format: &str) -> Result<CrsDef> {
+pub(crate) fn canonicalize_authoritative_crs(
+    parsed: CrsDef,
+    epsg: u32,
+    format: &str,
+) -> Result<CrsDef> {
     let registry = proj_core::lookup_epsg(epsg)
         .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
     if wkt_semantically_equivalent(&parsed, &registry) {
@@ -734,243 +738,19 @@ fn wkt_horizontal_semantically_equivalent(a: &HorizontalCrsDef, b: &HorizontalCr
 }
 
 fn wkt_projection_methods_equivalent(a: ProjectionMethod, b: ProjectionMethod) -> bool {
-    match (a, b) {
-        (ProjectionMethod::WebMercator, ProjectionMethod::WebMercator) => true,
-        (
-            ProjectionMethod::TransverseMercator {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::TransverseMercator {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat0, b_lat0)
-                && wkt_approx_eq(a_k0, b_k0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::PolarStereographic {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::PolarStereographic {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat_ts, b_lat_ts)
-                && wkt_approx_eq(a_k0, b_k0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertConformalConic {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertConformalConic {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        )
-        | (
-            ProjectionMethod::AlbersEqualArea {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::AlbersEqualArea {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat0, b_lat0)
-                && wkt_approx_eq(a_lat1, b_lat1)
-                && wkt_approx_eq(a_lat2, b_lat2)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertAzimuthalEqualArea {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertAzimuthalEqualArea {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        )
-        | (
-            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat0, b_lat0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::ObliqueStereographic {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::ObliqueStereographic {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat0, b_lat0)
-                && wkt_approx_eq(a_k0, b_k0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::HotineObliqueMercator {
-                latc: a_latc,
-                lonc: a_lonc,
-                azimuth: a_azimuth,
-                rectified_grid_angle: a_rectified_grid_angle,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-                variant_b: a_variant_b,
-            },
-            ProjectionMethod::HotineObliqueMercator {
-                latc: b_latc,
-                lonc: b_lonc,
-                azimuth: b_azimuth,
-                rectified_grid_angle: b_rectified_grid_angle,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-                variant_b: b_variant_b,
-            },
-        ) => {
-            a_variant_b == b_variant_b
-                && wkt_approx_eq(a_latc, b_latc)
-                && wkt_approx_eq(a_lonc, b_lonc)
-                && wkt_approx_eq(a_azimuth, b_azimuth)
-                && wkt_approx_eq(a_rectified_grid_angle, b_rectified_grid_angle)
-                && wkt_approx_eq(a_k0, b_k0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::CassiniSoldner {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::CassiniSoldner {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat0, b_lat0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::Mercator {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::Mercator {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat_ts, b_lat_ts)
-                && wkt_approx_eq(a_k0, b_k0)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        (
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            wkt_approx_eq(a_lon0, b_lon0)
-                && wkt_approx_eq(a_lat_ts, b_lat_ts)
-                && wkt_approx_eq(a_false_easting, b_false_easting)
-                && wkt_approx_eq(a_false_northing, b_false_northing)
-        }
-        _ => false,
+    // Compare through the serializer's method/parameter mapping so every
+    // supported method participates; a hand-written per-method match here
+    // silently rejected methods it did not list.
+    if crate::wkt_writer::projection_wkt_name(a) != crate::wkt_writer::projection_wkt_name(b) {
+        return false;
     }
+    let a_params = crate::wkt_writer::projection_parameters(a);
+    let b_params = crate::wkt_writer::projection_parameters(b);
+    a_params.len() == b_params.len()
+        && a_params
+            .iter()
+            .zip(&b_params)
+            .all(|(a, b)| a.name == b.name && wkt_approx_eq(a.value, b.value))
 }
 
 fn wkt_approx_eq(a: f64, b: f64) -> bool {
