@@ -1,0 +1,52 @@
+[package]
+name = "proj-rust-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+proj-core = { path = "../proj-core", features = ["geotiff"] }
+proj-wkt = { path = "../proj-wkt" }
+smallvec = "1"
+
+[[bin]]
+name = "crs_parse"
+path = "fuzz_targets/crs_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "wkt_roundtrip"
+path = "fuzz_targets/wkt_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "ntv2_parse"
+path = "fuzz_targets/ntv2_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "gtx_parse"
+path = "fuzz_targets/gtx_parse.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "geotiff_parse"
+path = "fuzz_targets/geotiff_parse.rs"
+test = false
+doc = false
+bench = false
+
+[profile.release]
+debug = 1

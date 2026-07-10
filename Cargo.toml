@@ -1,6 +1,6 @@
 [workspace]
 members = ["proj-core", "proj-wkt"]
-exclude = ["gen-reference"]
+exclude = ["gen-reference", "fuzz"]
 resolver = "2"
 
 [workspace.package]

@@ -57,6 +57,16 @@ jobs:
       - name: Registry reproducibility
         run: ./scripts/check-registry-generation.sh
 
+  deny:
+    name: Supply Chain (cargo-deny)
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          arguments: --all-features
+
   msrv:
     name: MSRV
     runs-on: ubuntu-24.04

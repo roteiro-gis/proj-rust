@@ -1788,4 +1788,14 @@ mod tests {
             start.elapsed()
         );
     }
+
+    #[test]
+    #[ignore = "pending: WKT serializer loses the vertical datum identity for compound ellipsoidal-height CRSs, so the authority cross-check rejects the reparse (found by the wkt_roundtrip fuzz target)"]
+    fn compound_ellipsoidal_height_wkt_roundtrips() {
+        let crs = crate::parse_crs("EPSG:7678").unwrap();
+        let wkt = crate::to_wkt(&crs).unwrap();
+        let reparsed = crate::parse_crs(&wkt)
+            .unwrap_or_else(|error| panic!("emitted WKT failed to reparse: {error}\n{wkt}"));
+        let _ = reparsed;
+    }
 }

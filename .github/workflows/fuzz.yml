@@ -1,0 +1,52 @@
+name: Fuzz
+
+on:
+  schedule:
+    # Nightly coverage-guided runs; crashes become committed regression tests.
+    - cron: "17 4 * * *"
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "proj-wkt/src/**"
+      - "proj-core/src/grid.rs"
+      - "fuzz/**"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  fuzz:
+    name: Fuzz ${{ matrix.target }}
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [crs_parse, wkt_roundtrip, ntv2_parse, gtx_parse, geotiff_parse]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust nightly
+        run: rustup toolchain install nightly --profile minimal --no-self-update
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: fuzz
+      - name: Install cargo-fuzz
+        run: cargo install cargo-fuzz --locked
+      - name: Run fuzzer
+        env:
+          # Pull requests get a quick corpus-replay-plus-short-run; scheduled
+          # runs dig for longer.
+          MAX_TOTAL_TIME: ${{ github.event_name == 'schedule' && '300' || '60' }}
+        run: |
+          cargo +nightly fuzz run ${{ matrix.target }} -- \
+            -max_total_time="$MAX_TOTAL_TIME" -timeout=30
+      - name: Upload crash artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-artifacts-${{ matrix.target }}
+          path: fuzz/artifacts/${{ matrix.target }}
+          if-no-files-found: ignore
