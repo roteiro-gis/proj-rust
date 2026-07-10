@@ -140,6 +140,19 @@ impl super::ProjectionImpl for CassiniSoldner {
 
         let sin_lat1 = lat1.sin();
         let cos_lat1 = lat1.cos();
+
+        // At the pole the footpoint meridian is singular: longitude is
+        // indeterminate and the series' /cos(lat1) term amplifies noise, so
+        // return the pole limit instead of relying on the finite-check.
+        if cos_lat1.abs() < 1e-12 {
+            let lat = if lat1 > 0.0 {
+                std::f64::consts::FRAC_PI_2
+            } else {
+                -std::f64::consts::FRAC_PI_2
+            };
+            return ensure_finite_lon_lat("Cassini-Soldner", self.lon0, lat);
+        }
+
         let tan_lat1 = lat1.tan();
         let n1 = self.a / (1.0 - self.e2 * sin_lat1 * sin_lat1).sqrt();
         let r1 = self.a_one_minus_e2 / (1.0 - self.e2 * sin_lat1 * sin_lat1).powf(1.5);

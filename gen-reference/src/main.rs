@@ -829,25 +829,18 @@ fn main() {
     // =========================================================================
 
     // Near-pole inverse points for transverse Mercator: project a point close
-    // to the pole, then record the inverse as its own reference point. Off-CM
-    // inverses diverge from C PROJ today (longitude recovery is
-    // ill-conditioned near the pole) and stay pending until the pole-guard fix.
+    // to the pole, then record the inverse as its own reference point. The
+    // exact (Poder/Engsager) transverse Mercator recovers these like C PROJ.
     let near_pole_tm: &[(u32, f64, f64, Option<&str>, &str)] = &[
         (32618, -75.0, 89.9999999, None, "UTM18N near north pole"),
         (
             32618,
             -70.5,
             89.999999,
-            Some("P1.4 near-pole transverse Mercator inverse"),
+            None,
             "UTM18N off-CM near north pole",
         ),
-        (
-            32718,
-            -72.0,
-            -89.9999999,
-            Some("P1.4 near-pole transverse Mercator inverse"),
-            "UTM18S near south pole",
-        ),
+        (32718, -72.0, -89.9999999, None, "UTM18S near south pole"),
     ];
     for &(epsg, lon, lat, pending, name) in near_pole_tm {
         if let Some(fwd) = transform(4326, epsg, lon, lat, 0.01, &format!("{name} forward")) {

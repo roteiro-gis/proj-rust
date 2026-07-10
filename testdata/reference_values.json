@@ -1807,8 +1807,7 @@
     "expected_x": -70.50000006427531,
     "expected_y": 89.999999,
     "tolerance": 0.0001,
-    "description": "UTM18N off-CM near north pole inverse",
-    "pending_fix": "P1.4 near-pole transverse Mercator inverse"
+    "description": "UTM18N off-CM near north pole inverse"
   },
   {
     "from_epsg": 4326,
@@ -1828,8 +1827,7 @@
     "expected_x": -72.00000026103632,
     "expected_y": -89.99999989999999,
     "tolerance": 0.0001,
-    "description": "UTM18S near south pole inverse",
-    "pending_fix": "P1.4 near-pole transverse Mercator inverse"
+    "description": "UTM18S near south pole inverse"
   },
   {
     "from_epsg": 4326,
