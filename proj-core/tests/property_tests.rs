@@ -1,12 +1,26 @@
 //! Property-based tests using proptest.
+//!
+//! Runs are deterministic: the RNG seed is fixed so CI and local runs explore
+//! the same case stream. Any minimized failure proptest records under
+//! `tests/proptest-regressions/` must be committed so it stays a regression
+//! test.
 
 use proj_core::Transform;
 use proptest::prelude::*;
+use proptest::test_runner::RngSeed;
 
 // Web Mercator latitude limit (±85.06°)
 const WM_LAT_LIMIT: f64 = 85.0;
 
+fn deterministic_config() -> ProptestConfig {
+    ProptestConfig {
+        rng_seed: RngSeed::Fixed(0x70726f6a_72757374), // "projrust"
+        ..ProptestConfig::default()
+    }
+}
+
 proptest! {
+    #![proptest_config(deterministic_config())]
     /// Roundtrip: WGS84 → Web Mercator → WGS84 should return the original point.
     #[test]
     fn roundtrip_4326_3857(
