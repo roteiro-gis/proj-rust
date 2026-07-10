@@ -21,9 +21,9 @@ mod tests;
 mod vertical;
 
 use pipeline::{
-    compile_pipeline, execute_pipeline_xy, validate_output_len, validate_pipeline_coord3d,
-    validate_vertical_ordinate, CompiledOperationFallback, CompiledOperationPipeline,
-    PipelineExecutionOutcome,
+    compile_pipeline, execute_pipeline_xy, execute_pipeline_xyz, validate_output_len,
+    validate_pipeline_coord3d, validate_vertical_ordinate, CompiledOperationFallback,
+    CompiledOperationPipeline, PipelineExecutionOutcome,
 };
 use selection::{
     compile_selected_pipelines, grid_coverage_miss_detail, is_grid_coverage_miss, selected_metadata,
@@ -625,12 +625,30 @@ impl Transform {
         )))
     }
 
+    /// Without a vertical CRS on either side, `convert_3d` heights are
+    /// ellipsoidal, so datum-shift-induced height changes computed by the
+    /// horizontal pipeline must survive — the same semantics C PROJ applies
+    /// to the 3D promotions of the CRS pair. With vertical CRSs present, the
+    /// vertical transform owns `z` (gravity-related heights are unaffected
+    /// by ellipsoidal datum math).
+    fn pipeline_owns_height(&self, pipeline: &CompiledOperationPipeline) -> bool {
+        pipeline.transforms_ellipsoidal_height
+            && matches!(self.vertical_transform, VerticalTransform::None { .. })
+    }
+
     fn execute_pipeline(
         &self,
         pipeline: &CompiledOperationPipeline,
         c: Coord3D,
     ) -> Result<PipelineExecutionOutcome> {
         validate_vertical_ordinate(c.z)?;
+        if self.pipeline_owns_height(pipeline) {
+            let coord = execute_pipeline_xyz(pipeline, c)?;
+            return Ok(PipelineExecutionOutcome {
+                coord,
+                vertical: self.vertical_transform.diagnostics().clone(),
+            });
+        }
         let xy = execute_pipeline_xy(pipeline, c)?;
         let vertical = self.vertical_transform.apply(c)?;
         let coord = Coord3D::new(xy.x, xy.y, vertical.z);
@@ -647,6 +665,9 @@ impl Transform {
         c: Coord3D,
     ) -> Result<Coord3D> {
         validate_vertical_ordinate(c.z)?;
+        if self.pipeline_owns_height(pipeline) {
+            return execute_pipeline_xyz(pipeline, c);
+        }
         let xy = execute_pipeline_xy(pipeline, c)?;
         let z = self.vertical_transform.apply_z(c)?;
         let coord = Coord3D::new(xy.x, xy.y, z);

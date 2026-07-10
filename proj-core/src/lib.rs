@@ -17,10 +17,12 @@
 //! or WGS84-compatible identity operations from datum metadata.
 //! The [`registry`], [`operation`], and [`grid`] modules expose the embedded
 //! operation catalog, selection metadata, and NTv2 grid-provider interfaces.
-//! `convert_3d` preserves `z` when no explicit vertical CRS is present or when
-//! source and target compound CRS definitions have identical vertical
-//! components. It converts `z` units when both vertical components use the same
-//! vertical reference frame with different linear units. Registry-backed GTX
+//! Without vertical CRS components, `convert_3d` treats `z` as ellipsoidal
+//! height: datum shifts change it exactly as C PROJ's 3D-promoted CRS pairs
+//! do, and same-datum transforms preserve it. When source and target compound
+//! CRS definitions have identical vertical components the gravity-related `z`
+//! is preserved, and it is unit-converted when both vertical components use
+//! the same vertical reference frame with different linear units. Registry-backed GTX
 //! geoid operations can be selected for supported ellipsoidal-to-gravity height
 //! CRS pairs, while grid files still resolve through caller-supplied grid
 //! providers.

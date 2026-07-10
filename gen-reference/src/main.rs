@@ -187,11 +187,6 @@ mod promoted_3d {
 }
 
 /// Generate a 3D reference point through promoted 3D CRSs.
-///
-/// Points whose reference height differs from a plain passthrough of the input
-/// height are marked `pending_fix`: proj-core currently preserves the caller's
-/// `z` across horizontal datum shifts, so it diverges from these references
-/// until the 3D height fix lands.
 #[allow(clippy::too_many_arguments)]
 fn transform_3d(
     from: u32,
@@ -202,6 +197,7 @@ fn transform_3d(
     tol: f64,
     tol_z: f64,
     desc: &str,
+    pending: Option<&str>,
 ) -> Option<ReferencePoint> {
     let (ox, oy, oz) = match promoted_3d::convert(from, to, (x, y, z)) {
         Ok(out) => out,
@@ -215,11 +211,6 @@ fn transform_3d(
         return None;
     }
 
-    let pending_fix = if (oz - z).abs() > tol_z {
-        Some("P1.6 3D cross-datum ellipsoidal height".to_string())
-    } else {
-        None
-    };
     Some(ReferencePoint {
         from_epsg: from,
         to_epsg: to,
@@ -232,7 +223,7 @@ fn transform_3d(
         tolerance: tol,
         tolerance_z: Some(tol_z),
         description: desc.to_string(),
-        pending_fix,
+        pending_fix: pending.map(str::to_string),
     })
 }
 
@@ -903,12 +894,23 @@ fn main() {
 
     // =========================================================================
     // 7. 3D points through promoted 3D CRSs. Cross-datum Helmert paths change
-    //    the ellipsoidal height; those emit `pending_fix` markers until the
-    //    3D height fix lands. Same-datum paths must preserve height today.
+    //    the ellipsoidal height and proj-core propagates it through the
+    //    horizontal pipeline; same-datum paths preserve the input height.
     // =========================================================================
 
-    // (from_epsg, to_epsg, lon, lat, height, tolerance, tolerance_z, name)
-    type ThreeDCase = (u32, u32, f64, f64, f64, f64, f64, &'static str);
+    // (from_epsg, to_epsg, lon, lat, height, tolerance, tolerance_z, name,
+    // pending fix marker)
+    type ThreeDCase = (
+        u32,
+        u32,
+        f64,
+        f64,
+        f64,
+        f64,
+        f64,
+        &'static str,
+        Option<&'static str>,
+    );
     let three_d_points: &[ThreeDCase] = &[
         (
             4326,
@@ -919,6 +921,7 @@ fn main() {
             0.001,
             1e-9,
             "NYC 3D 4326→3857 preserves height",
+            None,
         ),
         (
             4267,
@@ -929,6 +932,7 @@ fn main() {
             0.001,
             0.01,
             "US Midwest 3D NAD27→WGS84",
+            Some("P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"),
         ),
         (
             4277,
@@ -939,6 +943,7 @@ fn main() {
             0.001,
             0.01,
             "London 3D OSGB36→WGS84",
+            None,
         ),
         (
             4230,
@@ -949,6 +954,7 @@ fn main() {
             0.001,
             0.01,
             "Paris 3D ED50→WGS84",
+            Some("P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"),
         ),
         (
             4326,
@@ -959,6 +965,7 @@ fn main() {
             0.001,
             0.01,
             "London 3D WGS84→OSGB36 reverse",
+            None,
         ),
         (
             4326,
@@ -969,10 +976,13 @@ fn main() {
             0.01,
             0.01,
             "London 3D WGS84→British National Grid",
+            None,
         ),
     ];
-    for &(from_epsg, to_epsg, x, y, z, tol, tol_z, name) in three_d_points {
-        points.extend(transform_3d(from_epsg, to_epsg, x, y, z, tol, tol_z, name));
+    for &(from_epsg, to_epsg, x, y, z, tol, tol_z, name, pending) in three_d_points {
+        points.extend(transform_3d(
+            from_epsg, to_epsg, x, y, z, tol, tol_z, name, pending,
+        ));
     }
 
     eprintln!("Generated {} reference points", points.len());

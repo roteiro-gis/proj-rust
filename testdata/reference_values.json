@@ -1884,7 +1884,7 @@
     "tolerance": 0.001,
     "tolerance_z": 0.01,
     "description": "US Midwest 3D NAD27→WGS84",
-    "pending_fix": "P1.6 3D cross-datum ellipsoidal height"
+    "pending_fix": "P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"
   },
   {
     "from_epsg": 4277,
@@ -1897,8 +1897,7 @@
     "expected_z": 91.1245431266725,
     "tolerance": 0.001,
     "tolerance_z": 0.01,
-    "description": "London 3D OSGB36→WGS84",
-    "pending_fix": "P1.6 3D cross-datum ellipsoidal height"
+    "description": "London 3D OSGB36→WGS84"
   },
   {
     "from_epsg": 4230,
@@ -1912,7 +1911,7 @@
     "tolerance": 0.001,
     "tolerance_z": 0.01,
     "description": "Paris 3D ED50→WGS84",
-    "pending_fix": "P1.6 3D cross-datum ellipsoidal height"
+    "pending_fix": "P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"
   },
   {
     "from_epsg": 4326,
@@ -1925,8 +1924,7 @@
     "expected_z": 48.87831049412489,
     "tolerance": 0.001,
     "tolerance_z": 0.01,
-    "description": "London 3D WGS84→OSGB36 reverse",
-    "pending_fix": "P1.6 3D cross-datum ellipsoidal height"
+    "description": "London 3D WGS84→OSGB36 reverse"
   },
   {
     "from_epsg": 4326,
@@ -1939,7 +1937,6 @@
     "expected_z": -1.122713966295123,
     "tolerance": 0.01,
     "tolerance_z": 0.01,
-    "description": "London 3D WGS84→British National Grid",
-    "pending_fix": "P1.6 3D cross-datum ellipsoidal height"
+    "description": "London 3D WGS84→British National Grid"
   }
 ]
