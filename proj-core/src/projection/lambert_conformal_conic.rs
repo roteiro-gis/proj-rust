@@ -75,6 +75,51 @@ impl LambertConformalConic {
             false_northing,
         })
     }
+
+    /// EPSG method 1102 (1SP variant B): the cone constant and scale come
+    /// from the natural origin, while the grid origin (false easting and
+    /// northing) sits at a separate false-origin latitude.
+    pub(crate) fn new_1sp_variant_b(
+        ellipsoid: Ellipsoid,
+        lon0: f64,
+        lat0: f64,
+        k0: f64,
+        lat_false_origin: f64,
+        false_easting: f64,
+        false_northing: f64,
+    ) -> Result<Self> {
+        validate_angle("longitude of false origin", lon0)?;
+        validate_latitude_param("latitude of natural origin", lat0)?;
+        validate_scale("scale factor", k0)?;
+        validate_latitude_param("latitude of false origin", lat_false_origin)?;
+        validate_offset("false easting", false_easting)?;
+        validate_offset("false northing", false_northing)?;
+
+        let e = ellipsoid.e();
+        let n = lat0.sin();
+        if n.abs() < 1e-12 {
+            return Err(Error::InvalidDefinition(
+                "Lambert Conformal Conic 1SP variant B natural origin cannot be equatorial".into(),
+            ));
+        }
+
+        let m0 = m_func(lat0, e);
+        let t0 = t_func(lat0, e);
+        let f_const = k0 * m0 / (n * t0.powf(n));
+        let t_false = t_func(lat_false_origin, e);
+        let rho0 = ellipsoid.semi_major_axis() * f_const * t_false.powf(n);
+
+        Ok(Self {
+            a: ellipsoid.semi_major_axis(),
+            e,
+            lon0,
+            n,
+            f_const,
+            rho0,
+            false_easting,
+            false_northing,
+        })
+    }
 }
 
 fn m_func(lat: f64, e: f64) -> f64 {

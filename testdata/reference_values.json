@@ -1790,6 +1790,46 @@
     "description": "Kingston 24200→4242 LCC 1SP inverse"
   },
   {
+    "from_epsg": 4267,
+    "to_epsg": 6201,
+    "input_x": -84.37,
+    "input_y": 43.75,
+    "expected_x": 1990309.1138959893,
+    "expected_y": 157995.08298693498,
+    "tolerance": 0.001,
+    "description": "Michigan Central 4267→6201 LCC Michigan"
+  },
+  {
+    "from_epsg": 6201,
+    "to_epsg": 4267,
+    "input_x": 1990309.1138959893,
+    "input_y": 157995.08298693498,
+    "expected_x": -84.37,
+    "expected_y": 43.75000000000001,
+    "tolerance": 1e-9,
+    "description": "Michigan Central 6201→4267 LCC Michigan inverse"
+  },
+  {
+    "from_epsg": 9547,
+    "to_epsg": 9549,
+    "input_x": 6.7,
+    "input_y": 45.2,
+    "expected_x": 140832.32200805977,
+    "expected_y": 51858.97323946923,
+    "tolerance": 0.001,
+    "description": "Lyon-Turin 9547→9549 LCC 1SP variant B"
+  },
+  {
+    "from_epsg": 9549,
+    "to_epsg": 9547,
+    "input_x": 140832.32200805977,
+    "input_y": 51858.97323946923,
+    "expected_x": 6.7,
+    "expected_y": 45.20000000000002,
+    "tolerance": 1e-9,
+    "description": "Lyon-Turin 9549→9547 LCC 1SP variant B inverse"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

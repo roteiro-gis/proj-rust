@@ -147,6 +147,12 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         } => "Hotine_Oblique_Mercator",
         ProjectionMethod::CassiniSoldner { .. } => "Cassini_Soldner",
         ProjectionMethod::ColombiaUrban { .. } => "Colombia_Urban",
+        ProjectionMethod::LambertConformalConicMichigan { .. } => {
+            "Lambert_Conformal_Conic_2SP_Michigan"
+        }
+        ProjectionMethod::LambertConformalConic1SPVariantB { .. } => {
+            "Lambert_Conformal_Conic_1SP_Variant_B"
+        }
         ProjectionMethod::Mercator { lat_ts, .. } => {
             if approx_eq(lat_ts, 0.0) {
                 "Mercator_1SP"
@@ -354,6 +360,38 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             angle_param("latitude_of_origin", lat0),
             angle_param("central_meridian", lon0),
             length_param("projection_plane_origin_height", h0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::LambertConformalConicMichigan {
+            lon0,
+            lat0,
+            lat1,
+            lat2,
+            ellipsoid_scaling_factor,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            angle_param("standard_parallel_1", lat1),
+            angle_param("standard_parallel_2", lat2),
+            scale_param("ellipsoid_scaling_factor", ellipsoid_scaling_factor),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::LambertConformalConic1SPVariantB {
+            lon0,
+            lat0,
+            k0,
+            lat_false_origin,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            scale_param("scale_factor", k0),
+            angle_param("latitude_of_false_origin", lat_false_origin),
+            angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
         ],

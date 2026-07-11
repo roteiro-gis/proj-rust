@@ -140,11 +140,11 @@ use proj_epsg_format::{
     GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC,
     METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_COLOMBIA_URBAN, METHOD_EQUIDISTANT_CYL,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
-    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
-    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
-    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
-    VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
-    VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
+    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
+    METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_TRANSVERSE_MERCATOR,
+    METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT, PROJ_CRS_RECORD_BASE_SIZE,
+    VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS,
+    VERTICAL_CRS_RECORD_BASE_SIZE, VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
 const PROVENANCE_SCHEMA_VERSION: u16 = 5;
@@ -229,6 +229,7 @@ const LAT_STD_PARALLEL: i64 = 8832;
 const LON_OF_ORIGIN: i64 = 8833;
 const LAT_PROJECTION_CENTRE: i64 = 8811;
 const PROJECTION_PLANE_HEIGHT: i64 = 1039;
+const ELLIPSOID_SCALING_FACTOR: i64 = 1038;
 const LON_PROJECTION_CENTRE: i64 = 8812;
 const AZIMUTH_INITIAL_LINE: i64 = 8813;
 const RECTIFIED_GRID_ANGLE: i64 = 8814;
@@ -367,6 +368,8 @@ fn method_code_to_id(code: i64) -> Option<u8> {
         9815 => Some(METHOD_HOTINE_OBLIQUE_MERCATOR_B),
         9806 => Some(METHOD_CASSINI_SOLDNER),
         1052 => Some(METHOD_COLOMBIA_URBAN),
+        1051 => Some(METHOD_LCC_MICHIGAN),
+        1102 => Some(METHOD_LCC_1SP_VARIANT_B),
         1024 => Some(METHOD_WEB_MERCATOR),
         _ => None,
     }
@@ -510,6 +513,24 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             get_meters(cp, &[FALSE_NORTHING, NORTHING_FALSE_ORIGIN], linear_uoms),
             0.0,
             0.0,
+        ],
+        METHOD_LCC_MICHIGAN => [
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
+            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
+            get_scale(cp, &[ELLIPSOID_SCALING_FACTOR]),
+            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
+        ],
+        METHOD_LCC_1SP_VARIANT_B => [
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
+            get_degrees(cp, &[LAT_ORIGIN]),
+            get_scale(cp, &[SCALE_FACTOR]),
+            get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN]),
+            0.0,
+            get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_COLOMBIA_URBAN => [
             get_degrees(cp, &[LON_ORIGIN]),
@@ -1360,6 +1381,14 @@ fn supported_projection_methods() -> BTreeMap<String, u8> {
         ("Albers Equal Area", METHOD_ALBERS),
         ("Cassini-Soldner", METHOD_CASSINI_SOLDNER),
         ("Colombia Urban", METHOD_COLOMBIA_URBAN),
+        (
+            "Lambert Conic Conformal (1SP variant B)",
+            METHOD_LCC_1SP_VARIANT_B,
+        ),
+        (
+            "Lambert Conic Conformal (2SP Michigan)",
+            METHOD_LCC_MICHIGAN,
+        ),
         ("Equidistant Cylindrical", METHOD_EQUIDISTANT_CYL),
         (
             "Hotine Oblique Mercator A",

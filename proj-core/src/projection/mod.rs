@@ -182,6 +182,55 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
                 *false_northing,
             )?,
         )),
+        ProjectionMethod::LambertConformalConicMichigan {
+            lon0,
+            lat0,
+            lat1,
+            lat2,
+            ellipsoid_scaling_factor,
+            false_easting,
+            false_northing,
+        } => {
+            // The ellipsoid scaling factor scales the semi-major axis while
+            // preserving the ellipsoid shape (EPSG method 1051).
+            let base = datum.ellipsoid();
+            let scaled_a = base.semi_major_axis() * ellipsoid_scaling_factor;
+            let scaled = if base.flattening() == 0.0 {
+                crate::ellipsoid::Ellipsoid::sphere(scaled_a)
+            } else {
+                crate::ellipsoid::Ellipsoid::from_a_rf(scaled_a, base.inverse_flattening())
+            }?;
+            Ok(Projection::LambertConformalConic(
+                lambert_conformal_conic::LambertConformalConic::new(
+                    scaled,
+                    lon0.to_radians(),
+                    lat0.to_radians(),
+                    lat1.to_radians(),
+                    lat2.to_radians(),
+                    1.0,
+                    *false_easting,
+                    *false_northing,
+                )?,
+            ))
+        }
+        ProjectionMethod::LambertConformalConic1SPVariantB {
+            lon0,
+            lat0,
+            k0,
+            lat_false_origin,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::LambertConformalConic(
+            lambert_conformal_conic::LambertConformalConic::new_1sp_variant_b(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *k0,
+                lat_false_origin.to_radians(),
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::AlbersEqualArea {
             lon0,
             lat0,

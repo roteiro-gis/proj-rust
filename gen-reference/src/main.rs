@@ -837,6 +837,45 @@ fn main() {
         ));
     }
 
+    // LCC 2SP Michigan (EPSG method 1051) and LCC 1SP variant B (1102),
+    // both same-datum pairs so the projection math is isolated.
+    points.extend(transform(
+        4267,
+        6201,
+        -84.37,
+        43.75,
+        1e-3,
+        "Michigan Central 4267→6201 LCC Michigan",
+    ));
+    if let Some(fwd) = transform(4267, 6201, -84.37, 43.75, 1e-3, "") {
+        points.extend(transform(
+            6201,
+            4267,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Michigan Central 6201→4267 LCC Michigan inverse",
+        ));
+    }
+    points.extend(transform(
+        9547,
+        9549,
+        6.7,
+        45.2,
+        1e-3,
+        "Lyon-Turin 9547→9549 LCC 1SP variant B",
+    ));
+    if let Some(fwd) = transform(9547, 9549, 6.7, 45.2, 1e-3, "") {
+        points.extend(transform(
+            9549,
+            9547,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Lyon-Turin 9549→9547 LCC 1SP variant B inverse",
+        ));
+    }
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

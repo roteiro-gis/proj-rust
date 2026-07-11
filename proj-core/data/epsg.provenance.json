@@ -28,14 +28,14 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1093587,
-    "sha256": "sha256:63abcbaa6a24ddb1826d0d7f819b90c7a0648775d1bdbedd00bcecd1bba793da"
+    "byte_len": 1094339,
+    "sha256": "sha256:2f2d9b46917ee6ce26576832d1831a9665a096798035740fba8e9f9b3b4f7bf1"
   },
   "counts": {
     "ellipsoids": 44,
     "datums": 585,
     "geographic_crs": 598,
-    "projected_crs": 5203,
+    "projected_crs": 5210,
     "vertical_crs": 293,
     "compound_crs": 684,
     "extents": 848,
@@ -54,6 +54,8 @@
     "Lambert Azimuthal Equal Area": 8,
     "Lambert Azimuthal Equal Area (Spherical)": 13,
     "Lambert Conformal Conic": 4,
+    "Lambert Conic Conformal (1SP variant B)": 16,
+    "Lambert Conic Conformal (2SP Michigan)": 15,
     "Mercator": 3,
     "Oblique Stereographic": 9,
     "Polar Stereographic": 6,

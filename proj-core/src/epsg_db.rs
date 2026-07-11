@@ -25,9 +25,10 @@ use proj_epsg_format::{
     GRID_INTERPOLATION_BILINEAR, HEADER_SIZE, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED,
     MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_COLOMBIA_URBAN, METHOD_EQUIDISTANT_CYL,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
-    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
-    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
-    OP_IDENTITY, PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
+    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
+    METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_TRANSVERSE_MERCATOR,
+    METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT, OP_IDENTITY,
+    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
     VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
     VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
@@ -541,6 +542,23 @@ fn decode_projection_method(method_id: u8, params: [f64; 7]) -> ProjectionMethod
     let [p0, p1, p2, p3, p4, p5, p6] = params;
     match method_id {
         METHOD_WEB_MERCATOR => ProjectionMethod::WebMercator,
+        METHOD_LCC_MICHIGAN => ProjectionMethod::LambertConformalConicMichigan {
+            lon0: p0,
+            lat0: p1,
+            lat1: p2,
+            lat2: p5,
+            ellipsoid_scaling_factor: p4,
+            false_easting: p3,
+            false_northing: p6,
+        },
+        METHOD_LCC_1SP_VARIANT_B => ProjectionMethod::LambertConformalConic1SPVariantB {
+            lon0: p0,
+            lat0: p1,
+            k0: p2,
+            lat_false_origin: p4,
+            false_easting: p3,
+            false_northing: p6,
+        },
         METHOD_COLOMBIA_URBAN => ProjectionMethod::ColombiaUrban {
             lon0: p0,
             lat0: p1,

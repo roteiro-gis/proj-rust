@@ -318,6 +318,34 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
             false_easting: fe,
             false_northing: fn_,
         },
+        "lambertconformalconic2spmichigan" => ProjectionMethod::LambertConformalConicMichigan {
+            lon0,
+            lat0,
+            lat1: first_param(
+                &params,
+                &["standardparallel1", "latitudeof1ststandardparallel"],
+            )
+            .unwrap_or(lat0),
+            lat2: first_param(
+                &params,
+                &["standardparallel2", "latitudeof2ndstandardparallel"],
+            )
+            .unwrap_or(lat0),
+            ellipsoid_scaling_factor: first_param(&params, &["ellipsoidscalingfactor"])
+                .unwrap_or(1.0),
+            false_easting: fe,
+            false_northing: fn_,
+        },
+        "lambertconformalconic1spvariantb" | "lambertconicconformal1spvariantb" => {
+            ProjectionMethod::LambertConformalConic1SPVariantB {
+                lon0,
+                lat0,
+                k0,
+                lat_false_origin: first_param(&params, &["latitudeoffalseorigin"]).unwrap_or(lat0),
+                false_easting: fe,
+                false_northing: fn_,
+            }
+        }
         "polarstereographicvarianta" | "polarstereographicvariantb" | "polarstereographic" => {
             ProjectionMethod::PolarStereographic {
                 lon0,
