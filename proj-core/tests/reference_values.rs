@@ -222,6 +222,11 @@ fn corpus_has_adequate_coverage() {
         epsg_targets.contains(&8353),
         "missing JTSK03 Krovak East North"
     );
+    assert!(epsg_targets.contains(&8857), "missing Equal Earth");
+    assert!(
+        epsg_targets.contains(&8859),
+        "missing Equal Earth Asia-Pacific"
+    );
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));

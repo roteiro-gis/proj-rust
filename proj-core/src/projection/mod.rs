@@ -1,6 +1,7 @@
 pub(crate) mod albers_equal_area;
 pub(crate) mod cassini_soldner;
 pub(crate) mod colombia_urban;
+pub(crate) mod equal_earth;
 pub(crate) mod equidistant_cylindrical;
 pub(crate) mod hotine_oblique_mercator;
 pub(crate) mod krovak;
@@ -45,6 +46,40 @@ pub(crate) fn converge(
     })
 }
 
+/// Authalic `q` for geodetic latitude `lat` (Snyder 3-12), shared by the
+/// equal-area projections (LAEA, Equal Earth).
+pub(crate) fn authalic_q(lat: f64, e2: f64) -> f64 {
+    if e2.abs() < ITERATION_ECCENTRICITY_EPSILON {
+        return 2.0 * lat.sin();
+    }
+
+    let e = e2.sqrt();
+    let sin_lat = lat.sin();
+    let e_sin = e * sin_lat;
+    (1.0 - e2)
+        * (sin_lat / (1.0 - e2 * sin_lat * sin_lat)
+            - (1.0 / (2.0 * e)) * ((1.0 - e_sin) / (1.0 + e_sin)).ln())
+}
+
+/// Authalic latitude β from `q` and the polar `q_p`.
+pub(crate) fn authalic_latitude(q: f64, q_p: f64) -> f64 {
+    (q / q_p).clamp(-1.0, 1.0).asin()
+}
+
+/// Geodetic latitude from the authalic latitude β (Snyder 3-18 series,
+/// matching C PROJ's `pj_authlat`).
+pub(crate) fn geodetic_from_authalic(beta: f64, e2: f64) -> f64 {
+    if e2.abs() < ITERATION_ECCENTRICITY_EPSILON {
+        return beta;
+    }
+
+    let e4 = e2 * e2;
+    let e6 = e4 * e2;
+    beta + (e2 / 3.0 + 31.0 * e4 / 180.0 + 517.0 * e6 / 5040.0) * (2.0 * beta).sin()
+        + (23.0 * e4 / 360.0 + 251.0 * e6 / 3780.0) * (4.0 * beta).sin()
+        + (761.0 * e6 / 45360.0) * (6.0 * beta).sin()
+}
+
 /// Geodetic latitude from the conformal parameter
 /// `t = tan(π/4 − φ/2) / ((1 − e·sinφ)/(1 + e·sinφ))^(e/2)`
 /// (EPSG Guidance Note 7-2), shared by the Mercator, Lambert Conformal
@@ -86,6 +121,7 @@ pub(crate) enum Projection {
     CassiniSoldner(cassini_soldner::CassiniSoldner),
     ColombiaUrban(colombia_urban::ColombiaUrban),
     Krovak(krovak::Krovak),
+    EqualEarth(equal_earth::EqualEarth),
     Mercator(mercator::Mercator),
     EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
 }
@@ -104,6 +140,7 @@ impl Projection {
             Projection::CassiniSoldner(proj) => proj.forward(lon, lat),
             Projection::ColombiaUrban(proj) => proj.forward(lon, lat),
             Projection::Krovak(proj) => proj.forward(lon, lat),
+            Projection::EqualEarth(proj) => proj.forward(lon, lat),
             Projection::Mercator(proj) => proj.forward(lon, lat),
             Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
         }
@@ -122,6 +159,7 @@ impl Projection {
             Projection::CassiniSoldner(proj) => proj.inverse(x, y),
             Projection::ColombiaUrban(proj) => proj.inverse(x, y),
             Projection::Krovak(proj) => proj.inverse(x, y),
+            Projection::EqualEarth(proj) => proj.inverse(x, y),
             Projection::Mercator(proj) => proj.inverse(x, y),
             Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
         }
@@ -400,6 +438,16 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             *false_easting,
             *false_northing,
             true,
+        )?)),
+        ProjectionMethod::EqualEarth {
+            lon0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::EqualEarth(equal_earth::EqualEarth::new(
+            datum.ellipsoid(),
+            lon0.to_radians(),
+            *false_easting,
+            *false_northing,
         )?)),
         ProjectionMethod::EquidistantCylindrical {
             lon0,

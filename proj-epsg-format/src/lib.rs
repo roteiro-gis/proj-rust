@@ -56,6 +56,7 @@ pub const METHOD_LCC_MICHIGAN: u8 = 15;
 pub const METHOD_LCC_1SP_VARIANT_B: u8 = 16;
 pub const METHOD_KROVAK_NORTH_ORIENTATED: u8 = 17;
 pub const METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED: u8 = 18;
+pub const METHOD_EQUAL_EARTH: u8 = 19;
 
 // Coordinate operation step tags.
 pub const OP_IDENTITY: u8 = 0;

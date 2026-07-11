@@ -149,6 +149,7 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         ProjectionMethod::ColombiaUrban { .. } => "Colombia_Urban",
         ProjectionMethod::KrovakNorthOrientated { .. } => "Krovak",
         ProjectionMethod::KrovakModifiedNorthOrientated { .. } => "Krovak_Modified",
+        ProjectionMethod::EqualEarth { .. } => "Equal_Earth",
         ProjectionMethod::LambertConformalConicMichigan { .. } => {
             "Lambert_Conformal_Conic_2SP_Michigan"
         }
@@ -420,6 +421,15 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             angle_param("azimuth", co_latitude_cone_axis),
             angle_param("pseudo_standard_parallel_1", lat_pseudo_standard_parallel),
             scale_param("scale_factor", k0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::EqualEarth {
+            lon0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
         ],
@@ -1721,6 +1731,14 @@ mod tests {
                     k0: 0.9999,
                     false_easting: 5_000_000.0,
                     false_northing: 5_000_000.0,
+                },
+            ),
+            (
+                "Equal Earth",
+                ProjectionMethod::EqualEarth {
+                    lon0: -90.0,
+                    false_easting: 0.0,
+                    false_northing: 0.0,
                 },
             ),
         ]

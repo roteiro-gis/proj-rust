@@ -1890,6 +1890,46 @@
     "description": "Slovakia 8351→8353 JTSK03 Krovak East North"
   },
   {
+    "from_epsg": 4326,
+    "to_epsg": 8857,
+    "input_x": -74.006,
+    "input_y": 40.7128,
+    "expected_x": -6260505.935750319,
+    "expected_y": 5000321.867942547,
+    "tolerance": 0.001,
+    "description": "NYC 4326→8857 Equal Earth Greenwich"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 8858,
+    "input_x": -74.006,
+    "input_y": 40.7128,
+    "expected_x": 1353005.5932814986,
+    "expected_y": 5000321.867942547,
+    "tolerance": 0.001,
+    "description": "NYC 4326→8858 Equal Earth Americas"
+  },
+  {
+    "from_epsg": 8857,
+    "to_epsg": 4326,
+    "input_x": -6260505.935750319,
+    "input_y": 5000321.867942547,
+    "expected_x": -74.00600000000001,
+    "expected_y": 40.712799993499225,
+    "tolerance": 1e-7,
+    "description": "NYC 8857→4326 Equal Earth inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 8859,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": -898308.3643893392,
+    "expected_y": 4431956.303865738,
+    "tolerance": 0.001,
+    "description": "Tokyo 4326→8859 Equal Earth Asia-Pacific"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

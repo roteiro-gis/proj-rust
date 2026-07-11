@@ -28,14 +28,14 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1094928,
-    "sha256": "sha256:d24687f74801040b8d453ae41321db2b7a1b09d8b1a4b7d1526079b7b0ae983e"
+    "byte_len": 1095266,
+    "sha256": "sha256:c6c914e24c0a92fd120175470824f10cdc3ff489136f86c642e32a73ab867ff7"
   },
   "counts": {
     "ellipsoids": 44,
     "datums": 585,
     "geographic_crs": 598,
-    "projected_crs": 5215,
+    "projected_crs": 5218,
     "vertical_crs": 293,
     "compound_crs": 684,
     "extents": 848,

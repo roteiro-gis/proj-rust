@@ -844,6 +844,17 @@ pub enum ProjectionMethod {
         /// False northing (meters), applied on the native southing axis.
         false_northing: f64,
     },
+
+    /// Equal Earth (EPSG method 1078): pseudocylindrical equal-area world
+    /// projection through the authalic latitude.
+    EqualEarth {
+        /// Longitude of natural origin (degrees).
+        lon0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1065,6 +1076,11 @@ impl ProjectionMethod {
                 false_northing,
                 0.0,
             ],
+            ProjectionMethod::EqualEarth {
+                lon0,
+                false_easting,
+                false_northing,
+            } => [lon0, false_easting, false_northing, 0.0, 0.0, 0.0, 0.0, 0.0],
         }
     }
 }

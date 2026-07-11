@@ -936,6 +936,43 @@ fn main() {
         "Slovakia 8351→8353 JTSK03 Krovak East North",
     ));
 
+    // Equal Earth (EPSG method 1078): whole-world equal-area, WGS84-based,
+    // so 4326 pairs are projection-only.
+    points.extend(transform(
+        4326,
+        8857,
+        -74.006,
+        40.7128,
+        1e-3,
+        "NYC 4326→8857 Equal Earth Greenwich",
+    ));
+    points.extend(transform(
+        4326,
+        8858,
+        -74.006,
+        40.7128,
+        1e-3,
+        "NYC 4326→8858 Equal Earth Americas",
+    ));
+    if let Some(fwd) = transform(4326, 8857, -74.006, 40.7128, 1e-3, "") {
+        points.extend(transform(
+            8857,
+            4326,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "NYC 8857→4326 Equal Earth inverse",
+        ));
+    }
+    points.extend(transform(
+        4326,
+        8859,
+        139.6917,
+        35.6895,
+        1e-3,
+        "Tokyo 4326→8859 Equal Earth Asia-Pacific",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,
