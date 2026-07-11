@@ -645,12 +645,16 @@ fn read_string(data: &[u8], offset: usize, len: usize) -> String {
     String::from_utf8_lossy(&data[offset..offset + len]).into_owned()
 }
 
-fn read_static_string(data: &[u8], offset: usize, len: usize) -> &'static str {
+/// Zero-copy string slice into the embedded registry blob.
+///
+/// The blob is compile-time embedded and CI-reproducibility-gated; invalid
+/// UTF-8 in it is a build defect, matching the module's other assertions.
+fn read_static_string(data: &'static [u8], offset: usize, len: usize) -> &'static str {
     if len == 0 {
-        ""
-    } else {
-        Box::leak(read_string(data, offset, len).into_boxed_str())
+        return "";
     }
+    std::str::from_utf8(&data[offset..offset + len])
+        .expect("embedded EPSG registry strings are UTF-8")
 }
 
 pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
