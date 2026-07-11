@@ -134,11 +134,11 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
 // The container layout is defined once in `proj-epsg-format`, shared with
 // the `proj-core` reader.
 use proj_epsg_format::{
-    COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_HELMERT, DATUM_SHIFT_IDENTITY,
-    DATUM_SHIFT_UNKNOWN, ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED,
-    FLAG_SUPERSEDED, GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX,
-    GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC,
-    HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
+    COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_IDENTITY, DATUM_SHIFT_UNKNOWN,
+    ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED, FLAG_SUPERSEDED,
+    GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
+    GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC,
+    METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
     METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
     METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
@@ -147,7 +147,7 @@ use proj_epsg_format::{
     VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
-const PROVENANCE_SCHEMA_VERSION: u16 = 4;
+const PROVENANCE_SCHEMA_VERSION: u16 = 5;
 const CANONICAL_NAN_BITS: u64 = 0x7ff8_0000_0000_0000;
 const CANONICAL_FLOAT_DECIMAL_PLACES: usize = 13;
 
@@ -211,6 +211,7 @@ struct RegistryCounts {
     grid_resources: usize,
     operations: usize,
     vertical_operations: usize,
+    datum_aliases: usize,
 }
 
 const LAT_ORIGIN: i64 = 8801;
@@ -1410,6 +1411,56 @@ fn validate_curated_lists(conn: &Connection) {
             ));
         }
     }
+}
+
+/// Datum name aliases for WKT/PROJ-string datum resolution: each used
+/// geodetic datum's official EPSG name plus every `alias_name` entry
+/// (including ESRI-style `D_...` names). Matching is normalization-based at
+/// lookup time, so raw strings are stored.
+fn load_datum_aliases(conn: &Connection, used_datum_codes: &BTreeSet<u32>) -> Vec<(u32, String)> {
+    let mut aliases = BTreeSet::<(u32, String)>::new();
+
+    let mut names = conn
+        .prepare(
+            "SELECT CAST(code AS TEXT), name FROM geodetic_datum
+             WHERE auth_name = 'EPSG'",
+        )
+        .expect("prepare datum name query");
+    for row in names
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query datum names")
+        .flatten()
+    {
+        if let Ok(code) = row.0.parse::<u32>() {
+            if used_datum_codes.contains(&code) && !row.1.is_empty() {
+                aliases.insert((code, row.1));
+            }
+        }
+    }
+
+    let mut alt_names = conn
+        .prepare(
+            "SELECT CAST(code AS TEXT), alt_name FROM alias_name
+             WHERE table_name = 'geodetic_datum' AND auth_name = 'EPSG'",
+        )
+        .expect("prepare datum alias query");
+    for row in alt_names
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })
+        .expect("query datum aliases")
+        .flatten()
+    {
+        if let Ok(code) = row.0.parse::<u32>() {
+            if used_datum_codes.contains(&code) && !row.1.is_empty() {
+                aliases.insert((code, row.1));
+            }
+        }
+    }
+
+    aliases.into_iter().collect()
 }
 
 /// Operations with a same-CRS-pair EPSG replacement (`supersession` table);
@@ -2656,6 +2707,14 @@ fn main() {
     eprintln!("Operations: {}", operations.len());
     eprintln!("Vertical operations: {}", vertical_operations.len());
 
+    let datum_aliases = load_datum_aliases(
+        &conn,
+        &used_datums
+            .iter()
+            .map(|(code, _)| *code)
+            .collect::<BTreeSet<u32>>(),
+    );
+
     let counts = RegistryCounts {
         ellipsoids: used_ellipsoids.len(),
         datums: used_datums.len(),
@@ -2667,6 +2726,7 @@ fn main() {
         grid_resources: grid_resources.len(),
         operations: operations.len(),
         vertical_operations: vertical_operations.len(),
+        datum_aliases: datum_aliases.len(),
     };
 
     let mut buf = Vec::<u8>::new();
@@ -2683,6 +2743,7 @@ fn main() {
     buf.extend_from_slice(&(grid_resources.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(operations.len() as u32).to_le_bytes());
     buf.extend_from_slice(&(vertical_operations.len() as u32).to_le_bytes());
+    buf.extend_from_slice(&(datum_aliases.len() as u32).to_le_bytes());
 
     for (code, a, inv_f) in &used_ellipsoids {
         let mut rec = [0u8; ELLIPSOID_RECORD_SIZE];
@@ -2696,15 +2757,13 @@ fn main() {
         let mut rec = [0u8; DATUM_RECORD_SIZE];
         rec[0..4].copy_from_slice(&code.to_le_bytes());
         rec[4..8].copy_from_slice(&datum.ellipsoid_code.to_le_bytes());
+        // The Helmert values inform the Identity derivation above but are
+        // not stored: datum identity is the record code, and transforms come
+        // exclusively from registry operations.
         rec[8] = match datum.shift_kind {
-            DatumShiftKind::Unknown => DATUM_SHIFT_UNKNOWN,
+            DatumShiftKind::Unknown | DatumShiftKind::Helmert => DATUM_SHIFT_UNKNOWN,
             DatumShiftKind::Identity => DATUM_SHIFT_IDENTITY,
-            DatumShiftKind::Helmert => DATUM_SHIFT_HELMERT,
         };
-        for (index, value) in datum.helmert.iter().enumerate() {
-            let offset = 16 + index * 8;
-            rec[offset..offset + 8].copy_from_slice(&canonical_f64(*value).to_le_bytes());
-        }
         buf.extend_from_slice(&rec);
     }
 
@@ -2855,6 +2914,11 @@ fn main() {
         for area_code in &operation.area_codes {
             buf.extend_from_slice(&area_code.to_le_bytes());
         }
+    }
+
+    for (code, alias) in &datum_aliases {
+        buf.extend_from_slice(&code.to_le_bytes());
+        write_string_u16(&mut buf, alias);
     }
 
     let bin_sha256 = sha256_hex(&buf);

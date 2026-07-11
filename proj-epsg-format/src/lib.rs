@@ -16,25 +16,26 @@
 /// `"EPSG"` in big-endian byte order.
 pub const MAGIC: u32 = 0x4550_5347;
 /// Container format version; bump on any layout or semantic change.
-pub const VERSION: u16 = 8;
-/// Fixed header: magic (4) + version (2) + reserved (2) + ten `u32` section
-/// counts.
-pub const HEADER_SIZE: usize = 48;
+pub const VERSION: u16 = 9;
+/// Fixed header: magic (4) + version (2) + reserved (2) + eleven `u32`
+/// section counts.
+pub const HEADER_SIZE: usize = 52;
 
 // Fixed-size record prefixes. "Base" sizes exclude the trailing
 // length-prefixed strings.
 pub const ELLIPSOID_RECORD_SIZE: usize = 20;
-pub const DATUM_RECORD_SIZE: usize = 72;
+pub const DATUM_RECORD_SIZE: usize = 12;
 pub const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
 pub const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
 pub const VERTICAL_CRS_RECORD_BASE_SIZE: usize = 16;
 pub const COMPOUND_CRS_RECORD_BASE_SIZE: usize = 28;
 
 // Datum→WGS84 relationship tags (definition metadata only; operation
-// selection never synthesizes transforms from these).
+// selection never synthesizes transforms from these). Since version 9,
+// records carry only the WGS84-compatibility tag; per-datum Helmert values
+// are a generation-time input for deriving it and are not stored.
 pub const DATUM_SHIFT_UNKNOWN: u8 = 0;
 pub const DATUM_SHIFT_IDENTITY: u8 = 1;
-pub const DATUM_SHIFT_HELMERT: u8 = 2;
 
 // Projection method tags.
 pub const METHOD_WEB_MERCATOR: u8 = 1;

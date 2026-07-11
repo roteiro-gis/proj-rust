@@ -19,6 +19,14 @@ pub fn lookup_epsg(code: u32) -> Option<CrsDef> {
     epsg_db::lookup(code)
 }
 
+/// Look up the EPSG geodetic datum code for a datum name or alias.
+///
+/// Matching is case- and punctuation-insensitive over the registry's datum
+/// names and the EPSG alias table (including ESRI-style `D_...` names).
+pub fn lookup_datum_code_for_name(name: &str) -> Option<u32> {
+    epsg_db::lookup_datum_code_by_name(name)
+}
+
 /// Look up a datum definition by EPSG code.
 pub fn lookup_datum_epsg(code: u32) -> Option<Datum> {
     epsg_db::lookup_datum(code)
@@ -332,8 +340,8 @@ mod tests {
     fn embedded_registry_provenance_reports_source_database() {
         let value: serde_json::Value =
             serde_json::from_str(embedded_registry_provenance_json()).unwrap();
-        assert_eq!(value["schema_version"], 4);
-        assert_eq!(value["registry_format"]["version"], 8);
+        assert_eq!(value["schema_version"], 5);
+        assert_eq!(value["registry_format"]["version"], 9);
         assert_eq!(
             value["source_database"]["metadata"]["PROJ.VERSION"],
             "9.6.2"
@@ -346,7 +354,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 1082565);
+        assert_eq!(value["output"]["byte_len"], 1089875);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
         assert_eq!(value["counts"]["grid_resources"], 726);

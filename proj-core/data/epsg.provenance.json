@@ -1,9 +1,9 @@
 {
-  "schema_version": 4,
+  "schema_version": 5,
   "generator": "gen-reference gen-registry",
   "registry_format": {
     "magic": "0x45505347",
-    "version": 8
+    "version": 9
   },
   "source_database": {
     "kind": "PROJ proj.db",
@@ -28,8 +28,8 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1082565,
-    "sha256": "sha256:becd8b3c0646ce65689ee2053a4827dc961ae4b7178a3b46bc7bbaac8ae62613"
+    "byte_len": 1089875,
+    "sha256": "sha256:d09219ba2334807620430b94cf6898c0a9f2dcf7e320a0a558cf359390363505"
   },
   "counts": {
     "ellipsoids": 44,
@@ -41,7 +41,8 @@
     "extents": 848,
     "grid_resources": 726,
     "operations": 2157,
-    "vertical_operations": 716
+    "vertical_operations": 716,
+    "datum_aliases": 1664
   },
   "supported_projection_methods": {
     "Albers Equal Area": 5,

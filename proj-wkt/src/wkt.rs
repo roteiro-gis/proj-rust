@@ -1663,4 +1663,24 @@ mod tests {
             .unwrap_or_else(|error| panic!("emitted WKT failed to reparse: {error}\n{wkt}"));
         let _ = reparsed;
     }
+
+    #[test]
+    fn registry_alias_resolves_datum_outside_curated_table() {
+        // PZ-90.02 (datum EPSG:1157) is not in the curated datum table; the
+        // registry alias index resolves it by name, gated on the ellipsoid.
+        let wkt = r#"GEOGCS["PZ-90.02",DATUM["PZ-90.02",SPHEROID["PZ-90",6378136,298.257839303]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]"#;
+        let crs = crate::parse_crs(wkt).unwrap();
+        let CrsDef::Geographic(geographic) = &crs else {
+            panic!("expected geographic CRS, got {crs:?}");
+        };
+        assert_eq!(geographic.datum().epsg(), 1157);
+    }
+
+    #[test]
+    fn registry_alias_rejects_mismatched_ellipsoid() {
+        // Same datum name, wrong ellipsoid: resolution must fail closed.
+        let wkt = r#"GEOGCS["PZ-90.02",DATUM["PZ-90.02",SPHEROID["wrong",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]"#;
+        let err = crate::parse_crs(wkt).unwrap_err();
+        assert!(err.to_string().contains("datum"), "unexpected error: {err}");
+    }
 }

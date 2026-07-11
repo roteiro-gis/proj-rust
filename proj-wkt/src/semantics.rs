@@ -237,7 +237,7 @@ pub(crate) fn resolve_structured_datum(
     datum_name: &str,
     ellipsoid: &StructuredEllipsoid,
 ) -> Option<Datum> {
-    datum_candidates().iter().find_map(|candidate| {
+    let curated = datum_candidates().iter().find_map(|candidate| {
         (datum_alias_matches(candidate, scope, datum_name)
             && ellipsoid_matches(
                 ellipsoid,
@@ -246,7 +246,35 @@ pub(crate) fn resolve_structured_datum(
                 candidate.ellipsoid_epsg,
             ))
         .then_some(candidate.datum.clone())
-    })
+    });
+    curated.or_else(|| resolve_registry_datum(datum_name, ellipsoid))
+}
+
+/// Registry-backed datum resolution: the EPSG alias table maps the parsed
+/// datum name to a datum code, gated on the parsed ellipsoid agreeing with
+/// the registry datum's ellipsoid (by ellipsoid code when the definition
+/// carries one, else numerically).
+fn resolve_registry_datum(datum_name: &str, ellipsoid: &StructuredEllipsoid) -> Option<Datum> {
+    let code = proj_core::lookup_datum_code_for_name(datum_name)?;
+    let datum = proj_core::lookup_datum_epsg(code)?;
+
+    if let (Some(actual), Some(expected)) = (
+        ellipsoid.epsg,
+        proj_core::lookup_ellipsoid_code_for_datum(code),
+    ) {
+        if actual == expected {
+            return Some(datum);
+        }
+    }
+
+    let expected_rf = if datum.ellipsoid().flattening() == 0.0 {
+        0.0
+    } else {
+        1.0 / datum.ellipsoid().flattening()
+    };
+    ((ellipsoid.semi_major_axis - datum.ellipsoid().semi_major_axis()).abs() < 1e-6
+        && (ellipsoid.inverse_flattening - expected_rf).abs() < 1e-6)
+        .then_some(datum)
 }
 
 /// Resolve a structured datum, falling back to a custom datum built from the
@@ -264,7 +292,9 @@ pub(crate) fn resolve_structured_datum_or_custom(
     if let Some(datum) = resolve_structured_datum(scope, datum_name, ellipsoid) {
         return Some(datum);
     }
-    if resolve_named_datum(scope, datum_name).is_some() {
+    if resolve_named_datum(scope, datum_name).is_some()
+        || proj_core::lookup_datum_code_for_name(datum_name).is_some()
+    {
         return None;
     }
     custom_datum_from_structured_ellipsoid(ellipsoid)
