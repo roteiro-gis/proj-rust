@@ -146,6 +146,7 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
             variant_b: false, ..
         } => "Hotine_Oblique_Mercator",
         ProjectionMethod::CassiniSoldner { .. } => "Cassini_Soldner",
+        ProjectionMethod::ColombiaUrban { .. } => "Colombia_Urban",
         ProjectionMethod::Mercator { lat_ts, .. } => {
             if approx_eq(lat_ts, 0.0) {
                 "Mercator_1SP"
@@ -330,6 +331,19 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
         } => vec![
             angle_param("central_meridian", lon0),
             angle_param("standard_parallel_1", lat_ts),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::ColombiaUrban {
+            lon0,
+            lat0,
+            h0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            length_param("projection_plane_origin_height", h0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
         ],

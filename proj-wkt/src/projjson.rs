@@ -310,6 +310,13 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
             false_easting: fe,
             false_northing: fn_,
         },
+        "colombiaurban" => ProjectionMethod::ColombiaUrban {
+            lon0,
+            lat0,
+            h0: first_param(&params, &["projectionplaneoriginheight"]).unwrap_or(0.0),
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "polarstereographicvarianta" | "polarstereographicvariantb" | "polarstereographic" => {
             ProjectionMethod::PolarStereographic {
                 lon0,

@@ -1770,6 +1770,36 @@
     "description": "NYC 4326→32662 EqCyl precise inverse"
   },
   {
+    "from_epsg": 4686,
+    "to_epsg": 6247,
+    "input_x": -74.25,
+    "input_y": 4.8,
+    "expected_x": 80859.03296027493,
+    "expected_y": 122543.1742925066,
+    "tolerance": 0.001,
+    "description": "Bogota 4686→6247 Colombia Urban"
+  },
+  {
+    "from_epsg": 4686,
+    "to_epsg": 6247,
+    "input_x": -74.0,
+    "input_y": 4.6,
+    "expected_x": 108607.67815375591,
+    "expected_y": 100418.79321328922,
+    "tolerance": 0.001,
+    "description": "Bogota SE 4686→6247 Colombia Urban"
+  },
+  {
+    "from_epsg": 6247,
+    "to_epsg": 4686,
+    "input_x": 80859.03296027493,
+    "input_y": 122543.1742925066,
+    "expected_x": -74.24999999907845,
+    "expected_y": 4.799999996702549,
+    "tolerance": 1e-9,
+    "description": "Bogota 6247→4686 Colombia Urban inverse"
+  },
+  {
     "from_epsg": 4326,
     "to_epsg": 32618,
     "input_x": -75.0,

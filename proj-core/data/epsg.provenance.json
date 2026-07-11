@@ -28,14 +28,14 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1089875,
-    "sha256": "sha256:d09219ba2334807620430b94cf6898c0a9f2dcf7e320a0a558cf359390363505"
+    "byte_len": 1093587,
+    "sha256": "sha256:fbf8e0770495b83f896e1981d5d39801436b2dcb264139020ffc1f1426df944a"
   },
   "counts": {
     "ellipsoids": 44,
     "datums": 585,
     "geographic_crs": 598,
-    "projected_crs": 5171,
+    "projected_crs": 5203,
     "vertical_crs": 293,
     "compound_crs": 684,
     "extents": 848,
@@ -47,6 +47,7 @@
   "supported_projection_methods": {
     "Albers Equal Area": 5,
     "Cassini-Soldner": 12,
+    "Colombia Urban": 14,
     "Equidistant Cylindrical": 7,
     "Hotine Oblique Mercator A": 10,
     "Hotine Oblique Mercator B": 11,

@@ -1,5 +1,6 @@
 pub(crate) mod albers_equal_area;
 pub(crate) mod cassini_soldner;
+pub(crate) mod colombia_urban;
 pub(crate) mod equidistant_cylindrical;
 pub(crate) mod hotine_oblique_mercator;
 pub(crate) mod lambert_azimuthal_equal_area;
@@ -82,6 +83,7 @@ pub(crate) enum Projection {
     ObliqueStereographic(oblique_stereographic::ObliqueStereographic),
     HotineObliqueMercator(hotine_oblique_mercator::HotineObliqueMercator),
     CassiniSoldner(cassini_soldner::CassiniSoldner),
+    ColombiaUrban(colombia_urban::ColombiaUrban),
     Mercator(mercator::Mercator),
     EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
 }
@@ -98,6 +100,7 @@ impl Projection {
             Projection::ObliqueStereographic(proj) => proj.forward(lon, lat),
             Projection::HotineObliqueMercator(proj) => proj.forward(lon, lat),
             Projection::CassiniSoldner(proj) => proj.forward(lon, lat),
+            Projection::ColombiaUrban(proj) => proj.forward(lon, lat),
             Projection::Mercator(proj) => proj.forward(lon, lat),
             Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
         }
@@ -114,6 +117,7 @@ impl Projection {
             Projection::ObliqueStereographic(proj) => proj.inverse(x, y),
             Projection::HotineObliqueMercator(proj) => proj.inverse(x, y),
             Projection::CassiniSoldner(proj) => proj.inverse(x, y),
+            Projection::ColombiaUrban(proj) => proj.inverse(x, y),
             Projection::Mercator(proj) => proj.inverse(x, y),
             Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
         }
@@ -288,6 +292,22 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             *false_easting,
             *false_northing,
         )?)),
+        ProjectionMethod::ColombiaUrban {
+            lon0,
+            lat0,
+            h0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::ColombiaUrban(
+            colombia_urban::ColombiaUrban::new(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *h0,
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,

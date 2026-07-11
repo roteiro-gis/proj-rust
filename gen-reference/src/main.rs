@@ -815,6 +815,34 @@ fn main() {
         }
     }
 
+    // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
+    points.extend(transform(
+        4686,
+        6247,
+        -74.25,
+        4.8,
+        1e-3,
+        "Bogota 4686→6247 Colombia Urban",
+    ));
+    points.extend(transform(
+        4686,
+        6247,
+        -74.0,
+        4.6,
+        1e-3,
+        "Bogota SE 4686→6247 Colombia Urban",
+    ));
+    if let Some(fwd) = transform(4686, 6247, -74.25, 4.8, 1e-3, "") {
+        points.extend(transform(
+            6247,
+            4686,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Bogota 6247→4686 Colombia Urban inverse",
+        ));
+    }
+
     // =========================================================================
     // 6. EDGE cases: near-pole inverses and wrong-hemisphere polar stereo
     // =========================================================================

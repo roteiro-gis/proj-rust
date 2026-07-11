@@ -755,6 +755,16 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+    /// Colombia Urban (EPSG method 1052): plane projection at the elevation
+    /// of the mapped city. `h0` is the projection plane origin height in
+    /// meters.
+    ColombiaUrban {
+        lon0: f64,
+        lat0: f64,
+        h0: f64,
+        false_easting: f64,
+        false_northing: f64,
+    },
 }
 
 fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> bool {

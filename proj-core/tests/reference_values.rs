@@ -209,6 +209,7 @@ fn corpus_has_adequate_coverage() {
     assert!(epsg_targets.contains(&2056), "missing Hotine variant B");
     assert!(epsg_targets.contains(&30200), "missing Cassini-Soldner");
     assert!(epsg_targets.contains(&32662), "missing Plate Carree");
+    assert!(epsg_targets.contains(&6247), "missing Colombia Urban");
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));
