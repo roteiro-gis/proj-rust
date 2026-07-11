@@ -3,6 +3,7 @@ pub(crate) mod cassini_soldner;
 pub(crate) mod colombia_urban;
 pub(crate) mod equidistant_cylindrical;
 pub(crate) mod hotine_oblique_mercator;
+pub(crate) mod krovak;
 pub(crate) mod lambert_azimuthal_equal_area;
 pub(crate) mod lambert_conformal_conic;
 pub(crate) mod mercator;
@@ -84,6 +85,7 @@ pub(crate) enum Projection {
     HotineObliqueMercator(hotine_oblique_mercator::HotineObliqueMercator),
     CassiniSoldner(cassini_soldner::CassiniSoldner),
     ColombiaUrban(colombia_urban::ColombiaUrban),
+    Krovak(krovak::Krovak),
     Mercator(mercator::Mercator),
     EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
 }
@@ -101,6 +103,7 @@ impl Projection {
             Projection::HotineObliqueMercator(proj) => proj.forward(lon, lat),
             Projection::CassiniSoldner(proj) => proj.forward(lon, lat),
             Projection::ColombiaUrban(proj) => proj.forward(lon, lat),
+            Projection::Krovak(proj) => proj.forward(lon, lat),
             Projection::Mercator(proj) => proj.forward(lon, lat),
             Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
         }
@@ -118,6 +121,7 @@ impl Projection {
             Projection::HotineObliqueMercator(proj) => proj.inverse(x, y),
             Projection::CassiniSoldner(proj) => proj.inverse(x, y),
             Projection::ColombiaUrban(proj) => proj.inverse(x, y),
+            Projection::Krovak(proj) => proj.inverse(x, y),
             Projection::Mercator(proj) => proj.inverse(x, y),
             Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
         }
@@ -359,6 +363,44 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
                 *false_northing,
             )?,
         )),
+        ProjectionMethod::KrovakNorthOrientated {
+            lon0,
+            lat0,
+            co_latitude_cone_axis,
+            lat_pseudo_standard_parallel,
+            k0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::Krovak(krovak::Krovak::new(
+            datum.ellipsoid(),
+            lon0.to_radians(),
+            lat0.to_radians(),
+            co_latitude_cone_axis.to_radians(),
+            lat_pseudo_standard_parallel.to_radians(),
+            *k0,
+            *false_easting,
+            *false_northing,
+            false,
+        )?)),
+        ProjectionMethod::KrovakModifiedNorthOrientated {
+            lon0,
+            lat0,
+            co_latitude_cone_axis,
+            lat_pseudo_standard_parallel,
+            k0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::Krovak(krovak::Krovak::new(
+            datum.ellipsoid(),
+            lon0.to_radians(),
+            lat0.to_radians(),
+            co_latitude_cone_axis.to_radians(),
+            lat_pseudo_standard_parallel.to_radians(),
+            *k0,
+            *false_easting,
+            *false_northing,
+            true,
+        )?)),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,

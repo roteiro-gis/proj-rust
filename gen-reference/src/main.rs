@@ -876,6 +876,66 @@ fn main() {
         ));
     }
 
+    // Krovak East North (EPSG method 1041) and Modified Krovak East North
+    // (1043), same-datum pairs so the projection math is isolated. Both are
+    // north-orientated, so Czech/Slovak coordinates are negative.
+    points.extend(transform(
+        4156,
+        5514,
+        14.4208,
+        50.088,
+        1e-3,
+        "Prague 4156→5514 Krovak East North",
+    ));
+    points.extend(transform(
+        4156,
+        5514,
+        17.1077,
+        48.1486,
+        1e-3,
+        "Bratislava 4156→5514 Krovak East North",
+    ));
+    if let Some(fwd) = transform(4156, 5514, 14.4208, 50.088, 1e-3, "") {
+        points.extend(transform(
+            5514,
+            4156,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Prague 5514→4156 Krovak East North inverse",
+        ));
+    }
+    // C PROJ hardcodes the Krovak cone axis at 30°17'17.30311" and ignores
+    // the parameter, while the EPSG conversion for 5516 stores the rounded
+    // 30°17'17.303"; honoring the registry value moves the southing ~3.4 mm,
+    // so the Modified Krovak tolerances are 5 mm / 1e-7°.
+    points.extend(transform(
+        5228,
+        5516,
+        14.4208,
+        50.088,
+        5e-3,
+        "Prague 5228→5516 Modified Krovak East North",
+    ));
+    if let Some(fwd) = transform(5228, 5516, 14.4208, 50.088, 5e-3, "") {
+        points.extend(transform(
+            5516,
+            5228,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Prague 5516→5228 Modified Krovak East North inverse",
+        ));
+    }
+    points.extend(transform(
+        8351,
+        8353,
+        19.15,
+        48.74,
+        1e-3,
+        "Slovakia 8351→8353 JTSK03 Krovak East North",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

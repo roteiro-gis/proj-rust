@@ -24,7 +24,8 @@ use proj_epsg_format::{
     GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
     GRID_INTERPOLATION_BILINEAR, HEADER_SIZE, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED,
     MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_COLOMBIA_URBAN, METHOD_EQUIDISTANT_CYL,
-    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
+    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
+    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LAEA,
     METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_TRANSVERSE_MERCATOR,
     METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT, OP_IDENTITY,
@@ -566,6 +567,26 @@ fn decode_projection_method(method_id: u8, params: [f64; 7]) -> ProjectionMethod
             false_easting: p3,
             false_northing: p4,
         },
+        METHOD_KROVAK_NORTH_ORIENTATED => ProjectionMethod::KrovakNorthOrientated {
+            lon0: p0,
+            lat0: p1,
+            co_latitude_cone_axis: p2,
+            lat_pseudo_standard_parallel: p5,
+            k0: p4,
+            false_easting: p3,
+            false_northing: p6,
+        },
+        METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED => {
+            ProjectionMethod::KrovakModifiedNorthOrientated {
+                lon0: p0,
+                lat0: p1,
+                co_latitude_cone_axis: p2,
+                lat_pseudo_standard_parallel: p5,
+                k0: p4,
+                false_easting: p3,
+                false_northing: p6,
+            }
+        }
         METHOD_TRANSVERSE_MERCATOR => ProjectionMethod::TransverseMercator {
             lon0: p0,
             lat0: p1,

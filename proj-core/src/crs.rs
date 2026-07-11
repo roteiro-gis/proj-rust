@@ -804,261 +804,280 @@ pub enum ProjectionMethod {
         false_easting: f64,
         false_northing: f64,
     },
+
+    /// Krovak (North Orientated), EPSG method 1041: oblique conformal conic
+    /// with east/north axis orientation, so Czech and Slovak coordinates are
+    /// negative. Longitudes are referenced to the base CRS's prime meridian.
+    KrovakNorthOrientated {
+        /// Longitude of origin (degrees).
+        lon0: f64,
+        /// Latitude of projection centre (degrees).
+        lat0: f64,
+        /// Co-latitude of cone axis (degrees).
+        co_latitude_cone_axis: f64,
+        /// Latitude of pseudo standard parallel (degrees).
+        lat_pseudo_standard_parallel: f64,
+        /// Scale factor on pseudo standard parallel.
+        k0: f64,
+        /// False easting (meters), applied on the native westing axis.
+        false_easting: f64,
+        /// False northing (meters), applied on the native southing axis.
+        false_northing: f64,
+    },
+
+    /// Krovak Modified (North Orientated), EPSG method 1043: Krovak plus the
+    /// S-JTSK/05 polynomial distortion correction whose coefficients are
+    /// defining constants of the EPSG method.
+    KrovakModifiedNorthOrientated {
+        /// Longitude of origin (degrees).
+        lon0: f64,
+        /// Latitude of projection centre (degrees).
+        lat0: f64,
+        /// Co-latitude of cone axis (degrees).
+        co_latitude_cone_axis: f64,
+        /// Latitude of pseudo standard parallel (degrees).
+        lat_pseudo_standard_parallel: f64,
+        /// Scale factor on pseudo standard parallel.
+        k0: f64,
+        /// False easting (meters), applied on the native westing axis.
+        false_easting: f64,
+        /// False northing (meters), applied on the native southing axis.
+        false_northing: f64,
+    },
+}
+
+impl ProjectionMethod {
+    /// Canonical numeric parameters for definitional equivalence: a fixed
+    /// slot array whose layout is private to this comparison (booleans fold
+    /// to 0/1, unused slots stay 0). The match is exhaustive on purpose so
+    /// adding a method without wiring equivalence is a compile error.
+    fn canonical_params(&self) -> [f64; 8] {
+        match *self {
+            ProjectionMethod::WebMercator => [0.0; 8],
+            ProjectionMethod::TransverseMercator {
+                lon0,
+                lat0,
+                k0,
+                false_easting,
+                false_northing,
+            } => [lon0, lat0, k0, false_easting, false_northing, 0.0, 0.0, 0.0],
+            ProjectionMethod::PolarStereographic {
+                lon0,
+                lat_ts,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat_ts,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::LambertConformalConic {
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+            ],
+            ProjectionMethod::LambertConformalConicMichigan {
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                ellipsoid_scaling_factor,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                ellipsoid_scaling_factor,
+                false_easting,
+                false_northing,
+                0.0,
+            ],
+            ProjectionMethod::LambertConformalConic1SPVariantB {
+                lon0,
+                lat0,
+                k0,
+                lat_false_origin,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                k0,
+                lat_false_origin,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::AlbersEqualArea {
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                lat1,
+                lat2,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::LambertAzimuthalEqualArea {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+            }
+            | ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+            }
+            | ProjectionMethod::CassiniSoldner {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::ObliqueStereographic {
+                lon0,
+                lat0,
+                k0,
+                false_easting,
+                false_northing,
+            } => [lon0, lat0, k0, false_easting, false_northing, 0.0, 0.0, 0.0],
+            ProjectionMethod::HotineObliqueMercator {
+                latc,
+                lonc,
+                azimuth,
+                rectified_grid_angle,
+                k0,
+                false_easting,
+                false_northing,
+                variant_b,
+            } => [
+                latc,
+                lonc,
+                azimuth,
+                rectified_grid_angle,
+                k0,
+                false_easting,
+                false_northing,
+                if variant_b { 1.0 } else { 0.0 },
+            ],
+            ProjectionMethod::Mercator {
+                lon0,
+                lat_ts,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat_ts,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::EquidistantCylindrical {
+                lon0,
+                lat_ts,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat_ts,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::ColombiaUrban {
+                lon0,
+                lat0,
+                h0,
+                false_easting,
+                false_northing,
+            } => [lon0, lat0, h0, false_easting, false_northing, 0.0, 0.0, 0.0],
+            ProjectionMethod::KrovakNorthOrientated {
+                lon0,
+                lat0,
+                co_latitude_cone_axis,
+                lat_pseudo_standard_parallel,
+                k0,
+                false_easting,
+                false_northing,
+            }
+            | ProjectionMethod::KrovakModifiedNorthOrientated {
+                lon0,
+                lat0,
+                co_latitude_cone_axis,
+                lat_pseudo_standard_parallel,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                co_latitude_cone_axis,
+                lat_pseudo_standard_parallel,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+            ],
+        }
+    }
 }
 
 fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> bool {
-    match (a, b) {
-        (ProjectionMethod::WebMercator, ProjectionMethod::WebMercator) => true,
-        (
-            ProjectionMethod::TransverseMercator {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::TransverseMercator {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::PolarStereographic {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::PolarStereographic {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertConformalConic {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertConformalConic {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_lat1, *b_lat1)
-                && approx_eq(*a_lat2, *b_lat2)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::AlbersEqualArea {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                lat1: a_lat1,
-                lat2: a_lat2,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::AlbersEqualArea {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                lat1: b_lat1,
-                lat2: b_lat2,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_lat1, *b_lat1)
-                && approx_eq(*a_lat2, *b_lat2)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertAzimuthalEqualArea {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertAzimuthalEqualArea {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::LambertAzimuthalEqualAreaSpherical {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::ObliqueStereographic {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::ObliqueStereographic {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::HotineObliqueMercator {
-                latc: a_latc,
-                lonc: a_lonc,
-                azimuth: a_azimuth,
-                rectified_grid_angle: a_rectified_grid_angle,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-                variant_b: a_variant_b,
-            },
-            ProjectionMethod::HotineObliqueMercator {
-                latc: b_latc,
-                lonc: b_lonc,
-                azimuth: b_azimuth,
-                rectified_grid_angle: b_rectified_grid_angle,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-                variant_b: b_variant_b,
-            },
-        ) => {
-            a_variant_b == b_variant_b
-                && approx_eq(*a_latc, *b_latc)
-                && approx_eq(*a_lonc, *b_lonc)
-                && approx_eq(*a_azimuth, *b_azimuth)
-                && approx_eq(*a_rectified_grid_angle, *b_rectified_grid_angle)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::CassiniSoldner {
-                lon0: a_lon0,
-                lat0: a_lat0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::CassiniSoldner {
-                lon0: b_lon0,
-                lat0: b_lat0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat0, *b_lat0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::Mercator {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                k0: a_k0,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::Mercator {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                k0: b_k0,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_k0, *b_k0)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        (
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: a_lon0,
-                lat_ts: a_lat_ts,
-                false_easting: a_false_easting,
-                false_northing: a_false_northing,
-            },
-            ProjectionMethod::EquidistantCylindrical {
-                lon0: b_lon0,
-                lat_ts: b_lat_ts,
-                false_easting: b_false_easting,
-                false_northing: b_false_northing,
-            },
-        ) => {
-            approx_eq(*a_lon0, *b_lon0)
-                && approx_eq(*a_lat_ts, *b_lat_ts)
-                && approx_eq(*a_false_easting, *b_false_easting)
-                && approx_eq(*a_false_northing, *b_false_northing)
-        }
-        _ => false,
+    if std::mem::discriminant(a) != std::mem::discriminant(b) {
+        return false;
     }
+    let (a_params, b_params) = (a.canonical_params(), b.canonical_params());
+    a_params
+        .iter()
+        .zip(b_params.iter())
+        .all(|(x, y)| approx_eq(*x, *y))
 }
 
 fn approx_eq(a: f64, b: f64) -> bool {
@@ -1069,6 +1088,78 @@ fn approx_eq(a: f64, b: f64) -> bool {
 mod tests {
     use super::*;
     use crate::datum;
+
+    /// Regression: the old field-ladder comparison had no arms for methods
+    /// added after it was written, so identical definitions compared as not
+    /// equivalent. The canonical-params form covers every variant by
+    /// construction.
+    #[test]
+    fn every_projection_method_is_self_equivalent() {
+        let methods = [
+            ProjectionMethod::ColombiaUrban {
+                lon0: -74.15,
+                lat0: 4.68,
+                h0: 2550.0,
+                false_easting: 92334.879,
+                false_northing: 109320.965,
+            },
+            ProjectionMethod::LambertConformalConicMichigan {
+                lon0: -84.33,
+                lat0: 43.32,
+                lat1: 44.18,
+                lat2: 45.7,
+                ellipsoid_scaling_factor: 1.0000382,
+                false_easting: 609601.2192,
+                false_northing: 0.0,
+            },
+            ProjectionMethod::LambertConformalConic1SPVariantB {
+                lon0: 6.9,
+                lat0: 45.15,
+                k0: 1.0000398,
+                lat_false_origin: 45.15,
+                false_easting: 700000.0,
+                false_northing: 300000.0,
+            },
+            ProjectionMethod::KrovakNorthOrientated {
+                lon0: 24.833333333333332,
+                lat0: 49.5,
+                co_latitude_cone_axis: 30.288139752777778,
+                lat_pseudo_standard_parallel: 78.5,
+                k0: 0.9999,
+                false_easting: 0.0,
+                false_northing: 0.0,
+            },
+            ProjectionMethod::KrovakModifiedNorthOrientated {
+                lon0: 24.833333333333332,
+                lat0: 49.5,
+                co_latitude_cone_axis: 30.288139752777778,
+                lat_pseudo_standard_parallel: 78.5,
+                k0: 0.9999,
+                false_easting: 5_000_000.0,
+                false_northing: 5_000_000.0,
+            },
+        ];
+        for method in &methods {
+            assert!(
+                projection_methods_equivalent(method, method),
+                "{method:?} must be self-equivalent"
+            );
+        }
+        // Same numbers, different method: the discriminant must decide.
+        let modified_with_same_numbers = ProjectionMethod::KrovakModifiedNorthOrientated {
+            lon0: 24.833333333333332,
+            lat0: 49.5,
+            co_latitude_cone_axis: 30.288139752777778,
+            lat_pseudo_standard_parallel: 78.5,
+            k0: 0.9999,
+            false_easting: 0.0,
+            false_northing: 0.0,
+        };
+        assert!(!projection_methods_equivalent(
+            &methods[3],
+            &modified_with_same_numbers
+        ));
+    }
 
     #[test]
     fn geographic_crs_is_geographic() {
