@@ -38,6 +38,33 @@ use pipeline::PARALLEL_MIN_ITEMS_PER_THREAD;
 #[cfg(test)]
 use pipeline::{PipelineSourceXyUnits, PipelineTargetXyUnits};
 
+/// Geoid-grid vertical transforms compose with the pre-datum-shift
+/// ellipsoidal height: applying one across a Helmert/geocentric horizontal
+/// pipeline would silently drop the datum shift's ellipsoidal-height change.
+/// Every supported geoid path rides an identity or grid-based horizontal
+/// operation today, so reject the unsupported composition at construction
+/// instead of producing wrong heights.
+fn validate_vertical_composition(
+    vertical: &VerticalTransform,
+    pipeline: &CompiledOperationPipeline,
+    fallbacks: &[CompiledOperationFallback],
+) -> Result<()> {
+    if !matches!(vertical, VerticalTransform::GridShiftList { .. }) {
+        return Ok(());
+    }
+    if pipeline.transforms_ellipsoidal_height
+        || fallbacks
+            .iter()
+            .any(|fallback| fallback.pipeline.transforms_ellipsoidal_height)
+    {
+        return Err(Error::OperationSelection(
+            "geoid-grid vertical transforms cannot yet be composed with a horizontal datum              shift that changes ellipsoidal height; transform the horizontal datum and the              vertical reference in separate steps"
+                .into(),
+        ));
+    }
+    Ok(())
+}
+
 /// A reusable coordinate transformation between two CRS.
 #[derive(Clone)]
 pub struct Transform {
@@ -235,6 +262,11 @@ impl Transform {
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
         let vertical_transform = compile_vertical_transform(from, to, &options, &grid_runtime)?;
         let selected = compile_selected_pipelines(from, to, &options, &grid_runtime)?;
+        validate_vertical_composition(
+            &vertical_transform,
+            &selected.pipeline,
+            &selected.fallback_pipelines,
+        )?;
         Ok(Self {
             source: from.clone(),
             target: to.clone(),
@@ -426,6 +458,7 @@ impl Transform {
             approximate: self.diagnostics.approximate,
             missing_required_grid: self.diagnostics.missing_required_grid.clone(),
         };
+        validate_vertical_composition(&vertical_transform, &pipeline, &fallback_pipelines)?;
         Ok(Self {
             source: self.target.clone(),
             target: self.source.clone(),
