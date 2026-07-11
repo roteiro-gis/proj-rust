@@ -4,6 +4,7 @@
 
 - accept EPSG-tagged WKT1 `COMPD_CS` definitions whose horizontal component uses the authority-native axis permutation, including SWEREF99 TM + RH2000 height (EPSG:5845), while continuing to reject unsupported custom axis semantics
 - add `Transform::new_horizontal`, `Transform::new_horizontal_with_selection_options`, and `Transform::from_epsg_horizontal` for explicit XY-only transforms from compound authority-code CRSs without silently weakening the vertical-safe constructors
+- breaking: registry format v9 — datum records drop their stored to-WGS84 Helmert values (identity is the datum's EPSG code; `Datum` gains `epsg()`/`with_epsg` and `same_datum` compares codes when both sides carry one), and a new datum alias index (1,664 EPSG names and aliases) lets WKT/PROJ-string parsing resolve any registry datum by name instead of only the 8 curated ones, fail-closed on ellipsoid mismatch
 - breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverse iterations report a structured `Error::NonConvergence { context, iterations }`
 - breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based (`to_coord(&self)`/`to_coord3d(&self)`), and `convert_batch`/`convert_batch_3d` no longer require `Clone`
 - breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`; diagnostics conversions share the compiled metadata instead of cloning strings per point
