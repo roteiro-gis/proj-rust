@@ -567,6 +567,7 @@ fn decode_projection_method(method_id: u8, params: [f64; 7]) -> ProjectionMethod
             lat0: p1,
             lat1: p2,
             lat2: p5,
+            k0: p4,
             false_easting: p3,
             false_northing: p6,
         },

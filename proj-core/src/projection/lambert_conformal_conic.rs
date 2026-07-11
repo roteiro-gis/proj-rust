@@ -2,7 +2,7 @@ use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
     ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
-    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected,
+    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected, validate_scale,
 };
 
 /// Lambert Conformal Conic projection (1SP and 2SP).
@@ -22,12 +22,14 @@ pub(crate) struct LambertConformalConic {
 }
 
 impl LambertConformalConic {
+    #[allow(clippy::too_many_arguments)]
     pub(crate) fn new(
         ellipsoid: Ellipsoid,
         lon0: f64,
         lat0: f64,
         lat1: f64,
         lat2: f64,
+        k0: f64,
         false_easting: f64,
         false_northing: f64,
     ) -> Result<Self> {
@@ -35,6 +37,7 @@ impl LambertConformalConic {
         validate_latitude_param("latitude of origin", lat0)?;
         validate_latitude_param("first standard parallel", lat1)?;
         validate_latitude_param("second standard parallel", lat2)?;
+        validate_scale("scale factor", k0)?;
         validate_offset("false easting", false_easting)?;
         validate_offset("false northing", false_northing)?;
 
@@ -56,7 +59,9 @@ impl LambertConformalConic {
             ));
         }
 
-        let f_const = m1 / (n * t1.powf(n));
+        // The 1SP variant's scale factor at the natural origin multiplies the
+        // cone constant term; k0 is 1.0 for 2SP definitions.
+        let f_const = k0 * m1 / (n * t1.powf(n));
         let rho0 = ellipsoid.semi_major_axis() * f_const * t0.powf(n);
 
         Ok(Self {
@@ -131,6 +136,7 @@ mod tests {
             46.5_f64.to_radians(),
             44.0_f64.to_radians(),
             49.0_f64.to_radians(),
+            1.0,
             700_000.0,
             6_600_000.0,
         )
@@ -164,6 +170,7 @@ mod tests {
             33.0_f64.to_radians(),
             33.0_f64.to_radians(),
             33.0_f64.to_radians(),
+            1.0,
             500_000.0,
             0.0,
         )
@@ -186,6 +193,7 @@ mod tests {
             46.5_f64.to_radians(),
             44.0_f64.to_radians(),
             49.0_f64.to_radians(),
+            1.0,
             700_000.0,
             6_600_000.0,
         )

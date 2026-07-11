@@ -815,6 +815,28 @@ fn main() {
         }
     }
 
+    // Lambert Conformal Conic 1SP (EPSG method 9801): Jamaica 1969 National
+    // Grid. The 1SP parameter mapping (natural-origin parallels and scale
+    // factor) regressed silently before these points existed.
+    points.extend(transform(
+        4242,
+        24200,
+        -76.8,
+        18.0,
+        1e-3,
+        "Kingston 4242→24200 LCC 1SP",
+    ));
+    if let Some(fwd) = transform(4242, 24200, -76.8, 18.0, 1e-3, "") {
+        points.extend(transform(
+            24200,
+            4242,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Kingston 24200→4242 LCC 1SP inverse",
+        ));
+    }
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

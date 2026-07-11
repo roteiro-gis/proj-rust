@@ -211,6 +211,7 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         "lambertconformalconic1sp" | "lambertconformalconic2sp" | "lambertconformalconic" => {
             ProjectionMethod::LambertConformalConic {
                 lon0,
+                k0,
                 lat0,
                 lat1: first_param(
                     &params,

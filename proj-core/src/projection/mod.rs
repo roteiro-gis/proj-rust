@@ -167,6 +167,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             lat0,
             lat1,
             lat2,
+            k0,
             false_easting,
             false_northing,
         } => Ok(Projection::LambertConformalConic(
@@ -176,6 +177,7 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
                 lat0.to_radians(),
                 lat1.to_radians(),
                 lat2.to_radians(),
+                *k0,
                 *false_easting,
                 *false_northing,
             )?,

@@ -28,7 +28,7 @@ const TMERC_PARAMS: &[&str] = &["lat_0", "lon_0", "k_0", "k", "x_0", "y_0"];
 const MERC_PARAMS: &[&str] = &["lon_0", "lat_ts", "k_0", "k", "x_0", "y_0"];
 const STERE_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_ts", "k_0", "k", "x_0", "y_0"];
 const STEREA_PARAMS: &[&str] = &["lat_0", "lon_0", "k_0", "k", "x_0", "y_0"];
-const CONIC_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_1", "lat_2", "x_0", "y_0"];
+const CONIC_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_1", "lat_2", "k_0", "k", "x_0", "y_0"];
 const EQC_PARAMS: &[&str] = &["lon_0", "lat_ts", "x_0", "y_0"];
 const LAEA_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
 const OMERC_PARAMS: &[&str] = &[
@@ -571,6 +571,7 @@ fn parse_lcc(params: &HashMap<String, String>) -> Result<CrsDef> {
             lat0: get_f64(params, "lat_0")?,
             lat1: get_f64(params, "lat_1")?,
             lat2: get_f64(params, "lat_2")?,
+            k0: get_scale(params)?,
             false_easting: get_meter_param(params, "x_0")?,
             false_northing: get_meter_param(params, "y_0")?,
         },

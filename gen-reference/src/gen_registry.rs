@@ -467,10 +467,21 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
         METHOD_LCC => [
             get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
             get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
-            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            // The 1SP method (9801) has no standard parallels: both fall
+            // back to the natural-origin latitude, and the scale factor
+            // applies at that origin.
+            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_FALSE_ORIGIN, LAT_ORIGIN]),
             get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
-            0.0,
-            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_scale(cp, &[SCALE_FACTOR]),
+            get_degrees(
+                cp,
+                &[
+                    LAT_2ND_PARALLEL,
+                    LAT_1ST_PARALLEL,
+                    LAT_FALSE_ORIGIN,
+                    LAT_ORIGIN,
+                ],
+            ),
             get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_ALBERS => [

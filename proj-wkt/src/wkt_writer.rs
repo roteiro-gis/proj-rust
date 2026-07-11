@@ -204,16 +204,26 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             lat0,
             lat1,
             lat2,
+            k0,
             false_easting,
             false_northing,
-        } => vec![
-            angle_param("latitude_of_origin", lat0),
-            angle_param("central_meridian", lon0),
-            angle_param("standard_parallel_1", lat1),
-            angle_param("standard_parallel_2", lat2),
-            length_param("false_easting", false_easting),
-            length_param("false_northing", false_northing),
-        ],
+        } => {
+            let mut params = vec![
+                angle_param("latitude_of_origin", lat0),
+                angle_param("central_meridian", lon0),
+                angle_param("standard_parallel_1", lat1),
+                angle_param("standard_parallel_2", lat2),
+            ];
+            // Only the 1SP variant carries a scale factor in WKT1.
+            if approx_eq(lat1, lat2) {
+                params.push(scale_param("scale_factor", k0));
+            }
+            params.extend([
+                length_param("false_easting", false_easting),
+                length_param("false_northing", false_northing),
+            ]);
+            params
+        }
         ProjectionMethod::AlbersEqualArea {
             lon0,
             lat0,
@@ -1355,6 +1365,7 @@ mod tests {
                 lat0: 33.0,
                 lat1: 33.0,
                 lat2: 33.0,
+                k0: 1.0,
                 false_easting: 0.0,
                 false_northing: 0.0,
             },
@@ -1469,6 +1480,7 @@ mod tests {
                     lat0: 33.0,
                     lat1: 33.0,
                     lat2: 33.0,
+                    k0: 1.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
                 },
@@ -1480,6 +1492,7 @@ mod tests {
                     lat0: 23.0,
                     lat1: 33.0,
                     lat2: 45.0,
+                    k0: 1.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
                 },

@@ -1770,6 +1770,26 @@
     "description": "NYC 4326→32662 EqCyl precise inverse"
   },
   {
+    "from_epsg": 4242,
+    "to_epsg": 24200,
+    "input_x": -76.8,
+    "input_y": 18.0,
+    "expected_x": 271181.2980760896,
+    "expected_y": 150011.4238461517,
+    "tolerance": 0.001,
+    "description": "Kingston 4242→24200 LCC 1SP"
+  },
+  {
+    "from_epsg": 24200,
+    "to_epsg": 4242,
+    "input_x": 271181.2980760896,
+    "input_y": 150011.4238461517,
+    "expected_x": -76.8,
+    "expected_y": 18.0,
+    "tolerance": 1e-9,
+    "description": "Kingston 24200→4242 LCC 1SP inverse"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

@@ -399,6 +399,7 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         "lambertconformalconic1sp" | "lambertconformalconic2sp" | "lambertconformalconic" => {
             ProjectionMethod::LambertConformalConic {
                 lon0,
+                k0,
                 lat0,
                 lat1: first_param(
                     &params,
