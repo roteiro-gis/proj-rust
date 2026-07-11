@@ -45,7 +45,7 @@ pub struct Transform {
     target: CrsDef,
     selected_operation_kind: SelectedOperationKind,
     selected_direction: OperationStepDirection,
-    selected_operation: CoordinateOperationMetadata,
+    selected_operation: std::sync::Arc<CoordinateOperationMetadata>,
     diagnostics: OperationSelectionDiagnostics,
     vertical_transform: VerticalTransform,
     selection_options: SelectionOptions,
@@ -240,7 +240,7 @@ impl Transform {
             target: to.clone(),
             selected_operation_kind: selected.operation,
             selected_direction: selected.direction,
-            selected_operation: selected.metadata,
+            selected_operation: std::sync::Arc::new(selected.metadata),
             diagnostics: selected.diagnostics,
             vertical_transform,
             selection_options: options,
@@ -410,7 +410,7 @@ impl Transform {
             fallback_pipelines.push(CompiledOperationFallback {
                 operation: fallback.operation.clone(),
                 direction,
-                metadata,
+                metadata: std::sync::Arc::new(metadata),
                 pipeline,
             });
         }
@@ -420,7 +420,7 @@ impl Transform {
             selected_reasons: self.diagnostics.selected_reasons.clone(),
             fallback_operations: fallback_pipelines
                 .iter()
-                .map(|fallback| fallback.metadata.clone())
+                .map(|fallback| (*fallback.metadata).clone())
                 .collect(),
             skipped_operations: Vec::new(),
             approximate: self.diagnostics.approximate,
@@ -431,7 +431,7 @@ impl Transform {
             target: self.source.clone(),
             selected_operation_kind,
             selected_direction,
-            selected_operation,
+            selected_operation: std::sync::Arc::new(selected_operation),
             diagnostics,
             vertical_transform,
             selection_options: inverse_options,

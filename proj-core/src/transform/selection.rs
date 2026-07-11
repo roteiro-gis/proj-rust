@@ -72,7 +72,7 @@ pub(super) fn compile_selected_pipelines(
                     fallback_pipelines.push(CompiledOperationFallback {
                         operation: candidate.operation.clone().into_owned(),
                         direction: candidate.direction,
-                        metadata,
+                        metadata: std::sync::Arc::new(metadata),
                         pipeline,
                     });
                 } else {
@@ -112,7 +112,7 @@ pub(super) fn compile_selected_pipelines(
             selected_reasons,
             fallback_operations: fallback_pipelines
                 .iter()
-                .map(|fallback| fallback.metadata.clone())
+                .map(|fallback| (*fallback.metadata).clone())
                 .collect(),
             skipped_operations,
             approximate: candidate.operation.approximate(),

@@ -34,7 +34,7 @@ pub(super) struct CompiledOperationPipeline {
 pub(super) struct CompiledOperationFallback {
     pub(super) operation: SelectedOperationKind,
     pub(super) direction: OperationStepDirection,
-    pub(super) metadata: CoordinateOperationMetadata,
+    pub(super) metadata: std::sync::Arc<CoordinateOperationMetadata>,
     pub(super) pipeline: CompiledOperationPipeline,
 }
 

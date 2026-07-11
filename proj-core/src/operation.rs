@@ -625,14 +625,18 @@ pub struct OperationSelectionDiagnostics {
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct GridCoverageMiss {
-    pub operation: CoordinateOperationMetadata,
+    /// Shared with the transform's compiled metadata; cloning an outcome
+    /// bumps a reference count instead of copying strings.
+    pub operation: std::sync::Arc<CoordinateOperationMetadata>,
     pub detail: String,
 }
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TransformOutcome<T> {
     pub coord: T,
-    pub operation: CoordinateOperationMetadata,
+    /// Shared with the transform's compiled metadata; cloning an outcome
+    /// bumps a reference count instead of copying strings.
+    pub operation: std::sync::Arc<CoordinateOperationMetadata>,
     pub vertical: VerticalTransformDiagnostics,
     pub grid_coverage_misses: Vec<GridCoverageMiss>,
 }
