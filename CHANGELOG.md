@@ -6,6 +6,9 @@
 - add `Transform::new_horizontal`, `Transform::new_horizontal_with_selection_options`, and `Transform::from_epsg_horizontal` for explicit XY-only transforms from compound authority-code CRSs without silently weakening the vertical-safe constructors
 - breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverse iterations report a structured `Error::NonConvergence { context, iterations }`
 - breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based (`to_coord(&self)`/`to_coord3d(&self)`), and `convert_batch`/`convert_batch_3d` no longer require `Clone`
+- breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`; diagnostics conversions share the compiled metadata instead of cloning strings per point
+- add `proj_wkt::to_wkt2`: WKT2 (ISO 19162) serialization for geographic, projected, and compound definitions, sharing the WKT1 serializer's mapping; roundtrips are asserted for all supported methods and fuzzed alongside WKT1
+- registry CRS names are served zero-copy from the embedded blob instead of leaking ~6.7k heap copies at first registry access
 - add `proj_wkt::to_projjson`: full-body PROJJSON serialization for geographic, projected, and compound definitions that reparses to equivalent definitions, sharing the WKT serializer's method/parameter/datum mapping; fixes latent parser gaps the roundtrip surfaced (strict datum equality in PROJJSON canonicalization, projection-method equivalence covering only 5 of 13 methods, unit type tags ignored during axis unit extraction) and adds a `projjson_roundtrip` fuzz target
 - `Transform` implements `Clone` (grid data is Arc-shared) and a summary-form `Debug`; a compile-time assertion pins `Send + Sync + Clone + Debug`
 - add an optional `serde` feature deriving `Serialize`/`Deserialize` for coordinate and operation-metadata value types
