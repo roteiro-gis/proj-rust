@@ -159,7 +159,8 @@ fn parse_db() -> RegistryDb {
         datums.insert(
             code,
             Datum::new(ellipsoid, to_wgs84)
-                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}")),
+                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}"))
+                .with_epsg(code),
         );
         datum_ellipsoid_codes.insert(code, ellipsoid_code);
         offset += DATUM_RECORD_SIZE;

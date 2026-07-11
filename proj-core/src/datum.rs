@@ -10,6 +10,8 @@ pub struct Datum {
     ellipsoid: Ellipsoid,
     /// Explicit relationship from this datum to WGS84.
     to_wgs84: DatumToWgs84,
+    /// EPSG geodetic datum code, or 0 when unspecified/custom.
+    epsg: u32,
 }
 
 impl Datum {
@@ -19,14 +21,27 @@ impl Datum {
         Ok(Self {
             ellipsoid,
             to_wgs84,
+            epsg: 0,
         })
     }
 
-    const fn new_unchecked(ellipsoid: Ellipsoid, to_wgs84: DatumToWgs84) -> Self {
+    const fn new_unchecked(ellipsoid: Ellipsoid, to_wgs84: DatumToWgs84, epsg: u32) -> Self {
         Self {
             ellipsoid,
             to_wgs84,
+            epsg,
         }
+    }
+
+    /// Attach the EPSG geodetic datum code this definition corresponds to.
+    pub fn with_epsg(mut self, epsg: u32) -> Self {
+        self.epsg = epsg;
+        self
+    }
+
+    /// EPSG geodetic datum code, or 0 when unspecified/custom.
+    pub const fn epsg(&self) -> u32 {
+        self.epsg
     }
 
     /// Return the reference ellipsoid.
@@ -62,19 +77,31 @@ impl Datum {
         }
     }
 
-    /// Returns true if two datums are the same (same ellipsoid, same Helmert parameters).
+    /// Returns true if two datums are the same.
+    ///
+    /// WGS84-compatible (`Identity`) datums form an equivalence class
+    /// regardless of code. Otherwise, when both sides carry an EPSG datum
+    /// code, code equality decides. Code-less (custom) datums fall back to
+    /// structural comparison, where two `Unknown` datums are never equal —
+    /// fail-closed for operation selection.
     pub fn same_datum(&self, other: &Datum) -> bool {
         let same_ellipsoid =
             (self.ellipsoid.semi_major_axis() - other.ellipsoid.semi_major_axis()).abs() < 1e-6
                 && (self.ellipsoid.flattening() - other.ellipsoid.flattening()).abs() < 1e-12;
 
+        if let (DatumToWgs84::Identity, DatumToWgs84::Identity) = (&self.to_wgs84, &other.to_wgs84)
+        {
+            return same_ellipsoid;
+        }
+        if self.epsg != 0 && other.epsg != 0 {
+            return self.epsg == other.epsg && same_ellipsoid;
+        }
+
         match (&self.to_wgs84, &other.to_wgs84) {
-            (DatumToWgs84::Identity, DatumToWgs84::Identity) => same_ellipsoid,
             (DatumToWgs84::Helmert(a), DatumToWgs84::Helmert(b)) => {
                 same_ellipsoid && a.approx_eq(b)
             }
             (DatumToWgs84::GridShift(a), DatumToWgs84::GridShift(b)) => same_ellipsoid && a == b,
-            (DatumToWgs84::Unknown, DatumToWgs84::Unknown) => false,
             _ => false,
         }
     }
@@ -295,21 +322,22 @@ impl HelmertParams {
 // ---------------------------------------------------------------------------
 
 /// WGS 84 datum.
-pub const WGS84: Datum = Datum::new_unchecked(ellipsoid::WGS84, DatumToWgs84::Identity);
+pub const WGS84: Datum = Datum::new_unchecked(ellipsoid::WGS84, DatumToWgs84::Identity, 6326);
 
 /// NAD83 datum (functionally identical to WGS84 for sub-meter work).
-pub const NAD83: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity);
+pub const NAD83: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity, 6269);
 
 /// NAD27 datum (Clarke 1866 ellipsoid).
 /// Helmert parameters from EPSG dataset (approximate continental US average).
 pub const NAD27: Datum = Datum::new_unchecked(
     ellipsoid::CLARKE1866,
     DatumToWgs84::Helmert(HelmertParams::translation_unchecked(-8.0, 160.0, 176.0)),
+    6267,
 );
 
 /// ETRS89 datum (European Terrestrial Reference System 1989).
 /// Functionally identical to WGS84 for most purposes.
-pub const ETRS89: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity);
+pub const ETRS89: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity, 6258);
 
 /// OSGB36 datum (Ordnance Survey Great Britain 1936).
 pub const OSGB36: Datum = Datum::new_unchecked(
@@ -317,18 +345,21 @@ pub const OSGB36: Datum = Datum::new_unchecked(
     DatumToWgs84::Helmert(HelmertParams::new_unchecked(
         446.448, -125.157, 542.060, 0.1502, 0.2470, 0.8421, -20.4894,
     )),
+    6277,
 );
 
 /// Pulkovo 1942 datum (used in Russia and former Soviet states).
 pub const PULKOVO1942: Datum = Datum::new_unchecked(
     ellipsoid::KRASSOWSKY,
     DatumToWgs84::Helmert(HelmertParams::translation_unchecked(23.92, -141.27, -80.9)),
+    6284,
 );
 
 /// ED50 datum (European Datum 1950).
 pub const ED50: Datum = Datum::new_unchecked(
     ellipsoid::INTL1924,
     DatumToWgs84::Helmert(HelmertParams::translation_unchecked(-87.0, -98.0, -121.0)),
+    6230,
 );
 
 /// Tokyo datum (used in Japan).
@@ -337,6 +368,7 @@ pub const TOKYO: Datum = Datum::new_unchecked(
     DatumToWgs84::Helmert(HelmertParams::translation_unchecked(
         -146.414, 507.337, 680.507,
     )),
+    6301,
 );
 
 #[cfg(test)]
