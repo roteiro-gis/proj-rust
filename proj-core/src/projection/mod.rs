@@ -593,6 +593,20 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
                 *false_northing,
             )?,
         )),
+        ProjectionMethod::PolarStereographicVariantC {
+            lon0,
+            lat_ts,
+            easting_false_origin,
+            northing_false_origin,
+        } => Ok(Projection::PolarStereographic(
+            polar_stereographic::PolarStereographic::new_variant_c(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat_ts.to_radians(),
+                *easting_false_origin,
+                *northing_false_origin,
+            )?,
+        )),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,

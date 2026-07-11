@@ -894,6 +894,20 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+
+    /// Polar Stereographic variant C (EPSG method 9830): defined by a
+    /// standard parallel, with the false origin on that parallel instead of
+    /// at the pole (Terre Adelie grids).
+    PolarStereographicVariantC {
+        /// Longitude of origin (degrees).
+        lon0: f64,
+        /// Latitude of standard parallel (degrees).
+        lat_ts: f64,
+        /// Easting at false origin (meters).
+        easting_false_origin: f64,
+        /// Northing at false origin (meters).
+        northing_false_origin: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1147,6 +1161,21 @@ impl ProjectionMethod {
                 0.0,
                 0.0,
             ],
+            ProjectionMethod::PolarStereographicVariantC {
+                lon0,
+                lat_ts,
+                easting_false_origin,
+                northing_false_origin,
+            } => [
+                lon0,
+                lat_ts,
+                easting_false_origin,
+                northing_false_origin,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
         }
     }
 }
@@ -1237,6 +1266,12 @@ mod tests {
                 lat0: 13.472_466_333_333_33,
                 false_easting: 50_000.0,
                 false_northing: 50_000.0,
+            },
+            ProjectionMethod::PolarStereographicVariantC {
+                lon0: 140.0,
+                lat_ts: -67.0,
+                easting_false_origin: 300_000.0,
+                northing_false_origin: 200_000.0,
             },
         ];
         for method in &methods {

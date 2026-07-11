@@ -91,6 +91,43 @@ impl PolarStereographic {
             t_polar: compute_t_polar(e),
         })
     }
+
+    /// Variant C (EPSG method 9830): the cone geometry of the standard-
+    /// parallel form, but with the false origin on the standard parallel
+    /// instead of at the pole. Equivalent to the lat_ts form with the false
+    /// northing offset by ρF = a·mF, the radius of the standard parallel.
+    pub(crate) fn new_variant_c(
+        ellipsoid: Ellipsoid,
+        lon0: f64,
+        lat_ts: f64,
+        easting_false_origin: f64,
+        northing_false_origin: f64,
+    ) -> Result<Self> {
+        validate_latitude_param("latitude of standard parallel", lat_ts)?;
+        validate_offset("northing at false origin", northing_false_origin)?;
+        if (lat_ts.abs() - FRAC_PI_2).abs() < 1e-10 {
+            return Err(Error::InvalidDefinition(
+                "Polar Stereographic variant C requires a standard parallel off the pole".into(),
+            ));
+        }
+        let e2 = ellipsoid.e2();
+        let sin_ts = lat_ts.sin();
+        let rho_f =
+            ellipsoid.semi_major_axis() * lat_ts.cos() / (1.0 - e2 * sin_ts * sin_ts).sqrt();
+        let effective_false_northing = if lat_ts >= 0.0 {
+            northing_false_origin + rho_f
+        } else {
+            northing_false_origin - rho_f
+        };
+        Self::new(
+            ellipsoid,
+            lon0,
+            lat_ts,
+            1.0,
+            easting_false_origin,
+            effective_false_northing,
+        )
+    }
 }
 
 /// Compute t at the pole: t(90°) = exp(-e * atanh(e)) = ((1-e)/(1+e))^(e/2)
@@ -209,6 +246,51 @@ mod tests {
             .unwrap();
         assert!(x.abs() < 0.01, "x = {x}");
         assert!(y.abs() < 0.01, "y = {y}");
+    }
+
+    /// The EPSG Guidance Note 7-2 worked example for variant C
+    /// (EPSG:2985, Petrels 1972 / Terre Adelie Polar Stereographic).
+    /// C PROJ does not implement method 9830, so the guidance note is the
+    /// authoritative reference.
+    #[test]
+    fn variant_c_matches_epsg_worked_example() {
+        let proj = PolarStereographic::new_variant_c(
+            ellipsoid::INTL1924,
+            140.0_f64.to_radians(),
+            (-67.0_f64).to_radians(),
+            300_000.0,
+            200_000.0,
+        )
+        .unwrap();
+        // 66°36'18.820"S, 140°04'17.040"E
+        let lat: f64 = -(66.0 + 36.0 / 60.0 + 18.820 / 3600.0);
+        let lon: f64 = 140.0 + 4.0 / 60.0 + 17.040 / 3600.0;
+        let (x, y) = proj.forward(lon.to_radians(), lat.to_radians()).unwrap();
+        assert!((x - 303_169.52).abs() < 1e-2, "x = {x}");
+        assert!((y - 244_055.72).abs() < 1e-2, "y = {y}");
+        let (lon2, lat2) = proj.inverse(303_169.522, 244_055.721).unwrap();
+        assert!(
+            (lon2.to_degrees() - lon).abs() < 1e-7,
+            "{}",
+            lon2.to_degrees()
+        );
+        assert!(
+            (lat2.to_degrees() - lat).abs() < 1e-7,
+            "{}",
+            lat2.to_degrees()
+        );
+    }
+
+    #[test]
+    fn variant_c_rejects_polar_standard_parallel() {
+        assert!(PolarStereographic::new_variant_c(
+            ellipsoid::WGS84,
+            0.0,
+            (-90.0_f64).to_radians(),
+            0.0,
+            0.0
+        )
+        .is_err());
     }
 
     #[test]

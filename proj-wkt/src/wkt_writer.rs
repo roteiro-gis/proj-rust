@@ -153,6 +153,7 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         ProjectionMethod::AmericanPolyconic { .. } => "Polyconic",
         ProjectionMethod::AzimuthalEquidistant { .. } => "Azimuthal_Equidistant",
         ProjectionMethod::GuamProjection { .. } => "Guam_Projection",
+        ProjectionMethod::PolarStereographicVariantC { .. } => "Polar_Stereographic_Variant_C",
         ProjectionMethod::LambertConformalConicMichigan { .. } => {
             "Lambert_Conformal_Conic_2SP_Michigan"
         }
@@ -468,6 +469,17 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::PolarStereographicVariantC {
+            lon0,
+            lat_ts,
+            easting_false_origin,
+            northing_false_origin,
+        } => vec![
+            angle_param("standard_parallel_1", lat_ts),
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", easting_false_origin),
+            length_param("false_northing", northing_false_origin),
         ],
     }
 }
@@ -1802,6 +1814,15 @@ mod tests {
                     lat0: 13.47246633333333,
                     false_easting: 50_000.0,
                     false_northing: 50_000.0,
+                },
+            ),
+            (
+                "Polar Stereographic Variant C",
+                ProjectionMethod::PolarStereographicVariantC {
+                    lon0: 140.0,
+                    lat_ts: -67.0,
+                    easting_false_origin: 300_000.0,
+                    northing_false_origin: 200_000.0,
                 },
             ),
         ]
