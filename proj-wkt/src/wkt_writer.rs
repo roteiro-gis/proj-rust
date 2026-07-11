@@ -512,7 +512,7 @@ fn ellipsoid_wkt(ellipsoid: proj_core::Ellipsoid, epsg: Option<u32>) -> Ellipsoi
     }
 }
 
-fn linear_unit_wkt(unit: LinearUnit) -> Result<LinearUnitWkt> {
+pub(crate) fn linear_unit_wkt(unit: LinearUnit) -> Result<LinearUnitWkt> {
     let factor = checked_number("linear unit", "meters_per_unit", unit.meters_per_unit())?;
     if approx_eq(factor, 1.0) {
         return Ok(LinearUnitWkt {
@@ -569,7 +569,7 @@ fn wkt_name<'a>(name: &'a str, fallback: &'a str) -> &'a str {
     }
 }
 
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     format!(r#""{}""#, value.replace('"', "\"\""))
 }
 
@@ -583,7 +583,7 @@ fn checked_number(method: &str, name: &str, value: f64) -> Result<f64> {
     }
 }
 
-fn format_f64(value: f64) -> String {
+pub(crate) fn format_f64(value: f64) -> String {
     if value == 0.0 {
         "0".to_string()
     } else if (value - value.round()).abs() <= 1e-9 {
@@ -689,10 +689,10 @@ pub(crate) struct EllipsoidWkt {
     pub(crate) inverse_flattening: f64,
 }
 
-struct LinearUnitWkt {
-    name: &'static str,
-    factor: String,
-    epsg: Option<u32>,
+pub(crate) struct LinearUnitWkt {
+    pub(crate) name: &'static str,
+    pub(crate) factor: String,
+    pub(crate) epsg: Option<u32>,
 }
 
 fn known_datum(code: u32) -> Option<&'static DatumTemplate> {

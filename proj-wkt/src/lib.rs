@@ -49,6 +49,7 @@ mod projjson;
 mod projjson_writer;
 mod semantics;
 mod wkt;
+mod wkt2_writer;
 mod wkt_writer;
 
 use proj_core::{
@@ -110,6 +111,17 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
 /// meters.
 pub fn to_wkt(crs: &CrsDef) -> Result<String> {
     wkt_writer::to_wkt(crs)
+}
+
+/// Serialize a CRS definition as WKT2 (ISO 19162) `GEOGCRS`, `PROJCRS`, or
+/// `COMPOUNDCRS`.
+///
+/// Projection false easting/northing parameters are emitted in the CRS native
+/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
+/// meters. The emitted text reparses through [`parse_crs`] to an equivalent
+/// definition.
+pub fn to_wkt2(crs: &CrsDef) -> Result<String> {
+    wkt2_writer::to_wkt2(crs)
 }
 
 /// Serialize a CRS definition as PROJJSON.
