@@ -235,6 +235,15 @@ fn corpus_has_adequate_coverage() {
         epsg_targets.contains(&29101),
         "missing SAD69 Brazil Polyconic"
     );
+    assert!(
+        epsg_targets.contains(&27701),
+        "missing Equi7 Africa Azimuthal Equidistant"
+    );
+    assert!(epsg_targets.contains(&3993), "missing Guam Projection");
+    assert!(
+        epsg_targets.contains(&3295),
+        "missing Modified Azimuthal Equidistant"
+    );
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));

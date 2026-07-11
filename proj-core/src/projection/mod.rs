@@ -1,5 +1,6 @@
 pub(crate) mod albers_equal_area;
 pub(crate) mod american_polyconic;
+pub(crate) mod azimuthal_equidistant;
 pub(crate) mod cassini_soldner;
 pub(crate) mod colombia_urban;
 pub(crate) mod equal_earth;
@@ -47,38 +48,95 @@ pub(crate) fn converge(
     })
 }
 
-/// Coefficients for the meridional-arc series to e⁸, matching C PROJ's
-/// `pj_enfn`.
-pub(crate) fn meridian_arc_coefficients(es: f64) -> [f64; 5] {
-    const C00: f64 = 1.0;
-    const C02: f64 = 0.25;
-    const C04: f64 = 0.046875;
-    const C06: f64 = 0.01953125;
-    const C08: f64 = 0.01068115234375;
-    const C22: f64 = 0.75;
-    const C44: f64 = 0.46875;
-    const C46: f64 = 0.013020833333333334;
-    const C48: f64 = 0.007120768229166667;
-    const C66: f64 = 0.3645833333333333;
-    const C68: f64 = 0.005696614583333333;
-    const C88: f64 = 0.3076171875;
+/// Order of the meridional-arc expansion in the third flattening `n`;
+/// full double precision for |f| ≤ 1/150.
+const MERIDIAN_ARC_ORDER: usize = 6;
 
-    let t = es * es;
-    [
-        C00 - es * (C02 + es * (C04 + es * (C06 + es * C08))),
-        es * (C22 - es * (C04 + es * (C06 + es * C08))),
-        t * (C44 - es * (C46 + es * C48)),
-        t * es * (C66 - es * C68),
-        t * t * C88,
-    ]
+/// Coefficients for the meridional-arc series and its inverse, matching
+/// C PROJ's `pj_enfn`: a 6th-order expansion in the third flattening
+/// (Karney, arXiv:2212.05818). Layout: `[0]` is the rectifying-radius
+/// multiplier, `[1..=6]` convert φ→μ, `[7..=12]` convert μ→φ.
+pub(crate) fn meridian_arc_coefficients(es: f64) -> [f64; 13] {
+    // Third flattening n = (a - b) / (a + b) from the eccentricity squared.
+    let one_minus_f = (1.0 - es).sqrt();
+    let n = (1.0 - one_minus_f) / (1.0 + one_minus_f);
+
+    // Expansion of (quarter meridian) / ((a+b)/2 * π/2) as a series in n²;
+    // the coefficients are ((2k-3)!! / (2k)!!)² for k = 0..3.
+    const COEFF_RAD: [f64; 4] = [1.0, 1.0 / 4.0, 1.0 / 64.0, 1.0 / 256.0];
+    // φ→μ, Eq. A5 with zero terms dropped.
+    const COEFF_MU_PHI: [f64; 12] = [
+        -3.0 / 2.0,
+        9.0 / 16.0,
+        -3.0 / 32.0,
+        15.0 / 16.0,
+        -15.0 / 32.0,
+        135.0 / 2048.0,
+        -35.0 / 48.0,
+        105.0 / 256.0,
+        315.0 / 512.0,
+        -189.0 / 512.0,
+        -693.0 / 1280.0,
+        1001.0 / 2048.0,
+    ];
+    // μ→φ, Eq. A6 with zero terms dropped.
+    const COEFF_PHI_MU: [f64; 12] = [
+        3.0 / 2.0,
+        -27.0 / 32.0,
+        269.0 / 512.0,
+        21.0 / 16.0,
+        -55.0 / 32.0,
+        6759.0 / 4096.0,
+        151.0 / 96.0,
+        -417.0 / 128.0,
+        1097.0 / 512.0,
+        -15543.0 / 2560.0,
+        8011.0 / 2560.0,
+        293393.0 / 61440.0,
+    ];
+
+    fn polyval(x: f64, p: &[f64]) -> f64 {
+        p.iter().rev().fold(0.0, |y, &c| y * x + c)
+    }
+
+    let n2 = n * n;
+    let mut en = [0.0; 2 * MERIDIAN_ARC_ORDER + 1];
+    en[0] = polyval(n2, &COEFF_RAD[..=MERIDIAN_ARC_ORDER / 2]) / (1.0 + n);
+    let mut d = n;
+    let mut o = 0;
+    for l in 0..MERIDIAN_ARC_ORDER {
+        let m = (MERIDIAN_ARC_ORDER - l - 1) / 2;
+        en[l + 1] = d * polyval(n2, &COEFF_MU_PHI[o..=o + m]);
+        en[l + 1 + MERIDIAN_ARC_ORDER] = d * polyval(n2, &COEFF_PHI_MU[o..=o + m]);
+        d *= n;
+        o += m + 1;
+    }
+    en
+}
+
+/// Evaluate `sum(c[k] * sin((2k+2)·ζ))` by Clenshaw summation.
+fn clenshaw(sin_zeta: f64, cos_zeta: f64, c: &[f64]) -> f64 {
+    let x = 2.0 * (cos_zeta - sin_zeta) * (cos_zeta + sin_zeta);
+    let (mut u0, mut u1) = (0.0, 0.0);
+    for &coeff in c.iter().rev() {
+        let t = x * u0 - u1 + coeff;
+        u1 = u0;
+        u0 = t;
+    }
+    2.0 * sin_zeta * cos_zeta * u0
 }
 
 /// Meridional arc length from the equator to latitude φ, in semi-major-axis
 /// units (C PROJ's `pj_mlfn`).
-pub(crate) fn meridian_arc(phi: f64, sin_phi: f64, cos_phi: f64, en: &[f64; 5]) -> f64 {
-    let cs = cos_phi * sin_phi;
-    let s2 = sin_phi * sin_phi;
-    en[0] * phi - cs * (en[1] + s2 * (en[2] + s2 * (en[3] + s2 * en[4])))
+pub(crate) fn meridian_arc(phi: f64, sin_phi: f64, cos_phi: f64, en: &[f64; 13]) -> f64 {
+    en[0] * (phi + clenshaw(sin_phi, cos_phi, &en[1..=MERIDIAN_ARC_ORDER]))
+}
+
+/// Latitude φ from the meridional arc length, in semi-major-axis units
+/// (C PROJ's `pj_inv_mlfn`).
+pub(crate) fn inverse_meridian_arc(ml: f64, en: &[f64; 13]) -> f64 {
+    let mu = ml / en[0];
+    mu + clenshaw(mu.sin(), mu.cos(), &en[MERIDIAN_ARC_ORDER + 1..])
 }
 
 /// Authalic `q` for geodetic latitude `lat` (Snyder 3-12), shared by the
@@ -158,6 +216,8 @@ pub(crate) enum Projection {
     Krovak(krovak::Krovak),
     EqualEarth(equal_earth::EqualEarth),
     AmericanPolyconic(american_polyconic::AmericanPolyconic),
+    AzimuthalEquidistant(azimuthal_equidistant::AzimuthalEquidistant),
+    GuamProjection(azimuthal_equidistant::GuamProjection),
     Mercator(mercator::Mercator),
     EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
 }
@@ -178,6 +238,8 @@ impl Projection {
             Projection::Krovak(proj) => proj.forward(lon, lat),
             Projection::EqualEarth(proj) => proj.forward(lon, lat),
             Projection::AmericanPolyconic(proj) => proj.forward(lon, lat),
+            Projection::AzimuthalEquidistant(proj) => proj.forward(lon, lat),
+            Projection::GuamProjection(proj) => proj.forward(lon, lat),
             Projection::Mercator(proj) => proj.forward(lon, lat),
             Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
         }
@@ -198,6 +260,8 @@ impl Projection {
             Projection::Krovak(proj) => proj.inverse(x, y),
             Projection::EqualEarth(proj) => proj.inverse(x, y),
             Projection::AmericanPolyconic(proj) => proj.inverse(x, y),
+            Projection::AzimuthalEquidistant(proj) => proj.inverse(x, y),
+            Projection::GuamProjection(proj) => proj.inverse(x, y),
             Projection::Mercator(proj) => proj.inverse(x, y),
             Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
         }
@@ -494,6 +558,34 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             false_northing,
         } => Ok(Projection::AmericanPolyconic(
             american_polyconic::AmericanPolyconic::new(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
+        ProjectionMethod::AzimuthalEquidistant {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::AzimuthalEquidistant(
+            azimuthal_equidistant::AzimuthalEquidistant::new(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
+        ProjectionMethod::GuamProjection {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::GuamProjection(
+            azimuthal_equidistant::GuamProjection::new(
                 datum.ellipsoid(),
                 lon0.to_radians(),
                 lat0.to_radians(),

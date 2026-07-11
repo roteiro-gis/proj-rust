@@ -1002,6 +1002,44 @@ fn main() {
         "Brasilia 4618→29101 SAD69 Brazil Polyconic",
     ));
 
+    // Azimuthal Equidistant (EPSG methods 1125/9832) and Guam (9831).
+    // WGS 84 / Equi7 Africa is projection-only from 4326; the Guam 1963
+    // pairs are same-datum.
+    points.extend(transform(
+        4326,
+        27701,
+        36.82,
+        -1.29,
+        1e-3,
+        "Nairobi 4326→27701 Equi7 Africa Azimuthal Equidistant",
+    ));
+    if let Some(fwd) = transform(4326, 27701, 36.82, -1.29, 1e-3, "") {
+        points.extend(transform(
+            27701,
+            4326,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Nairobi 27701→4326 Equi7 Africa inverse",
+        ));
+    }
+    points.extend(transform(
+        4675,
+        3993,
+        144.635_331_291_666_66,
+        13.339_038_461_111_11,
+        1e-3,
+        "Guam 4675→3993 Guam SPCS Guam Projection",
+    ));
+    points.extend(transform(
+        4675,
+        3295,
+        138.193_030_011_040_92,
+        9.596_525_859_439_623,
+        1e-3,
+        "Yap 4675→3295 Modified Azimuthal Equidistant",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

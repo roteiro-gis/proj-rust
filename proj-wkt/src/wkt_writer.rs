@@ -151,6 +151,8 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         ProjectionMethod::KrovakModifiedNorthOrientated { .. } => "Krovak_Modified",
         ProjectionMethod::EqualEarth { .. } => "Equal_Earth",
         ProjectionMethod::AmericanPolyconic { .. } => "Polyconic",
+        ProjectionMethod::AzimuthalEquidistant { .. } => "Azimuthal_Equidistant",
+        ProjectionMethod::GuamProjection { .. } => "Guam_Projection",
         ProjectionMethod::LambertConformalConicMichigan { .. } => {
             "Lambert_Conformal_Conic_2SP_Michigan"
         }
@@ -435,6 +437,28 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             length_param("false_northing", false_northing),
         ],
         ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::AzimuthalEquidistant {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_center", lat0),
+            angle_param("longitude_of_center", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::GuamProjection {
             lon0,
             lat0,
             false_easting,
@@ -1760,6 +1784,24 @@ mod tests {
                     lat0: 0.0,
                     false_easting: 5_000_000.0,
                     false_northing: 10_000_000.0,
+                },
+            ),
+            (
+                "Azimuthal Equidistant",
+                ProjectionMethod::AzimuthalEquidistant {
+                    lon0: 21.5,
+                    lat0: 8.5,
+                    false_easting: 5_621_452.02,
+                    false_northing: 5_990_638.423,
+                },
+            ),
+            (
+                "Guam Projection",
+                ProjectionMethod::GuamProjection {
+                    lon0: 144.74875069444445,
+                    lat0: 13.47246633333333,
+                    false_easting: 50_000.0,
+                    false_northing: 50_000.0,
                 },
             ),
         ]

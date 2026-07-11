@@ -329,6 +329,20 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
             false_easting: fe,
             false_northing: fn_,
         },
+        "azimuthalequidistant" | "modifiedazimuthalequidistant" => {
+            ProjectionMethod::AzimuthalEquidistant {
+                lon0,
+                lat0,
+                false_easting: fe,
+                false_northing: fn_,
+            }
+        }
+        "guamprojection" | "guam" => ProjectionMethod::GuamProjection {
+            lon0,
+            lat0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "krovak"
         | "krovaknorthorientated"
         | "krovakmodified"

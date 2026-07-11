@@ -58,6 +58,8 @@ pub const METHOD_KROVAK_NORTH_ORIENTATED: u8 = 17;
 pub const METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED: u8 = 18;
 pub const METHOD_EQUAL_EARTH: u8 = 19;
 pub const METHOD_AMERICAN_POLYCONIC: u8 = 20;
+pub const METHOD_AZIMUTHAL_EQUIDISTANT: u8 = 21;
+pub const METHOD_GUAM: u8 = 22;
 
 // Coordinate operation step tags.
 pub const OP_IDENTITY: u8 = 0;

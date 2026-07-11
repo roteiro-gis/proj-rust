@@ -1960,6 +1960,46 @@
     "description": "Brasilia 4618→29101 SAD69 Brazil Polyconic"
   },
   {
+    "from_epsg": 4326,
+    "to_epsg": 27701,
+    "input_x": 36.82,
+    "input_y": -1.29,
+    "expected_x": 7334614.446717742,
+    "expected_y": 4929069.685564423,
+    "tolerance": 0.001,
+    "description": "Nairobi 4326→27701 Equi7 Africa Azimuthal Equidistant"
+  },
+  {
+    "from_epsg": 27701,
+    "to_epsg": 4326,
+    "input_x": 7334614.446717742,
+    "input_y": 4929069.685564423,
+    "expected_x": 36.82,
+    "expected_y": -1.2900000000000014,
+    "tolerance": 1e-7,
+    "description": "Nairobi 27701→4326 Equi7 Africa inverse"
+  },
+  {
+    "from_epsg": 4675,
+    "to_epsg": 3993,
+    "input_x": 144.63533129166666,
+    "input_y": 13.33903846111111,
+    "expected_x": 37712.481054354175,
+    "expected_y": 35242.00113900984,
+    "tolerance": 0.001,
+    "description": "Guam 4675→3993 Guam SPCS Guam Projection"
+  },
+  {
+    "from_epsg": 4675,
+    "to_epsg": 3295,
+    "input_x": 138.19303001104092,
+    "input_y": 9.596525859439623,
+    "expected_x": 42665.90522385725,
+    "expected_y": 65509.825381037896,
+    "tolerance": 0.001,
+    "description": "Yap 4675→3295 Modified Azimuthal Equidistant"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

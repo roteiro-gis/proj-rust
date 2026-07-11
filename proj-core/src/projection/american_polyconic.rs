@@ -23,7 +23,7 @@ pub(crate) struct AmericanPolyconic {
     lat0: f64,
     false_easting: f64,
     false_northing: f64,
-    en: [f64; 5],
+    en: [f64; 13],
     /// Meridional arc at the latitude of origin (adimensional; the negated
     /// origin latitude in the spherical case).
     ml0: f64,

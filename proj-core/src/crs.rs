@@ -868,6 +868,32 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+
+    /// Azimuthal Equidistant (EPSG methods 1125 and 9832): true distance and
+    /// azimuth from the projection centre.
+    AzimuthalEquidistant {
+        /// Longitude of natural origin (degrees).
+        lon0: f64,
+        /// Latitude of natural origin (degrees).
+        lat0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
+
+    /// Guam Projection (EPSG method 9831): the simplified azimuthal
+    /// equidistant used by the Guam and Yap island grids.
+    GuamProjection {
+        /// Longitude of natural origin (degrees).
+        lon0: f64,
+        /// Latitude of natural origin (degrees).
+        lat0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1099,6 +1125,18 @@ impl ProjectionMethod {
                 lat0,
                 false_easting,
                 false_northing,
+            }
+            | ProjectionMethod::AzimuthalEquidistant {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+            }
+            | ProjectionMethod::GuamProjection {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
             } => [
                 lon0,
                 lat0,
@@ -1187,6 +1225,18 @@ mod tests {
                 lat0: 0.0,
                 false_easting: 5_000_000.0,
                 false_northing: 10_000_000.0,
+            },
+            ProjectionMethod::AzimuthalEquidistant {
+                lon0: 21.5,
+                lat0: 8.5,
+                false_easting: 5_621_452.02,
+                false_northing: 5_990_638.423,
+            },
+            ProjectionMethod::GuamProjection {
+                lon0: 144.748_750_694_444_45,
+                lat0: 13.472_466_333_333_33,
+                false_easting: 50_000.0,
+                false_northing: 50_000.0,
             },
         ];
         for method in &methods {

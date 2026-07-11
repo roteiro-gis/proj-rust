@@ -345,6 +345,9 @@ mod tests {
             5516,  // Modified Krovak East North
             8857,  // Equal Earth
             5880,  // American Polyconic
+            27701, // Azimuthal Equidistant (Equi7 Africa)
+            3295,  // Modified Azimuthal Equidistant (Yap Islands)
+            3993,  // Guam Projection
             7415,  // compound projected + gravity height
             7678,  // compound geographic + ellipsoidal height
         ];
