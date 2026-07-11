@@ -343,6 +343,8 @@ mod tests {
             9549,  // Lambert conformal conic 1SP variant B
             5514,  // Krovak East North
             5516,  // Modified Krovak East North
+            8857,  // Equal Earth
+            5880,  // American Polyconic
             7415,  // compound projected + gravity height
             7678,  // compound geographic + ellipsoidal height
         ];

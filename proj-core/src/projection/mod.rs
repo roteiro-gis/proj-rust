@@ -1,4 +1,5 @@
 pub(crate) mod albers_equal_area;
+pub(crate) mod american_polyconic;
 pub(crate) mod cassini_soldner;
 pub(crate) mod colombia_urban;
 pub(crate) mod equal_earth;
@@ -44,6 +45,40 @@ pub(crate) fn converge(
         context,
         iterations: max_iterations,
     })
+}
+
+/// Coefficients for the meridional-arc series to e⁸, matching C PROJ's
+/// `pj_enfn`.
+pub(crate) fn meridian_arc_coefficients(es: f64) -> [f64; 5] {
+    const C00: f64 = 1.0;
+    const C02: f64 = 0.25;
+    const C04: f64 = 0.046875;
+    const C06: f64 = 0.01953125;
+    const C08: f64 = 0.01068115234375;
+    const C22: f64 = 0.75;
+    const C44: f64 = 0.46875;
+    const C46: f64 = 0.013020833333333334;
+    const C48: f64 = 0.007120768229166667;
+    const C66: f64 = 0.3645833333333333;
+    const C68: f64 = 0.005696614583333333;
+    const C88: f64 = 0.3076171875;
+
+    let t = es * es;
+    [
+        C00 - es * (C02 + es * (C04 + es * (C06 + es * C08))),
+        es * (C22 - es * (C04 + es * (C06 + es * C08))),
+        t * (C44 - es * (C46 + es * C48)),
+        t * es * (C66 - es * C68),
+        t * t * C88,
+    ]
+}
+
+/// Meridional arc length from the equator to latitude φ, in semi-major-axis
+/// units (C PROJ's `pj_mlfn`).
+pub(crate) fn meridian_arc(phi: f64, sin_phi: f64, cos_phi: f64, en: &[f64; 5]) -> f64 {
+    let cs = cos_phi * sin_phi;
+    let s2 = sin_phi * sin_phi;
+    en[0] * phi - cs * (en[1] + s2 * (en[2] + s2 * (en[3] + s2 * en[4])))
 }
 
 /// Authalic `q` for geodetic latitude `lat` (Snyder 3-12), shared by the
@@ -122,6 +157,7 @@ pub(crate) enum Projection {
     ColombiaUrban(colombia_urban::ColombiaUrban),
     Krovak(krovak::Krovak),
     EqualEarth(equal_earth::EqualEarth),
+    AmericanPolyconic(american_polyconic::AmericanPolyconic),
     Mercator(mercator::Mercator),
     EquidistantCylindrical(equidistant_cylindrical::EquidistantCylindrical),
 }
@@ -141,6 +177,7 @@ impl Projection {
             Projection::ColombiaUrban(proj) => proj.forward(lon, lat),
             Projection::Krovak(proj) => proj.forward(lon, lat),
             Projection::EqualEarth(proj) => proj.forward(lon, lat),
+            Projection::AmericanPolyconic(proj) => proj.forward(lon, lat),
             Projection::Mercator(proj) => proj.forward(lon, lat),
             Projection::EquidistantCylindrical(proj) => proj.forward(lon, lat),
         }
@@ -160,6 +197,7 @@ impl Projection {
             Projection::ColombiaUrban(proj) => proj.inverse(x, y),
             Projection::Krovak(proj) => proj.inverse(x, y),
             Projection::EqualEarth(proj) => proj.inverse(x, y),
+            Projection::AmericanPolyconic(proj) => proj.inverse(x, y),
             Projection::Mercator(proj) => proj.inverse(x, y),
             Projection::EquidistantCylindrical(proj) => proj.inverse(x, y),
         }
@@ -449,6 +487,20 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
             *false_easting,
             *false_northing,
         )?)),
+        ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::AmericanPolyconic(
+            american_polyconic::AmericanPolyconic::new(
+                datum.ellipsoid(),
+                lon0.to_radians(),
+                lat0.to_radians(),
+                *false_easting,
+                *false_northing,
+            )?,
+        )),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,

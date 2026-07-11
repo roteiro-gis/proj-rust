@@ -150,6 +150,7 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         ProjectionMethod::KrovakNorthOrientated { .. } => "Krovak",
         ProjectionMethod::KrovakModifiedNorthOrientated { .. } => "Krovak_Modified",
         ProjectionMethod::EqualEarth { .. } => "Equal_Earth",
+        ProjectionMethod::AmericanPolyconic { .. } => "Polyconic",
         ProjectionMethod::LambertConformalConicMichigan { .. } => {
             "Lambert_Conformal_Conic_2SP_Michigan"
         }
@@ -429,6 +430,17 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             false_easting,
             false_northing,
         } => vec![
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
             angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
@@ -1739,6 +1751,15 @@ mod tests {
                     lon0: -90.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
+                },
+            ),
+            (
+                "American Polyconic",
+                ProjectionMethod::AmericanPolyconic {
+                    lon0: -54.0,
+                    lat0: 0.0,
+                    false_easting: 5_000_000.0,
+                    false_northing: 10_000_000.0,
                 },
             ),
         ]

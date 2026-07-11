@@ -1930,6 +1930,36 @@
     "description": "Tokyo 4326→8859 Equal Earth Asia-Pacific"
   },
   {
+    "from_epsg": 4674,
+    "to_epsg": 5880,
+    "input_x": -43.2,
+    "input_y": -22.9,
+    "expected_x": 6107064.064791936,
+    "expected_y": 7425917.997233426,
+    "tolerance": 0.001,
+    "description": "Rio 4674→5880 SIRGAS 2000 Brazil Polyconic"
+  },
+  {
+    "from_epsg": 5880,
+    "to_epsg": 4674,
+    "input_x": 6107064.064791936,
+    "input_y": 7425917.997233426,
+    "expected_x": -43.20000000000001,
+    "expected_y": -22.900000000000002,
+    "tolerance": 1e-7,
+    "description": "Rio 5880→4674 Brazil Polyconic inverse"
+  },
+  {
+    "from_epsg": 4618,
+    "to_epsg": 29101,
+    "input_x": -47.9,
+    "input_y": -15.8,
+    "expected_x": 5653466.094584227,
+    "expected_y": 8243010.160282712,
+    "tolerance": 0.001,
+    "description": "Brasilia 4618→29101 SAD69 Brazil Polyconic"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

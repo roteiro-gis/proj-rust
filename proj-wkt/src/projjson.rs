@@ -323,6 +323,12 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
             false_easting: fe,
             false_northing: fn_,
         },
+        "polyconic" | "americanpolyconic" => ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "krovak"
         | "krovaknorthorientated"
         | "krovakmodified"

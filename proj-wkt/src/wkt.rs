@@ -511,6 +511,12 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
             false_easting: fe,
             false_northing: fn_,
         },
+        "polyconic" | "americanpolyconic" => ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "krovak"
         | "krovaknorthorientated"
         | "krovakmodified"

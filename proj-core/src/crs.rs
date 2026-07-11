@@ -855,6 +855,19 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+
+    /// American Polyconic (EPSG method 9818): each parallel projected as the
+    /// arc of a tangent cone.
+    AmericanPolyconic {
+        /// Longitude of natural origin (degrees).
+        lon0: f64,
+        /// Latitude of natural origin (degrees).
+        lat0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1081,6 +1094,21 @@ impl ProjectionMethod {
                 false_easting,
                 false_northing,
             } => [lon0, false_easting, false_northing, 0.0, 0.0, 0.0, 0.0, 0.0],
+            ProjectionMethod::AmericanPolyconic {
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
         }
     }
 }
@@ -1153,6 +1181,12 @@ mod tests {
                 k0: 0.9999,
                 false_easting: 5_000_000.0,
                 false_northing: 5_000_000.0,
+            },
+            ProjectionMethod::AmericanPolyconic {
+                lon0: -54.0,
+                lat0: 0.0,
+                false_easting: 5_000_000.0,
+                false_northing: 10_000_000.0,
             },
         ];
         for method in &methods {

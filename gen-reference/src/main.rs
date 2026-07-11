@@ -973,6 +973,35 @@ fn main() {
         "Tokyo 4326→8859 Equal Earth Asia-Pacific",
     ));
 
+    // American Polyconic (EPSG method 9818): Brazilian national grids.
+    // Same-datum pairs so the points exercise the projection only.
+    points.extend(transform(
+        4674,
+        5880,
+        -43.2,
+        -22.9,
+        1e-3,
+        "Rio 4674→5880 SIRGAS 2000 Brazil Polyconic",
+    ));
+    if let Some(fwd) = transform(4674, 5880, -43.2, -22.9, 1e-3, "") {
+        points.extend(transform(
+            5880,
+            4674,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Rio 5880→4674 Brazil Polyconic inverse",
+        ));
+    }
+    points.extend(transform(
+        4618,
+        29101,
+        -47.9,
+        -15.8,
+        1e-3,
+        "Brasilia 4618→29101 SAD69 Brazil Polyconic",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

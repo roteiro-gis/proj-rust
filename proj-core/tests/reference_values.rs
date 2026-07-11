@@ -227,6 +227,14 @@ fn corpus_has_adequate_coverage() {
         epsg_targets.contains(&8859),
         "missing Equal Earth Asia-Pacific"
     );
+    assert!(
+        epsg_targets.contains(&5880),
+        "missing SIRGAS 2000 Brazil Polyconic"
+    );
+    assert!(
+        epsg_targets.contains(&29101),
+        "missing SAD69 Brazil Polyconic"
+    );
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));

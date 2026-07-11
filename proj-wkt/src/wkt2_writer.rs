@@ -246,7 +246,7 @@ mod tests {
     fn registry_definitions_roundtrip_through_wkt2() {
         let codes = [
             4326, 4258, 3857, 32618, 3413, 2154, 5070, 3035, 3408, 28992, 3078, 2056, 30200, 3395,
-            32662, 6247, 24200, 6201, 9549, 5514, 5516, 7415, 7678,
+            32662, 6247, 24200, 6201, 9549, 5514, 5516, 8857, 5880, 7415, 7678,
         ];
         for code in codes {
             let original = parse_crs(&format!("EPSG:{code}")).unwrap();
