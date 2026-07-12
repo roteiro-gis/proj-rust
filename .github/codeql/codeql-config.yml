@@ -1,0 +1,7 @@
+# Coordinate values (latitude/longitude) are the domain data of this
+# library, not user location PII; error messages must describe the
+# out-of-range coordinate, which the cleartext-logging query misreads as
+# logging sensitive information.
+query-filters:
+  - exclude:
+      id: rust/cleartext-logging
