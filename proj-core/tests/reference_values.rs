@@ -244,6 +244,10 @@ fn corpus_has_adequate_coverage() {
         epsg_targets.contains(&3295),
         "missing Modified Azimuthal Equidistant"
     );
+    assert!(
+        epsg_targets.contains(&22780),
+        "missing grad-unit Levant Stereographic"
+    );
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));

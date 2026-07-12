@@ -29,7 +29,7 @@
   "output": {
     "file_name": "epsg.bin",
     "byte_len": 1096916,
-    "sha256": "sha256:1a1ce75fc64d4183aee04a17fc02601e0e5df651bdd1ca88c69bb1c7081fadc6"
+    "sha256": "sha256:8b0174660b97bebb4b2b868e647c29ed1af6ee6e3adf426b3f380d435fbcee67"
   },
   "counts": {
     "ellipsoids": 44,

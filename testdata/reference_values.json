@@ -2000,6 +2000,16 @@
     "description": "Yap 4675→3295 Modified Azimuthal Equidistant"
   },
   {
+    "from_epsg": 4227,
+    "to_epsg": 22780,
+    "input_x": 40.14,
+    "input_y": 35.33,
+    "expected_x": 89981.01614227482,
+    "expected_y": 125742.07454177662,
+    "tolerance": 0.001,
+    "description": "Deir ez Zor 4227→22780 Levant Stereographic (grads)"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

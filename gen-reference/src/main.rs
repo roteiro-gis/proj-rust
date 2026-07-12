@@ -1040,6 +1040,21 @@ fn main() {
         "Yap 4675→3295 Modified Azimuthal Equidistant",
     ));
 
+    // Grad-unit conversion parameters (regression: the generator once
+    // applied the arc-second factor to grads). Deir ez Zor is degree-based
+    // with grad projection parameters, so it exercises the fix without the
+    // grad-axis geographic CRS question (C PROJ keeps NTF (Paris) axes in
+    // grads while we normalize to degrees — the NTF Paris zones are pinned
+    // by a registry integration test instead).
+    points.extend(transform(
+        4227,
+        22780,
+        40.14,
+        35.33,
+        1e-3,
+        "Deir ez Zor 4227→22780 Levant Stereographic (grads)",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,
