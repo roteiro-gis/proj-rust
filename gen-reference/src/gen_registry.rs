@@ -141,8 +141,8 @@ use proj_epsg_format::{
     METHOD_ALBERS, METHOD_AMERICAN_POLYCONIC, METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER,
     METHOD_COLOMBIA_URBAN, METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
-    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LAEA,
-    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
+    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE,
+    METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
     METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
     PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
@@ -390,6 +390,7 @@ fn method_code_to_id(code: i64) -> Option<u8> {
         // C PROJ has no implementation of 9830; ours follows the EPSG
         // Guidance Note directly.
         9830 => Some(METHOD_POLAR_STEREO_VARIANT_C),
+        9813 => Some(METHOD_LABORDE),
         1024 => Some(METHOD_WEB_MERCATOR),
         _ => None,
     }
@@ -559,6 +560,15 @@ fn encode_params(
             get_meters(cp, &[EASTING_FALSE_ORIGIN], linear_uoms),
             get_meters(cp, &[NORTHING_FALSE_ORIGIN], linear_uoms),
             0.0,
+            0.0,
+        ],
+        METHOD_LABORDE => [
+            get_degrees(cp, &[LON_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[AZIMUTH_INITIAL_LINE], angle_uoms),
+            get_meters(cp, &[FALSE_EASTING], linear_uoms),
+            get_meters(cp, &[FALSE_NORTHING], linear_uoms),
+            get_scale(cp, &[SCALE_FACTOR_PROJECTION_CENTRE]),
             0.0,
         ],
         METHOD_EQUIDISTANT_CYL => [

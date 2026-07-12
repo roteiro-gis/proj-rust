@@ -908,6 +908,23 @@ pub enum ProjectionMethod {
         /// Northing at false origin (meters).
         northing_false_origin: f64,
     },
+
+    /// Laborde Oblique Mercator (EPSG method 9813): the Madagascar grid's
+    /// conformal-sphere oblique construction.
+    LabordeObliqueMercator {
+        /// Longitude of projection centre (degrees).
+        lon0: f64,
+        /// Latitude of projection centre (degrees).
+        lat0: f64,
+        /// Azimuth at projection centre (degrees).
+        azimuth: f64,
+        /// Scale factor at projection centre.
+        k0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1176,6 +1193,23 @@ impl ProjectionMethod {
                 0.0,
                 0.0,
             ],
+            ProjectionMethod::LabordeObliqueMercator {
+                lon0,
+                lat0,
+                azimuth,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                azimuth,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+            ],
         }
     }
 }
@@ -1272,6 +1306,14 @@ mod tests {
                 lat_ts: -67.0,
                 easting_false_origin: 300_000.0,
                 northing_false_origin: 200_000.0,
+            },
+            ProjectionMethod::LabordeObliqueMercator {
+                lon0: 46.437_229_166_666_67,
+                lat0: -18.9,
+                azimuth: 18.9,
+                k0: 0.9995,
+                false_easting: 400_000.0,
+                false_northing: 800_000.0,
             },
         ];
         for method in &methods {

@@ -7,6 +7,7 @@ pub(crate) mod equal_earth;
 pub(crate) mod equidistant_cylindrical;
 pub(crate) mod hotine_oblique_mercator;
 pub(crate) mod krovak;
+pub(crate) mod laborde;
 pub(crate) mod lambert_azimuthal_equal_area;
 pub(crate) mod lambert_conformal_conic;
 pub(crate) mod mercator;
@@ -214,6 +215,7 @@ pub(crate) enum Projection {
     CassiniSoldner(cassini_soldner::CassiniSoldner),
     ColombiaUrban(colombia_urban::ColombiaUrban),
     Krovak(krovak::Krovak),
+    Laborde(laborde::Laborde),
     EqualEarth(equal_earth::EqualEarth),
     AmericanPolyconic(american_polyconic::AmericanPolyconic),
     AzimuthalEquidistant(azimuthal_equidistant::AzimuthalEquidistant),
@@ -236,6 +238,7 @@ impl Projection {
             Projection::CassiniSoldner(proj) => proj.forward(lon, lat),
             Projection::ColombiaUrban(proj) => proj.forward(lon, lat),
             Projection::Krovak(proj) => proj.forward(lon, lat),
+            Projection::Laborde(proj) => proj.forward(lon, lat),
             Projection::EqualEarth(proj) => proj.forward(lon, lat),
             Projection::AmericanPolyconic(proj) => proj.forward(lon, lat),
             Projection::AzimuthalEquidistant(proj) => proj.forward(lon, lat),
@@ -258,6 +261,7 @@ impl Projection {
             Projection::CassiniSoldner(proj) => proj.inverse(x, y),
             Projection::ColombiaUrban(proj) => proj.inverse(x, y),
             Projection::Krovak(proj) => proj.inverse(x, y),
+            Projection::Laborde(proj) => proj.inverse(x, y),
             Projection::EqualEarth(proj) => proj.inverse(x, y),
             Projection::AmericanPolyconic(proj) => proj.inverse(x, y),
             Projection::AzimuthalEquidistant(proj) => proj.inverse(x, y),
@@ -607,6 +611,22 @@ pub(crate) fn make_projection(method: &ProjectionMethod, datum: &Datum) -> Resul
                 *northing_false_origin,
             )?,
         )),
+        ProjectionMethod::LabordeObliqueMercator {
+            lon0,
+            lat0,
+            azimuth,
+            k0,
+            false_easting,
+            false_northing,
+        } => Ok(Projection::Laborde(laborde::Laborde::new(
+            datum.ellipsoid(),
+            lon0.to_radians(),
+            lat0.to_radians(),
+            azimuth.to_radians(),
+            *k0,
+            *false_easting,
+            *false_northing,
+        )?)),
         ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts,

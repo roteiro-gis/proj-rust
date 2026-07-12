@@ -1055,6 +1055,27 @@ fn main() {
         "Deir ez Zor 4227→22780 Levant Stereographic (grads)",
     ));
 
+    // Laborde Oblique Mercator (EPSG method 9813): Madagascar. Same-datum
+    // pair; the Paris-based 29701 stays out of the corpus (grad axes).
+    points.extend(transform(
+        4297,
+        8441,
+        47.5,
+        -18.9,
+        1e-3,
+        "Antananarivo 4297→8441 Tananarive Laborde Grid",
+    ));
+    if let Some(fwd) = transform(4297, 8441, 47.5, -18.9, 1e-3, "") {
+        points.extend(transform(
+            8441,
+            4297,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Antananarivo 8441→4297 Laborde Grid inverse",
+        ));
+    }
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

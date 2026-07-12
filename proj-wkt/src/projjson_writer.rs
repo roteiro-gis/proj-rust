@@ -349,6 +349,7 @@ mod tests {
             3295,  // Modified Azimuthal Equidistant (Yap Islands)
             3993,  // Guam Projection
             2985,  // Polar Stereographic variant C (Terre Adelie)
+            8441,  // Laborde Oblique Mercator (Madagascar)
             7415,  // compound projected + gravity height
             7678,  // compound geographic + ellipsoidal height
         ];

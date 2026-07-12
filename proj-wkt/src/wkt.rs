@@ -631,6 +631,22 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
             easting_false_origin: fe,
             northing_false_origin: fn_,
         },
+        "labordeobliquemercator" | "laborde" => ProjectionMethod::LabordeObliqueMercator {
+            lon0,
+            lat0,
+            azimuth: first_param(
+                &params,
+                &[
+                    "azimuth",
+                    "azimuthatprojectioncenter",
+                    "azimuthatprojectioncentre",
+                ],
+            )
+            .unwrap_or(0.0),
+            k0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "equidistantcylindrical" | "platecarree" => ProjectionMethod::EquidistantCylindrical {
             lon0,
             lat_ts: first_param(

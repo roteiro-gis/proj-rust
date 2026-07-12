@@ -443,6 +443,22 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
             easting_false_origin: fe,
             northing_false_origin: fn_,
         },
+        "labordeobliquemercator" | "laborde" => ProjectionMethod::LabordeObliqueMercator {
+            lon0,
+            lat0,
+            azimuth: first_param(
+                &params,
+                &[
+                    "azimuth",
+                    "azimuthatprojectioncenter",
+                    "azimuthatprojectioncentre",
+                ],
+            )
+            .unwrap_or(0.0),
+            k0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
         "popularvisualisationpseudomercator" | "webmercator" => ProjectionMethod::WebMercator,
         "equidistantcylindrical" | "platecarree" => ProjectionMethod::EquidistantCylindrical {
             lon0,
