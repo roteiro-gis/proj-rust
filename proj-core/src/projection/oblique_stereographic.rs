@@ -105,22 +105,23 @@ fn conformal_latitude_from_isometric(psi: f64, n: f64, c: f64) -> f64 {
     (n * psi + 0.5 * c.ln()).tanh().clamp(-1.0, 1.0).asin()
 }
 
-fn geodetic_from_isometric(psi: f64, e: f64, e2: f64) -> f64 {
+fn geodetic_from_isometric(psi: f64, e: f64, e2: f64) -> Result<f64> {
+    let initial = 2.0 * psi.exp().atan() - std::f64::consts::FRAC_PI_2;
     if e.abs() < ECCENTRICITY_EPSILON {
-        return 2.0 * psi.exp().atan() - std::f64::consts::FRAC_PI_2;
+        return Ok(initial);
     }
 
-    let mut lat = 2.0 * psi.exp().atan() - std::f64::consts::FRAC_PI_2;
-    for _ in 0..15 {
-        let psi_i = isometric_latitude(lat, e);
-        let sin_lat = lat.sin();
-        let delta = (psi_i - psi) * lat.cos() * (1.0 - e2 * sin_lat * sin_lat) / (1.0 - e2);
-        lat -= delta;
-        if delta.abs() < 1e-14 {
-            break;
-        }
-    }
-    lat
+    super::converge(
+        "Oblique Stereographic inverse latitude",
+        initial,
+        15,
+        1e-14,
+        |lat| {
+            let psi_i = isometric_latitude(lat, e);
+            let sin_lat = lat.sin();
+            lat - (psi_i - psi) * lat.cos() * (1.0 - e2 * sin_lat * sin_lat) / (1.0 - e2)
+        },
+    )
 }
 
 impl super::ProjectionImpl for ObliqueStereographic {
@@ -156,7 +157,7 @@ impl super::ProjectionImpl for ObliqueStereographic {
         if rho < RHO_EPSILON {
             let psi =
                 (0.5 * ((1.0 + self.sin_chi0) / (self.c * (1.0 - self.sin_chi0))).ln()) / self.n;
-            let lat = geodetic_from_isometric(psi, self.e, self.e2);
+            let lat = geodetic_from_isometric(psi, self.e, self.e2)?;
             return ensure_finite_lon_lat("Oblique Stereographic", self.lon0, lat);
         }
 
@@ -168,7 +169,7 @@ impl super::ProjectionImpl for ObliqueStereographic {
         let d_lambda = (dx * sin_c).atan2(rho * self.cos_chi0 * cos_c - dy * self.sin_chi0 * sin_c);
 
         let psi = (0.5 * ((1.0 + chi.sin()) / (self.c * (1.0 - chi.sin()))).ln()) / self.n;
-        let lat = geodetic_from_isometric(psi, self.e, self.e2);
+        let lat = geodetic_from_isometric(psi, self.e, self.e2)?;
         let lon = self.lon0 + d_lambda / self.n;
 
         ensure_finite_lon_lat("Oblique Stereographic", lon, lat)

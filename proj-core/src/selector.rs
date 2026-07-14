@@ -599,6 +599,13 @@ fn compare_candidates(
                 .unwrap_or(Ordering::Equal)
         })
         .then_with(|| {
+            // Among equally accurate matches, prefer the operation scoped to
+            // the smaller (more specific) area of use, as C PROJ does.
+            matched_pseudo_area(left.matched_area_of_use.as_ref())
+                .partial_cmp(&matched_pseudo_area(right.matched_area_of_use.as_ref()))
+                .unwrap_or(Ordering::Equal)
+        })
+        .then_with(|| {
             left.operation
                 .deprecated()
                 .cmp(&right.operation.deprecated())
@@ -610,6 +617,21 @@ fn compare_candidates(
                 .cmp(&left.operation.grid_format_preference())
         })
         .then_with(|| right.operation.preferred().cmp(&left.operation.preferred()))
+}
+
+/// Spherical pseudo-area of a matched area of use: `(sin N − sin S)` times the
+/// antimeridian-aware longitude span. Only relative order matters; unmatched
+/// candidates rank as infinitely large.
+fn matched_pseudo_area(area: Option<&AreaOfUse>) -> f64 {
+    let Some(area) = area else {
+        return f64::INFINITY;
+    };
+    let width = if area.east >= area.west {
+        area.east - area.west
+    } else {
+        area.east - area.west + 360.0
+    };
+    (area.north.to_radians().sin() - area.south.to_radians().sin()) * width
 }
 
 fn operation_grid_format_preference(operation: &CoordinateOperation) -> u8 {

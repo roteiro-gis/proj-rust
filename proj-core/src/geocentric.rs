@@ -1,4 +1,5 @@
 use crate::ellipsoid::Ellipsoid;
+use crate::error::Result;
 
 /// Convert geodetic coordinates to geocentric (ECEF) coordinates.
 ///
@@ -36,7 +37,7 @@ pub(crate) fn geocentric_to_geodetic(
     x: f64,
     y: f64,
     z: f64,
-) -> (f64, f64, f64) {
+) -> Result<(f64, f64, f64)> {
     let a = ellipsoid.semi_major_axis();
     let b = ellipsoid.b();
     let e2 = ellipsoid.e2();
@@ -54,7 +55,7 @@ pub(crate) fn geocentric_to_geodetic(
             -std::f64::consts::FRAC_PI_2
         };
         let h = z.abs() - b;
-        return (lon, lat, h);
+        return Ok((lon, lat, h));
     }
 
     // Initial estimate using Bowring's formula
@@ -62,21 +63,20 @@ pub(crate) fn geocentric_to_geodetic(
     let sin_theta = theta.sin();
     let cos_theta = theta.cos();
 
-    let mut lat = (z + ep2 * b * sin_theta * sin_theta * sin_theta)
+    let initial = (z + ep2 * b * sin_theta * sin_theta * sin_theta)
         .atan2(p - e2 * a * cos_theta * cos_theta * cos_theta);
 
-    // Iterate for convergence
-    for _ in 0..10 {
-        let sin_lat = lat.sin();
-        let n = a / (1.0 - e2 * sin_lat * sin_lat).sqrt();
-        let new_lat = (z + e2 * n * sin_lat).atan2(p);
-
-        if (new_lat - lat).abs() < 1e-14 {
-            lat = new_lat;
-            break;
-        }
-        lat = new_lat;
-    }
+    let lat = crate::projection::converge(
+        "geocentric to geodetic latitude",
+        initial,
+        10,
+        1e-14,
+        |lat| {
+            let sin_lat = lat.sin();
+            let n = a / (1.0 - e2 * sin_lat * sin_lat).sqrt();
+            (z + e2 * n * sin_lat).atan2(p)
+        },
+    )?;
 
     let sin_lat = lat.sin();
     let n = a / (1.0 - e2 * sin_lat * sin_lat).sqrt();
@@ -86,7 +86,7 @@ pub(crate) fn geocentric_to_geodetic(
         z / lat.sin() - n * (1.0 - e2)
     };
 
-    (lon, lat, h)
+    Ok((lon, lat, h))
 }
 
 #[cfg(test)]
@@ -106,7 +106,7 @@ mod tests {
         assert!(y.abs() < 0.001, "y = {y}");
         assert!(z.abs() < 0.001, "z = {z}");
 
-        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
+        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z).unwrap();
         assert!((lon2 - lon).abs() < 1e-12, "lon: {lon2} vs {lon}");
         assert!((lat2 - lat).abs() < 1e-12, "lat: {lat2} vs {lat}");
         assert!((h2 - h).abs() < 0.001, "h: {h2} vs {h}");
@@ -120,7 +120,7 @@ mod tests {
         let h = 10.0;
 
         let (x, y, z) = geodetic_to_geocentric(e, lon, lat, h);
-        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
+        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z).unwrap();
 
         assert!(
             (lon2 - lon).abs() < 1e-12,
@@ -149,7 +149,7 @@ mod tests {
         assert!(y.abs() < 0.001);
         assert!((z - ellipsoid::WGS84.b()).abs() < 0.001, "z = {z}");
 
-        let (_lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
+        let (_lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z).unwrap();
         assert!((lat2 - lat).abs() < 1e-10, "lat: {lat2}");
         assert!(h2.abs() < 0.001, "h: {h2}");
     }
@@ -163,7 +163,7 @@ mod tests {
         let h = 100.0;
 
         let (x, y, z) = geodetic_to_geocentric(e, lon, lat, h);
-        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
+        let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z).unwrap();
 
         assert!((lon2 - lon).abs() < 1e-12);
         assert!((lat2 - lat).abs() < 1e-12);

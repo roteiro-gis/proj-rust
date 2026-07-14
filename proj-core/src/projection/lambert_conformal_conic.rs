@@ -82,20 +82,6 @@ fn t_func(lat: f64, e: f64) -> f64 {
     (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan() / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)
 }
 
-fn lat_from_t_lcc(t: f64, e: f64) -> f64 {
-    let mut lat = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
-    for _ in 0..15 {
-        let e_sin = e * lat.sin();
-        let new_lat = std::f64::consts::FRAC_PI_2
-            - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan();
-        if (new_lat - lat).abs() < 1e-14 {
-            return new_lat;
-        }
-        lat = new_lat;
-    }
-    lat
-}
-
 impl super::ProjectionImpl for LambertConformalConic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
@@ -118,7 +104,11 @@ impl super::ProjectionImpl for LambertConformalConic {
         let theta = dx.atan2(dy);
 
         let t = (rho / (self.a * self.f_const)).powf(1.0 / self.n);
-        let lat = lat_from_t_lcc(t, self.e);
+        let lat = super::latitude_from_conformal_t(
+            "Lambert Conformal Conic inverse latitude",
+            t,
+            self.e,
+        )?;
         let lon = self.lon0 + theta / self.n;
 
         ensure_finite_lon_lat("Lambert Conformal Conic", lon, lat)

@@ -261,23 +261,21 @@ impl SwissObliqueMercator {
         )?;
 
         let target = (self.k - isometric_latitude_sphere(chi)) / self.c;
-        let mut lat = chi;
-        for _ in 0..SWISS_INVERSE_ITERATIONS {
-            let e_sin = self.e * lat.sin();
-            let delta = (target + isometric_latitude_ellipsoid(lat, self.half_e, e_sin))
-                * (1.0 - e_sin * e_sin)
-                * lat.cos()
-                / self.one_minus_e2;
-            lat -= delta;
-            if delta.abs() < SWISS_INVERSE_TOLERANCE {
-                let lon = self.lon0 + lambda / self.c;
-                return ensure_finite_lon_lat("Swiss Oblique Mercator", lon, lat);
-            }
-        }
-
-        Err(Error::OutOfRange(
-            "Swiss Oblique Mercator inverse did not converge".into(),
-        ))
+        let lat = crate::projection::converge(
+            "Swiss Oblique Mercator inverse latitude",
+            chi,
+            SWISS_INVERSE_ITERATIONS,
+            SWISS_INVERSE_TOLERANCE,
+            |lat| {
+                let e_sin = self.e * lat.sin();
+                lat - (target + isometric_latitude_ellipsoid(lat, self.half_e, e_sin))
+                    * (1.0 - e_sin * e_sin)
+                    * lat.cos()
+                    / self.one_minus_e2
+            },
+        )?;
+        let lon = self.lon0 + lambda / self.c;
+        ensure_finite_lon_lat("Swiss Oblique Mercator", lon, lat)
     }
 }
 
@@ -311,24 +309,6 @@ fn t_func(lat: f64, e: f64) -> f64 {
     let sin_lat = lat.sin();
     let e_sin = e * sin_lat;
     (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan() / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)
-}
-
-fn lat_from_t(t: f64, e: f64) -> f64 {
-    if e.abs() < ECCENTRICITY_EPSILON {
-        return std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
-    }
-
-    let mut lat = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
-    for _ in 0..15 {
-        let e_sin = e * lat.sin();
-        let new_lat = std::f64::consts::FRAC_PI_2
-            - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan();
-        if (new_lat - lat).abs() < 1e-14 {
-            return new_lat;
-        }
-        lat = new_lat;
-    }
-    lat
 }
 
 impl super::ProjectionImpl for HotineObliqueMercator {
@@ -395,7 +375,11 @@ impl GeneralHotineObliqueMercator {
         }
 
         let t = (self.h / ((1.0 + u) / (1.0 - u)).sqrt()).powf(1.0 / self.b);
-        let lat = lat_from_t(t, self.e);
+        let lat = crate::projection::latitude_from_conformal_t(
+            "Hotine Oblique Mercator inverse latitude",
+            t,
+            self.e,
+        )?;
         let lon = self.lon0
             - (s * self.gamma0.cos() - v * self.gamma0.sin())
                 .atan2((self.b * skew_u / self.a_const).cos())

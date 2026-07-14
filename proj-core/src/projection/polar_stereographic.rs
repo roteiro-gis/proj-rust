@@ -26,6 +26,8 @@ pub(crate) struct PolarStereographic {
     // Precomputed constants
     e: f64,
     two_a_k0: f64,
+    /// t evaluated at the pole, `((1-e)/(1+e))^(e/2)`.
+    t_polar: f64,
 }
 
 impl PolarStereographic {
@@ -85,6 +87,7 @@ impl PolarStereographic {
             false_northing,
             e,
             two_a_k0,
+            t_polar: compute_t_polar(e),
         })
     }
 }
@@ -95,31 +98,21 @@ fn compute_t_polar(e: f64) -> f64 {
 }
 
 /// Compute the conformal latitude parameter t for a given latitude.
+///
+/// Evaluated at the signed latitude: the formula extends continuously across
+/// the equator, so opposite-hemisphere inputs map to large-radius points
+/// (matching C PROJ) instead of mirroring into the projection's hemisphere.
 fn compute_t(lat: f64, e: f64) -> f64 {
     let sin_lat = lat.sin();
     let e_sin = e * sin_lat;
-    ((FRAC_PI_2 - lat.abs()) / 2.0).tan() / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)
-}
-
-/// Iterative computation of latitude from t (isometric latitude → geodetic latitude).
-fn lat_from_t(t: f64, e: f64) -> f64 {
-    let mut lat = FRAC_PI_2 - 2.0 * t.atan();
-    for _ in 0..15 {
-        let e_sin = e * lat.sin();
-        let new_lat = FRAC_PI_2 - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan();
-        if (new_lat - lat).abs() < 1e-14 {
-            return new_lat;
-        }
-        lat = new_lat;
-    }
-    lat
+    ((FRAC_PI_2 - lat) / 2.0).tan() / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)
 }
 
 impl super::ProjectionImpl for PolarStereographic {
     fn forward(&self, lon: f64, lat: f64) -> Result<(f64, f64)> {
         validate_lon_lat(lon, lat)?;
         let e = self.e;
-        let t_polar = compute_t_polar(e);
+        let t_polar = self.t_polar;
 
         // For north polar: use latitude directly.
         // For south polar: negate latitude to work with formulas designed for north.
@@ -143,7 +136,7 @@ impl super::ProjectionImpl for PolarStereographic {
     fn inverse(&self, x: f64, y: f64) -> Result<(f64, f64)> {
         validate_projected(x, y)?;
         let e = self.e;
-        let t_polar = compute_t_polar(e);
+        let t_polar = self.t_polar;
 
         let dx = x - self.false_easting;
         let dy = y - self.false_northing;
@@ -163,7 +156,8 @@ impl super::ProjectionImpl for PolarStereographic {
         }
 
         let t = rho * t_polar / self.two_a_k0;
-        let lat_unsigned = lat_from_t(t, e);
+        let lat_unsigned =
+            super::latitude_from_conformal_t("Polar Stereographic inverse latitude", t, e)?;
         let lat = sign * lat_unsigned;
 
         let lon = self.lon0 + dx.atan2(dy_eff);
@@ -276,6 +270,44 @@ mod tests {
         assert!(
             (lat_back - lat).abs() < 1e-8,
             "lat roundtrip: {lat_back} vs {lat}"
+        );
+    }
+
+    #[test]
+    fn wrong_hemisphere_extends_continuously() {
+        // EPSG:3413-style north polar stereographic (lat_ts 70N, lon0 -45).
+        let proj = PolarStereographic::new(
+            ellipsoid::WGS84,
+            (-45.0_f64).to_radians(),
+            70.0_f64.to_radians(),
+            1.0,
+            0.0,
+            0.0,
+        )
+        .unwrap();
+
+        // The conformal formula is continuous across the equator: a southern
+        // point maps to a large-radius coordinate, not a mirrored northern
+        // one, and it roundtrips.
+        let lon = (-45.0_f64).to_radians();
+        let lat = (-30.0_f64).to_radians();
+        let (x_south, y_south) = proj.forward(lon, lat).unwrap();
+        let (_, y_north) = proj.forward(lon, -lat).unwrap();
+        assert!(
+            y_south < y_north && y_south < -2.0e7,
+            "southern point must not mirror: y_south={y_south}, y_north={y_north}"
+        );
+        let (lon2, lat2) = proj.inverse(x_south, y_south).unwrap();
+        assert!((lon2 - lon).abs() < 1e-12, "lon: {lon2}");
+        assert!((lat2 - lat).abs() < 1e-12, "lat: {lat2}");
+
+        // Continuity across the equator itself.
+        let eps = 1e-9;
+        let (_, y_plus) = proj.forward(lon, eps).unwrap();
+        let (_, y_minus) = proj.forward(lon, -eps).unwrap();
+        assert!(
+            (y_plus - y_minus).abs() < 1.0,
+            "equator crossing must be continuous: {y_plus} vs {y_minus}"
         );
     }
 }

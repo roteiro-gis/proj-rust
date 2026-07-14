@@ -49,8 +49,20 @@ fn helmert_backed_projected_transform_uses_source_height_for_xy() {
 
     assert!(de.abs() > 0.1, "easting delta = {de}");
     assert!(dn.abs() > 0.05, "northing delta = {dn}");
-    assert!((ground.2 - 0.0).abs() < 1e-12);
-    assert!((high.2 - 10_000.0).abs() < 1e-12);
+
+    // Ellipsoidal height is rebased onto the target datum's ellipsoid: the
+    // WGS84→OSGB36(Airy) separation near London is about -46 m, and height
+    // differences are preserved to within the datum shift's height gradient.
+    assert!(
+        (-60.0..=-30.0).contains(&ground.2),
+        "ground height = {}",
+        ground.2
+    );
+    assert!(
+        (high.2 - ground.2 - 10_000.0).abs() < 20.0,
+        "height delta = {}",
+        high.2 - ground.2
+    );
 }
 
 #[test]

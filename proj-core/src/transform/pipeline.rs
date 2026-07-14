@@ -24,6 +24,9 @@ pub(super) struct CompiledOperationPipeline {
     steps: SmallVec<[CompiledStep; 8]>,
     pub(super) source_xy_units: PipelineSourceXyUnits,
     pub(super) target_xy_units: PipelineTargetXyUnits,
+    /// True when the steps change ellipsoidal height (Helmert/geocentric
+    /// datum math); horizontal grid shifts and projections do not.
+    pub(super) transforms_ellipsoidal_height: bool,
 }
 
 pub(super) struct CompiledOperationFallback {
@@ -200,7 +203,7 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
         }
         CompiledStep::GeocentricToGeodetic { ellipsoid } => {
             let (lon, lat, h) =
-                geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z);
+                geocentric::geocentric_to_geodetic(ellipsoid, coord.x, coord.y, coord.z)?;
             Coord3D::new(lon, lat, h)
         }
     };
@@ -226,6 +229,29 @@ pub(super) fn execute_pipeline_xy(
 
     let output = pipeline.target_xy_units.denormalize(state);
     validate_pipeline_coord("pipeline final output", output)?;
+    Ok(output)
+}
+
+/// Like [`execute_pipeline_xy`] but keeps the pipeline's `z` output, so
+/// datum-shift-induced ellipsoidal height changes survive. `z` is in meters
+/// throughout; the x/y unit adapters do not touch it.
+pub(super) fn execute_pipeline_xyz(
+    pipeline: &CompiledOperationPipeline,
+    c: Coord3D,
+) -> Result<Coord3D> {
+    let mut state = pipeline.source_xy_units.normalize(c)?;
+    if pipeline.steps.is_empty() {
+        validate_pipeline_coord3d("pipeline final output", c)?;
+        return Ok(c);
+    }
+
+    for step in &pipeline.steps {
+        state = execute_step(step, state)?;
+    }
+
+    let xy = pipeline.target_xy_units.denormalize(state);
+    let output = Coord3D::new(xy.x, xy.y, state.z);
+    validate_pipeline_coord3d("pipeline final output", output)?;
     Ok(output)
 }
 
@@ -297,10 +323,20 @@ pub(super) fn compile_pipeline(
         });
     }
 
+    let transforms_ellipsoidal_height = steps.iter().any(|step| {
+        matches!(
+            step,
+            CompiledStep::Helmert { .. }
+                | CompiledStep::GeodeticToGeocentric { .. }
+                | CompiledStep::GeocentricToGeodetic { .. }
+        )
+    });
+
     Ok(CompiledOperationPipeline {
         steps,
         source_xy_units: PipelineSourceXyUnits::compile(source),
         target_xy_units: PipelineTargetXyUnits::compile(target),
+        transforms_ellipsoidal_height,
     })
 }
 

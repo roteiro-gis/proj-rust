@@ -15,6 +15,48 @@ use crate::datum::Datum;
 use crate::error::{Error, Result};
 
 const LAT_EPSILON: f64 = 1e-12;
+const ITERATION_ECCENTRICITY_EPSILON: f64 = 1e-15;
+
+/// Run the fixed-point iteration `step` from `initial` until successive
+/// iterates differ by less than `tolerance`.
+///
+/// Unlike the fixed-count loops this replaces, exhausting `max_iterations`
+/// is an error instead of silently returning a non-converged iterate.
+pub(crate) fn converge(
+    context: &str,
+    initial: f64,
+    max_iterations: usize,
+    tolerance: f64,
+    mut step: impl FnMut(f64) -> f64,
+) -> Result<f64> {
+    let mut value = initial;
+    for _ in 0..max_iterations {
+        let next = step(value);
+        if (next - value).abs() < tolerance {
+            return Ok(next);
+        }
+        value = next;
+    }
+    Err(Error::OutOfRange(format!(
+        "{context} did not converge after {max_iterations} iterations"
+    )))
+}
+
+/// Geodetic latitude from the conformal parameter
+/// `t = tan(π/4 − φ/2) / ((1 − e·sinφ)/(1 + e·sinφ))^(e/2)`
+/// (EPSG Guidance Note 7-2), shared by the Mercator, Lambert Conformal
+/// Conic, Polar Stereographic, and Hotine Oblique Mercator inverses.
+pub(crate) fn latitude_from_conformal_t(context: &str, t: f64, e: f64) -> Result<f64> {
+    let initial = std::f64::consts::FRAC_PI_2 - 2.0 * t.atan();
+    if e.abs() < ITERATION_ECCENTRICITY_EPSILON {
+        return Ok(initial);
+    }
+    converge(context, initial, 15, 1e-14, |lat| {
+        let e_sin = e * lat.sin();
+        std::f64::consts::FRAC_PI_2
+            - 2.0 * (t * ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0)).atan()
+    })
+}
 
 /// Internal trait for projection math.
 ///
@@ -383,5 +425,54 @@ mod tests {
             normalize_longitude(-3.0 * std::f64::consts::PI),
             -std::f64::consts::PI
         );
+    }
+
+    #[test]
+    fn converge_returns_fixed_point() {
+        let result = converge("test", 0.5, 15, 1e-14, |x| (x + 2.0 / x) / 2.0).unwrap();
+        assert!((result - std::f64::consts::SQRT_2).abs() < 1e-14);
+    }
+
+    #[test]
+    fn converge_errors_on_exhaustion() {
+        let error = converge("test iteration", 0.0, 15, 1e-14, |x| x + 1.0).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("test iteration did not converge after 15 iterations"),
+            "unexpected error: {error}"
+        );
+    }
+
+    #[test]
+    fn converge_errors_when_iteration_produces_nan() {
+        let error = converge("test iteration", 1.0, 15, 1e-14, |_| f64::NAN).unwrap_err();
+        assert!(error.to_string().contains("did not converge"));
+    }
+
+    #[test]
+    fn latitude_from_conformal_t_recovers_latitude() {
+        // WGS84 first eccentricity
+        let e = 0.081_819_190_842_622_f64;
+        for lat_deg in [-80.0, -45.0, 0.0, 30.0, 60.0, 89.0] {
+            let lat = f64::to_radians(lat_deg);
+            let e_sin = e * lat.sin();
+            let t = (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan()
+                / ((1.0 - e_sin) / (1.0 + e_sin)).powf(e / 2.0);
+            let recovered = latitude_from_conformal_t("test", t, e).unwrap();
+            assert!(
+                (recovered - lat).abs() < 1e-12,
+                "lat {lat_deg}: recovered {}",
+                recovered.to_degrees()
+            );
+        }
+    }
+
+    #[test]
+    fn latitude_from_conformal_t_spherical_shortcut() {
+        let lat = f64::to_radians(37.0);
+        let t = (std::f64::consts::FRAC_PI_4 - lat / 2.0).tan();
+        let recovered = latitude_from_conformal_t("test", t, 0.0).unwrap();
+        assert!((recovered - lat).abs() < 1e-14);
     }
 }
