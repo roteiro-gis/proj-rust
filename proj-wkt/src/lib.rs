@@ -327,6 +327,7 @@ fn parsed_coordinate_operation(
         deprecated: false,
         preferred: true,
         approximate: false,
+        superseded: false,
         method,
     }
 }

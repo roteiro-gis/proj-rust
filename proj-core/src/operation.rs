@@ -266,6 +266,9 @@ pub struct CoordinateOperation {
     pub deprecated: bool,
     pub preferred: bool,
     pub approximate: bool,
+    /// EPSG records a same-CRS-pair replacement for this operation; ranking
+    /// prefers the replacement, matching C PROJ.
+    pub superseded: bool,
     pub method: OperationMethod,
 }
 
@@ -672,6 +675,7 @@ mod tests {
             deprecated: false,
             preferred: true,
             approximate: false,
+            superseded: false,
             method: OperationMethod::Identity,
         }
     }

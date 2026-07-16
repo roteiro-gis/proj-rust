@@ -168,3 +168,23 @@ fn helmert_and_datum_shift_methods_are_not_candidate_synthesis_paths() {
         )
     });
 }
+
+#[test]
+fn registry_format_constants_are_defined_only_in_proj_epsg_format() {
+    // The container layout for epsg.bin lives in the proj-epsg-format crate;
+    // a second definition in the reader or writer reintroduces the silent
+    // codec-drift risk the shared crate exists to prevent.
+    for needle in [
+        "const MAGIC: u32",
+        "const VERSION: u16",
+        "const METHOD_WEB_MERCATOR",
+        "const OP_HELMERT",
+        "const FLAG_DEPRECATED",
+        "const GRID_FORMAT_NTV2",
+        "const DATUM_RECORD_SIZE",
+        "const HORIZONTAL_CRS_GEOGRAPHIC",
+        "const VERTICAL_COMPONENT_ELLIPSOIDAL",
+    ] {
+        assert_no_hits(needle);
+    }
+}

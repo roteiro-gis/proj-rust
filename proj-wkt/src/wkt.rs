@@ -10,7 +10,7 @@ use crate::semantics::{
 use crate::{ParseError, Result};
 use proj_core::{
     CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
-    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
+    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
 };
 use std::collections::HashMap;
 
@@ -607,7 +607,7 @@ fn parse_wkt_vertical(
                         "unsupported WKT ellipsoidal-height datum EPSG:{vertical_datum_epsg}"
                     ))
                 })?;
-            if !datum.same_datum(&authority_datum) {
+            if !wkt_datums_equivalent(datum, &authority_datum) {
                 return Err(ParseError::UnsupportedSemantics(
                     "WKT ellipsoidal-height vertical datum does not match compound horizontal datum"
                         .into(),
@@ -694,7 +694,7 @@ fn wkt_semantically_equivalent(a: &CrsDef, b: &CrsDef) -> bool {
         }
         (CrsDef::Compound(a), CrsDef::Compound(b)) => {
             wkt_horizontal_semantically_equivalent(a.horizontal(), b.horizontal())
-                && a.vertical_crs().semantically_equivalent(b.vertical_crs())
+                && wkt_verticals_equivalent(a.vertical_crs(), b.vertical_crs())
         }
         _ => false,
     }
@@ -966,6 +966,30 @@ fn wkt_datums_equivalent(a: &Datum, b: &Datum) -> bool {
     matches!(a.to_wgs84(), DatumToWgs84::Unknown)
         && matches!(b.to_wgs84(), DatumToWgs84::Unknown)
         && wkt_ellipsoids_equivalent(a.ellipsoid(), b.ellipsoid())
+}
+
+/// Definition-level vertical CRS equivalence for WKT authority cross-checks.
+///
+/// `Datum::same_datum` deliberately never equates two `Unknown`-to-WGS84
+/// datums (fail-closed for operation selection), but comparing a parsed WKT
+/// definition against the registry definition it is tagged with is an
+/// identity check, so ellipsoidal-height verticals compare their datums with
+/// the same relaxed rule the horizontal arms use.
+fn wkt_verticals_equivalent(a: &VerticalCrsDef, b: &VerticalCrsDef) -> bool {
+    if a.semantically_equivalent(b) {
+        return true;
+    }
+
+    match (a.kind(), b.kind()) {
+        (
+            VerticalCrsKind::EllipsoidalHeight { datum: a_datum },
+            VerticalCrsKind::EllipsoidalHeight { datum: b_datum },
+        ) => {
+            wkt_approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
+                && wkt_datums_equivalent(a_datum, b_datum)
+        }
+        _ => false,
+    }
 }
 
 fn wkt_ellipsoids_equivalent(a: proj_core::Ellipsoid, b: proj_core::Ellipsoid) -> bool {
@@ -1751,5 +1775,53 @@ mod tests {
         assert!(err
             .to_string()
             .contains("unsupported or unrecognized WKT datum"));
+    }
+
+    #[test]
+    fn adversarial_parameter_scans_stay_linear() {
+        // Parameter scanning must stay amortized-linear: with quadratic
+        // rescanning these inputs would take minutes, not milliseconds. The
+        // generous bound only trips on complexity regressions, not slow CI.
+        let deadline = std::time::Duration::from_secs(20);
+
+        let mut wkt = String::from(
+            "PROJCS[\"adv\",GEOGCS[\"WGS 84\",DATUM[\"WGS_1984\",\
+             SPHEROID[\"WGS 84\",6378137,298.257223563]],\
+             PRIMEM[\"Greenwich\",0],UNIT[\"degree\",0.0174532925199433]],\
+             PROJECTION[\"Transverse_Mercator\"]",
+        );
+        for i in 0..30_000 {
+            wkt.push_str(&format!(",PARAMETER[\"p{i}\",{i}]"));
+        }
+        wkt.push_str(",UNIT[\"metre\",1]]");
+        let start = std::time::Instant::now();
+        let _ = parse_wkt_structure(&wkt);
+        assert!(
+            start.elapsed() < deadline,
+            "dense PARAMETER parse took {:?}",
+            start.elapsed()
+        );
+
+        let mut dangling = String::from("PROJCS[\"x\",");
+        dangling.push_str(&"PARAMETER[".repeat(60_000));
+        let start = std::time::Instant::now();
+        let _ = parse_wkt_structure(&dangling);
+        assert!(
+            start.elapsed() < deadline,
+            "dangling-marker parse took {:?}",
+            start.elapsed()
+        );
+    }
+
+    #[test]
+    fn compound_ellipsoidal_height_wkt_roundtrips() {
+        // Found by the wkt_roundtrip fuzz target: the serializer emitted
+        // VERT_DATUM["Unknown datum"] for ellipsoidal-height verticals and
+        // the authority cross-check rejected the reparse.
+        let crs = crate::parse_crs("EPSG:7678").unwrap();
+        let wkt = crate::to_wkt(&crs).unwrap();
+        let reparsed = crate::parse_crs(&wkt)
+            .unwrap_or_else(|error| panic!("emitted WKT failed to reparse: {error}\n{wkt}"));
+        let _ = reparsed;
     }
 }

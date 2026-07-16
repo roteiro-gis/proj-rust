@@ -100,6 +100,12 @@ impl SelectedOperationKind {
             .unwrap_or(false)
     }
 
+    pub(crate) fn superseded(&self) -> bool {
+        self.as_operation()
+            .map(|operation| operation.superseded)
+            .unwrap_or(false)
+    }
+
     pub(crate) fn grid_format_preference(&self) -> u8 {
         self.as_operation()
             .map(operation_grid_format_preference)
@@ -582,6 +588,14 @@ fn compare_candidates(
                 .matched_area_of_use
                 .is_some()
                 .cmp(&left.matched_area_of_use.is_some())
+        })
+        .then_with(|| {
+            // EPSG supersession: prefer the replacement variant over the
+            // superseded one regardless of stated accuracy — C PROJ drops
+            // superseded operations when a same-pair replacement exists.
+            left.operation
+                .superseded()
+                .cmp(&right.operation.superseded())
         })
         .then_with(|| {
             let left_accuracy = left

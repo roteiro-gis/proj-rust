@@ -5,6 +5,19 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+    # Parity only moves when numerics, selection, grids, or the corpora
+    # change; skip the bundled C PROJ build for unrelated PRs.
+    paths:
+      - "proj-core/src/**"
+      - "proj-core/tests/**"
+      - "proj-wkt/src/**"
+      - "testdata/**"
+      - "scripts/run-reference-parity.sh"
+      - ".github/workflows/reference-compat.yml"
+      - "Cargo.lock"
+  schedule:
+    # Weekly drift check even without PR activity.
+    - cron: "42 5 * * 1"
   workflow_dispatch:
     inputs:
       run_benchmarks:

@@ -18,7 +18,17 @@ pub(crate) fn to_wkt(crs: &CrsDef) -> Result<String> {
 
 fn format_compound_crs(compound: &CompoundCrsDef) -> Result<String> {
     let horizontal = format_horizontal_crs(compound.horizontal())?;
-    let vertical = format_vertical_crs(compound.vertical_crs())?;
+    // An ellipsoidal-height vertical component shares the horizontal CRS's
+    // geodetic datum; resolve that datum's authority so the emitted
+    // VERT_DATUM keeps its identity.
+    let horizontal_datum_epsg = match compound.horizontal() {
+        HorizontalCrsDef::Geographic(geographic) => authority_code(geographic.epsg()),
+        HorizontalCrsDef::Projected(projected) => {
+            authority_code(projected.base_geographic_crs_epsg())
+        }
+    }
+    .and_then(proj_core::lookup_datum_code_for_crs);
+    let vertical = format_vertical_crs(compound.vertical_crs(), horizontal_datum_epsg)?;
     let mut fields = vec![quote(wkt_name(compound.name(), "unnamed compound CRS"))];
     fields.push(horizontal);
     fields.push(vertical);
@@ -342,10 +352,13 @@ fn format_parameter(param: ProjectionParam, linear_unit: LinearUnit) -> Result<S
     ))
 }
 
-fn format_vertical_crs(vertical: &VerticalCrsDef) -> Result<String> {
+fn format_vertical_crs(
+    vertical: &VerticalCrsDef,
+    horizontal_datum_epsg: Option<u32>,
+) -> Result<String> {
     let linear_unit = linear_unit_wkt(vertical.linear_unit())?;
     let mut fields = vec![quote(wkt_name(vertical.name(), "unnamed vertical CRS"))];
-    fields.push(format_vertical_datum(vertical)?);
+    fields.push(format_vertical_datum(vertical, horizontal_datum_epsg)?);
     fields.push(format_linear_unit(&linear_unit));
     fields.push(
         match vertical.kind() {
@@ -358,7 +371,10 @@ fn format_vertical_crs(vertical: &VerticalCrsDef) -> Result<String> {
     Ok(format!("VERT_CS[{}]", fields.join(",")))
 }
 
-fn format_vertical_datum(vertical: &VerticalCrsDef) -> Result<String> {
+fn format_vertical_datum(
+    vertical: &VerticalCrsDef,
+    horizontal_datum_epsg: Option<u32>,
+) -> Result<String> {
     match vertical.kind() {
         VerticalCrsKind::GravityRelatedHeight {
             vertical_datum_epsg,
@@ -369,7 +385,7 @@ fn format_vertical_datum(vertical: &VerticalCrsDef) -> Result<String> {
             Ok(format!("VERT_DATUM[{}]", fields.join(",")))
         }
         VerticalCrsKind::EllipsoidalHeight { datum } => {
-            let info = datum_wkt(datum, None)?;
+            let info = datum_wkt(datum, horizontal_datum_epsg)?;
             let mut fields = vec![quote(&info.name)];
             fields.push("2002".to_string());
             if let Some(code) = info.datum_epsg {
