@@ -7,8 +7,8 @@ use crate::semantics::{
     resolve_structured_datum, validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
-    AxisDirection, CoordinateSystemSpec, DatumAliasScope, GeographicCoordinateSystemKind,
-    ProjectionParameterUnitKind, StructuredEllipsoid,
+    AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, DatumAliasScope,
+    GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, Result};
 use proj_core::{
@@ -70,6 +70,7 @@ fn parse_geographic_projjson(value: &Value) -> Result<CrsDef> {
         coordinate_system_angle_unit_to_degree(value)?,
         prime_meridian_degrees_from_json(value),
         &coordinate_system,
+        AxisOrderPolicy::Strict,
     )?;
     let datum = infer_datum_from_json_crs(value)?;
     let horizontal = GeographicCrsDef::new(0, datum.clone(), "");
@@ -105,6 +106,7 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
     validate_supported_projected_semantics(
         "PROJJSON projected CRS",
         &coordinate_system_from_json(value),
+        AxisOrderPolicy::Strict,
     )?;
 
     let base_angle_unit_to_degree =
@@ -114,6 +116,7 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         Some(base_angle_unit_to_degree),
         prime_meridian_degrees_from_json(base_crs),
         &coordinate_system_from_json(base_crs),
+        AxisOrderPolicy::Strict,
     )?;
     let method_name = conversion
         .get("method")

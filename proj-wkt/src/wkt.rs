@@ -4,8 +4,8 @@ use crate::semantics::{
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
-    AxisDirection, CoordinateSystemSpec, DatumAliasScope, GeographicCoordinateSystemKind,
-    ProjectionParameterUnitKind, StructuredEllipsoid,
+    AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, DatumAliasScope,
+    GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, Result};
 use proj_core::{
@@ -23,7 +23,17 @@ use std::collections::HashMap;
 pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     let s = s.trim();
     let top_level_epsg = extract_top_level_epsg(s);
-    let parsed = parse_wkt_structure(s)?;
+    let is_wkt1 = parse_wkt_element(s, 0).is_some_and(|(root_name, _, _)| {
+        root_name.eq_ignore_ascii_case("GEOGCS")
+            || root_name.eq_ignore_ascii_case("PROJCS")
+            || root_name.eq_ignore_ascii_case("COMPD_CS")
+    });
+    let axis_order_policy = if top_level_epsg.is_some() && is_wkt1 {
+        AxisOrderPolicy::NormalizePermutation
+    } else {
+        AxisOrderPolicy::Strict
+    };
+    let parsed = parse_wkt_structure(s, axis_order_policy)?;
 
     if let Some(epsg) = top_level_epsg {
         return canonicalize_authoritative_crs(parsed, epsg, "WKT");
@@ -179,7 +189,7 @@ fn trim_wkt_token(token: &str) -> &str {
 }
 
 /// Attempt to parse WKT structure to extract projection parameters.
-fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
+fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
     let Some((root_name, _, _)) = parse_wkt_element(s, 0) else {
         return Err(ParseError::Parse(format!(
             "unrecognized WKT root element: {:.40}",
@@ -191,15 +201,15 @@ fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
         || root_name.eq_ignore_ascii_case("GEODCRS")
         || root_name.eq_ignore_ascii_case("GEOGCRS")
     {
-        return parse_wkt_geographic(s);
+        return parse_wkt_geographic(s, axis_order_policy);
     }
 
     if root_name.eq_ignore_ascii_case("PROJCS") || root_name.eq_ignore_ascii_case("PROJCRS") {
-        return parse_wkt_projected(s);
+        return parse_wkt_projected(s, axis_order_policy);
     }
 
     if root_name.eq_ignore_ascii_case("COMPD_CS") || root_name.eq_ignore_ascii_case("COMPOUNDCRS") {
-        return parse_wkt_compound(s);
+        return parse_wkt_compound(s, axis_order_policy);
     }
 
     if root_name.eq_ignore_ascii_case("VERT_CS")
@@ -217,7 +227,7 @@ fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
     )))
 }
 
-fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
+fn parse_wkt_geographic(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     let coordinate_system = extract_coordinate_system(root_inner);
@@ -233,6 +243,7 @@ fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
         angle_unit_to_degree,
         prime_meridian_degrees,
         &coordinate_system,
+        axis_order_policy,
     )?;
 
     let datum = infer_datum_from_geographic_inner(root_inner)?;
@@ -258,7 +269,7 @@ fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
     }
 }
 
-fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
+fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     // WKT1 uses PROJECTION["name"], WKT2 uses METHOD["name"].
@@ -271,7 +282,11 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let coordinate_system = extract_coordinate_system(root_inner);
     let projected_linear_unit = extract_projected_linear_unit(root_inner, &coordinate_system)?
         .unwrap_or_else(LinearUnit::metre);
-    validate_supported_projected_semantics("WKT projected CRS", &coordinate_system)?;
+    validate_supported_projected_semantics(
+        "WKT projected CRS",
+        &coordinate_system,
+        axis_order_policy,
+    )?;
 
     let base_geographic_inner =
         find_top_level_element_inner(root_inner, &["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"])
@@ -290,6 +305,7 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
         Some(base_angle_unit_to_degree),
         extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
         &base_coordinate_system,
+        axis_order_policy,
     )?;
     let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree)?;
 
@@ -530,7 +546,7 @@ fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     )))
 }
 
-fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
+fn parse_wkt_compound(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     let mut horizontal = None;
@@ -544,7 +560,10 @@ fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
                 || name.eq_ignore_ascii_case("PROJCS")
                 || name.eq_ignore_ascii_case("PROJCRS"))
         {
-            horizontal = Some(parse_wkt_structure(&format!("{name}[{element_inner}]")));
+            horizontal = Some(parse_wkt_structure(
+                &format!("{name}[{element_inner}]"),
+                axis_order_policy,
+            ));
             return;
         }
 
@@ -1518,6 +1537,7 @@ mod tests {
     use super::*;
 
     const US_FOOT_TO_METER: f64 = 0.3048006096012192;
+    const SWEREF99_TM_RH2000_WKT1: &str = r#"COMPD_CS["SWEREF99 TM + RH2000 height",PROJCS["SWEREF99 TM",GEOGCS["SWEREF99",DATUM["SWEREF99",SPHEROID["GRS 1980",6378137,298.257222101,AUTHORITY["EPSG","7019"]],AUTHORITY["EPSG","6619"]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]],AUTHORITY["EPSG","4619"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",15],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Northing",NORTH],AXIS["Easting",EAST],AUTHORITY["EPSG","3006"]],VERT_CS["RH2000 height",VERT_DATUM["Rikets hojdsystem 2000",2005,AUTHORITY["EPSG","5208"]],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["Gravity-related height",UP],AUTHORITY["EPSG","5613"]],AUTHORITY["EPSG","5845"]]"#;
 
     #[test]
     fn extract_top_level_epsg_from_wkt() {
@@ -1567,6 +1587,22 @@ mod tests {
             crs.vertical_crs().unwrap().linear_unit_to_meter(),
             LinearUnit::metre().meters_per_unit()
         );
+    }
+
+    #[test]
+    fn parse_epsg_tagged_wkt1_compound_with_authority_axis_order() {
+        let crs = crate::parse_crs(SWEREF99_TM_RH2000_WKT1).unwrap();
+
+        assert!(crs.is_compound());
+        assert_eq!(crs.epsg(), 5845);
+        assert_eq!(crs.as_projected().unwrap().epsg(), 3006);
+        assert_eq!(crs.vertical_crs().unwrap().epsg(), 5613);
+
+        let target = proj_core::lookup_epsg(4326).unwrap();
+        let transform = proj_core::Transform::from_horizontal_components(&crs, &target).unwrap();
+        let (lon, lat) = transform.convert((500_000.0, 0.0)).unwrap();
+        assert!((lon - 15.0).abs() < 1e-8);
+        assert!(lat.abs() < 1e-8);
     }
 
     #[test]
@@ -1737,6 +1773,17 @@ mod tests {
     }
 
     #[test]
+    fn reject_untagged_wkt1_with_reversed_projected_axes() {
+        let err = parse_wkt(
+            r#"PROJCS["Custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AXIS["Northing",NORTH],AXIS["Easting",EAST]]"#,
+        )
+        .unwrap_err();
+        assert!(err
+            .to_string()
+            .contains("unsupported axis order/directions"));
+    }
+
+    #[test]
     fn parse_wkt2_geographic_with_id() {
         let wkt = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",4326]]"#;
         let crs = parse_wkt(wkt).unwrap();
@@ -1795,7 +1842,7 @@ mod tests {
         }
         wkt.push_str(",UNIT[\"metre\",1]]");
         let start = std::time::Instant::now();
-        let _ = parse_wkt_structure(&wkt);
+        let _ = parse_wkt_structure(&wkt, AxisOrderPolicy::Strict);
         assert!(
             start.elapsed() < deadline,
             "dense PARAMETER parse took {:?}",
@@ -1805,7 +1852,7 @@ mod tests {
         let mut dangling = String::from("PROJCS[\"x\",");
         dangling.push_str(&"PARAMETER[".repeat(60_000));
         let start = std::time::Instant::now();
-        let _ = parse_wkt_structure(&dangling);
+        let _ = parse_wkt_structure(&dangling, AxisOrderPolicy::Strict);
         assert!(
             start.elapsed() < deadline,
             "dangling-marker parse took {:?}",

@@ -104,6 +104,15 @@ impl Transform {
         Self::with_selection_options(from_crs, to_crs, SelectionOptions::default())
     }
 
+    /// Create an explicitly horizontal-only transform from authority code strings.
+    ///
+    /// Compound CRS inputs are reduced to their horizontal components. Use this
+    /// for XY-only data; it deliberately does not transform an explicit vertical
+    /// ordinate from either CRS.
+    pub fn new_horizontal(from_crs: &str, to_crs: &str) -> Result<Self> {
+        Self::new_horizontal_with_selection_options(from_crs, to_crs, SelectionOptions::default())
+    }
+
     /// Create a transform with explicit selection options.
     pub fn with_selection_options(
         from_crs: &str,
@@ -113,6 +122,18 @@ impl Transform {
         let source = registry::lookup_authority_code(from_crs)?;
         let target = registry::lookup_authority_code(to_crs)?;
         Self::from_crs_defs_with_selection_options(&source, &target, options)
+    }
+
+    /// Create an explicitly horizontal-only transform from authority code
+    /// strings with operation-selection options.
+    pub fn new_horizontal_with_selection_options(
+        from_crs: &str,
+        to_crs: &str,
+        options: SelectionOptions,
+    ) -> Result<Self> {
+        let source = registry::lookup_authority_code(from_crs)?;
+        let target = registry::lookup_authority_code(to_crs)?;
+        Self::from_horizontal_components_with_selection_options(&source, &target, options)
     }
 
     /// Create a transform from an explicit registry operation id.
@@ -135,6 +156,15 @@ impl Transform {
         let target = registry::lookup_epsg(to)
             .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code: {to}")))?;
         Self::from_crs_defs(&source, &target)
+    }
+
+    /// Create an explicitly horizontal-only transform from EPSG codes.
+    pub fn from_epsg_horizontal(from: u32, to: u32) -> Result<Self> {
+        let source = registry::lookup_epsg(from)
+            .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code: {from}")))?;
+        let target = registry::lookup_epsg(to)
+            .ok_or_else(|| Error::UnknownCrs(format!("unknown EPSG code: {to}")))?;
+        Self::from_horizontal_components(&source, &target)
     }
 
     /// Create a transform from explicit CRS definitions.

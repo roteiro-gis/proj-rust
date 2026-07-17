@@ -9,9 +9,9 @@
 //!
 //! - **Authority codes**: `"EPSG:4326"` — delegates to proj-core's registry
 //! - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"` — parsed into CrsDef
-//! - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` — extracts AUTHORITY tag when present,
-//!   otherwise parses projection parameters
-//! - **WKT2/PROJJSON compound CRS**: parses explicit vertical CRS components for
+//! - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `COMPD_CS[...]` — extracts an
+//!   AUTHORITY tag when present, otherwise parses projection parameters
+//! - **WKT1/WKT2/PROJJSON compound CRS**: parses explicit vertical CRS components for
 //!   equality-checked z preservation and same-reference vertical unit conversion
 //! - **WKT output**: serializes [`proj_core::CrsDef`] values to WKT1-style
 //!   `GEOGCS[...]`, `PROJCS[...]`, and `COMPD_CS[...]` definitions
@@ -28,6 +28,9 @@
 //! [`parse_crs`] returns only the CRS definition.
 //! Unsupported axis-order, prime-meridian, geographic angular-unit, and vertical
 //! transformation semantics are rejected.
+//! EPSG-tagged WKT1 definitions with an authority-native axis permutation are
+//! validated and canonicalized to the library's longitude/latitude or
+//! easting/northing coordinate order.
 //!
 //! # Example
 //!
@@ -90,7 +93,7 @@ impl ParsedCrs {
 /// - **OGC CRS84**: `"CRS:84"`, `"OGC:CRS84"`
 /// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}`
-/// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]`
+/// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `COMPD_CS[...]`
 /// - **WKT2**: `GEODCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     Ok(parse_crs_definition(s)?.crs)
