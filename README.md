@@ -39,6 +39,11 @@ Coordinates use CRS-native units:
 - Projected CRS coordinates use the CRS linear unit, such as metres or US survey feet.
 - `convert_3d()` preserves `z` when no explicit vertical CRS is present, preserves it for matching vertical components, and converts it when matching vertical reference frames use different linear units.
 
+Strict transform constructors reject a compound-to-2D CRS pair because that
+would silently discard an explicit vertical reference. For an intentionally
+XY-only operation, use `Transform::new_horizontal("EPSG:5845", "EPSG:4326")`;
+the returned transform uses EPSG:5845's EPSG:3006 horizontal component.
+
 With the default `geo-types` feature, `Transform` also supports `geo_types::Coord<f64>` and full 2D geometry conversion through `convert_geometry()`.
 
 ## CRS Input
@@ -50,10 +55,10 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 - EPSG authority codes, bare EPSG numbers, EPSG URNs, and OGC `CRS:84`.
 - Common PROJ strings for the implemented projection families, including legacy `+init=epsg:XXXX`.
 - WKT1 and supported WKT2 geographic/projected CRS definitions.
-- WKT2 compound CRS definitions with explicit vertical components.
+- WKT1 `COMPD_CS` and WKT2 `COMPOUNDCRS` definitions with explicit vertical components.
 - Basic PROJJSON geographic, projected, and compound CRS definitions.
 
-Custom definitions are accepted only when they map to this library's CRS model: longitude/east, latitude/north geographic axes in degrees with a Greenwich prime meridian, and projected easting/northing axes in a single linear unit. Unsupported axis order, prime meridian, angular unit, projection, or vertical transformation semantics return errors.
+Custom definitions are accepted only when they map to this library's CRS model: longitude/east, latitude/north geographic axes in degrees with a Greenwich prime meridian, and projected easting/northing axes in a single linear unit. EPSG-tagged WKT1 definitions may use the authority-native axis order; a pure axis permutation is canonicalized to the library's coordinate order after the embedded definition is validated against the registry. Unsupported custom axis order, axis directions, prime meridian, angular unit, projection, or vertical transformation semantics return errors.
 
 ## Supported CRS
 

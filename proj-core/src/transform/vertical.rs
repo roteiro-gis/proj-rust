@@ -303,7 +303,7 @@ pub(super) fn compile_vertical_transform(
             vertical_label(target_vertical)
         ))),
         (Some(_), None) | (None, Some(_)) => Err(Error::OperationSelection(
-            "cannot transform between an explicit vertical CRS and a horizontal-only CRS; vertical CRS transformations are not supported".into(),
+            "cannot transform between an explicit vertical CRS and a horizontal-only CRS; use Transform::new_horizontal or Transform::from_horizontal_components for an explicitly XY-only transform".into(),
         )),
     }
 }

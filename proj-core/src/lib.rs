@@ -26,6 +26,11 @@
 //! geoid operations can be selected for supported ellipsoidal-to-gravity height
 //! CRS pairs, while grid files still resolve through caller-supplied grid
 //! providers.
+//! A strict transform constructor rejects a compound-to-horizontal-only CRS
+//! pair because it cannot safely infer what to do with the explicit vertical
+//! ordinate. Use [`Transform::new_horizontal`] or
+//! [`Transform::from_horizontal_components`] when the operation is explicitly
+//! limited to XY coordinates.
 //! Geographic antimeridian AOIs use
 //! [`AreaOfInterest::geographic_wrapped_bounds`], while ordinary projected and
 //! source/target bounds keep strict `min <= max` validation.

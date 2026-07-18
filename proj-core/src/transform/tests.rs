@@ -928,6 +928,25 @@ fn horizontal_components_allow_compound_xy_preview() {
 }
 
 #[test]
+fn horizontal_authority_constructor_supports_compound_to_2d_crs() {
+    let err = expect_transform_error(Transform::new("EPSG:5845", "EPSG:4326"));
+    assert!(err.to_string().contains("explicit vertical CRS"));
+    assert!(err.to_string().contains("Transform::new_horizontal"));
+
+    let t = Transform::new_horizontal("EPSG:5845", "EPSG:4326").unwrap();
+    assert_eq!(t.source_crs().epsg(), 3006);
+    assert_eq!(t.target_crs().epsg(), 4326);
+    assert!(t.source_crs().vertical_crs().is_none());
+
+    let (lon, lat) = t.convert((500_000.0, 0.0)).unwrap();
+    assert!((lon - 15.0).abs() < 1e-8);
+    assert!(lat.abs() < 1e-8);
+
+    let from_epsg = Transform::from_epsg_horizontal(5845, 4326).unwrap();
+    assert_eq!(from_epsg.source_crs().epsg(), 3006);
+}
+
+#[test]
 fn same_vertical_reference_converts_z_units() {
     let horizontal =
         HorizontalCrsDef::Geographic(GeographicCrsDef::new(4326, datum::WGS84, "WGS 84"));

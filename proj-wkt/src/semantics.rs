@@ -14,6 +14,12 @@ pub(crate) enum AxisDirection {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum AxisOrderPolicy {
+    Strict,
+    NormalizePermutation,
+}
+
 impl AxisDirection {
     pub(crate) fn from_str(value: &str) -> Self {
         match normalize_key(value).as_str() {
@@ -60,6 +66,7 @@ pub(crate) fn validate_supported_geographic_semantics(
     angle_unit_to_degree: Option<f64>,
     prime_meridian_degrees: Option<f64>,
     coordinate_system: &CoordinateSystemSpec,
+    axis_order_policy: AxisOrderPolicy,
 ) -> Result<()> {
     if let Some(angle_unit_to_degree) = angle_unit_to_degree {
         if !approx_eq(angle_unit_to_degree, 1.0) {
@@ -83,6 +90,7 @@ pub(crate) fn validate_supported_geographic_semantics(
         Some("ellipsoidal"),
         &[AxisDirection::East, AxisDirection::North],
         "longitude/east, latitude/north",
+        axis_order_policy,
     )
 }
 
@@ -91,6 +99,7 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
     angle_unit_to_degree: Option<f64>,
     prime_meridian_degrees: Option<f64>,
     coordinate_system: &CoordinateSystemSpec,
+    axis_order_policy: AxisOrderPolicy,
 ) -> Result<GeographicCoordinateSystemKind> {
     if let Some(angle_unit_to_degree) = angle_unit_to_degree {
         if !approx_eq(angle_unit_to_degree, 1.0) {
@@ -124,6 +133,7 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
             Some("ellipsoidal"),
             &[AxisDirection::East, AxisDirection::North, AxisDirection::Up],
             "longitude/east, latitude/north, ellipsoidal height/up",
+            axis_order_policy,
         )?;
         return Ok(GeographicCoordinateSystemKind::ThreeDimensionalEllipsoidalHeight);
     }
@@ -134,6 +144,7 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
         Some("ellipsoidal"),
         &[AxisDirection::East, AxisDirection::North],
         "longitude/east, latitude/north",
+        axis_order_policy,
     )?;
     Ok(GeographicCoordinateSystemKind::TwoDimensional)
 }
@@ -141,6 +152,7 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
 pub(crate) fn validate_supported_projected_semantics(
     context: &str,
     coordinate_system: &CoordinateSystemSpec,
+    axis_order_policy: AxisOrderPolicy,
 ) -> Result<()> {
     validate_coordinate_system(
         context,
@@ -148,6 +160,7 @@ pub(crate) fn validate_supported_projected_semantics(
         Some("cartesian"),
         &[AxisDirection::East, AxisDirection::North],
         "easting/east, northing/north",
+        axis_order_policy,
     )
 }
 
@@ -437,6 +450,7 @@ fn validate_coordinate_system(
     expected_subtype: Option<&str>,
     expected_axes: &[AxisDirection],
     expected_axes_description: &str,
+    axis_order_policy: AxisOrderPolicy,
 ) -> Result<()> {
     if let Some(expected_subtype) = expected_subtype {
         if let Some(subtype) = &coordinate_system.subtype {
@@ -467,7 +481,10 @@ fn validate_coordinate_system(
         )));
     }
 
-    if coordinate_system.axes != expected_axes {
+    if coordinate_system.axes != expected_axes
+        && !(axis_order_policy == AxisOrderPolicy::NormalizePermutation
+            && axes_are_permutations(&coordinate_system.axes, expected_axes))
+    {
         return Err(ParseError::UnsupportedSemantics(format!(
             "{context} uses unsupported axis order/directions `{}`; expected {expected_axes_description}",
             format_axes(&coordinate_system.axes)
@@ -475,6 +492,17 @@ fn validate_coordinate_system(
     }
 
     Ok(())
+}
+
+fn axes_are_permutations(actual: &[AxisDirection], expected: &[AxisDirection]) -> bool {
+    actual.len() == expected.len()
+        && expected.iter().all(|expected_axis| {
+            actual.iter().filter(|axis| *axis == expected_axis).count()
+                == expected
+                    .iter()
+                    .filter(|axis| *axis == expected_axis)
+                    .count()
+        })
 }
 
 fn format_axes(axes: &[AxisDirection]) -> String {
