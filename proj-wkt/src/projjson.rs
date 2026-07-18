@@ -4,7 +4,8 @@ use std::collections::HashMap;
 use crate::semantics::{
     angle_unit_name_to_degree, approx_eq, linear_unit_from_meters_per_unit, linear_unit_name,
     normalize_key, projection_parameter_unit_kind, radians_to_degrees_factor, resolve_named_datum,
-    resolve_structured_datum, validate_supported_geographic_or_ellipsoidal_height_semantics,
+    resolve_structured_datum_or_custom,
+    validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
     AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, DatumAliasScope,
@@ -487,9 +488,10 @@ fn infer_datum_from_json_crs(value: &Value) -> Result<proj_core::Datum> {
 
     match ellipsoid.as_ref() {
         Some(ellipsoid) => {
-            resolve_structured_datum(DatumAliasScope::ProjJson, &datum_name, ellipsoid).ok_or_else(
-                || ParseError::Parse("unsupported PROJJSON datum or CRS definition".into()),
-            )
+            resolve_structured_datum_or_custom(DatumAliasScope::ProjJson, &datum_name, ellipsoid)
+                .ok_or_else(|| {
+                    ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
+                })
         }
         None => resolve_named_datum(DatumAliasScope::ProjJson, &datum_name).ok_or_else(|| {
             ParseError::Parse("unsupported PROJJSON datum or CRS definition".into())
@@ -1181,8 +1183,11 @@ mod tests {
     }
 
     #[test]
-    fn rejects_projjson_custom_datum_even_when_other_names_match() {
-        let err = parse_projjson(
+    /// An unrecognized datum name with valid ellipsoid numbers parses as a
+    /// custom datum and must not be conflated with WGS 84 despite sharing
+    /// its ellipsoid.
+    fn projjson_custom_datum_parses_as_custom_datum() {
+        let crs = parse_projjson(
             r#"{
                 "type": "GeographicCRS",
                 "name": "WGS 84 styled custom",
@@ -1204,11 +1209,17 @@ mod tests {
                 }
             }"#,
         )
-        .unwrap_err();
+        .unwrap();
 
-        assert!(err
-            .to_string()
-            .contains("unsupported PROJJSON datum or CRS definition"));
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 0);
+        let wgs84 = proj_core::lookup_epsg(4326).unwrap();
+        assert!(!crs.semantically_equivalent(&wgs84));
+        // The custom definition roundtrips through the PROJJSON serializer
+        // (structural comparison: custom datums are fail-closed under
+        // semantic equivalence by design).
+        let reparsed = parse_projjson(&crate::to_projjson(&crs).unwrap()).unwrap();
+        assert_eq!(format!("{crs:?}"), format!("{reparsed:?}"));
     }
 
     #[test]

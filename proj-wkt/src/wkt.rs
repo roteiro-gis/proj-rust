@@ -1,6 +1,6 @@
 use crate::semantics::{
     approx_eq, linear_unit_from_meters_per_unit, normalize_key, projection_parameter_unit_kind,
-    radians_to_degrees_factor, resolve_structured_datum,
+    radians_to_degrees_factor, resolve_structured_datum_or_custom,
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
@@ -681,7 +681,7 @@ fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
     let ellipsoid = parse_structured_ellipsoid(datum_inner)
         .ok_or_else(|| ParseError::Parse("WKT datum is missing a supported ellipsoid".into()))?;
 
-    resolve_structured_datum(DatumAliasScope::Wkt, &datum_name, &ellipsoid)
+    resolve_structured_datum_or_custom(DatumAliasScope::Wkt, &datum_name, &ellipsoid)
         .ok_or_else(|| ParseError::Parse("unsupported or unrecognized WKT datum".into()))
 }
 
@@ -1593,15 +1593,27 @@ mod tests {
             .contains("unsupported axis order/directions"));
     }
 
+    /// An unrecognized datum name with valid ellipsoid numbers parses as a
+    /// custom datum (as the serializers emit for definitions without a
+    /// registry identity) and must not be conflated with the registry datum
+    /// sharing its ellipsoid.
     #[test]
-    fn reject_custom_airy_datum_without_structured_match() {
-        let err = parse_wkt(
+    fn custom_airy_datum_parses_as_custom_datum() {
+        let crs = parse_wkt(
             r#"GEOGCRS["Custom Airy",DATUM["Custom Airy Datum",ELLIPSOID["Airy 1830",6377563.396,299.3249646]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]]"#,
         )
-        .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unsupported or unrecognized WKT datum"));
+        .unwrap();
+        assert!(crs.is_geographic());
+        assert_eq!(crs.epsg(), 0);
+        let osgb = proj_core::lookup_epsg(4277).unwrap();
+        assert!(!crs.semantically_equivalent(&osgb));
+        // The custom definition roundtrips through both serializers
+        // (structural comparison: custom datums are fail-closed under
+        // semantic equivalence by design).
+        let reparsed = parse_wkt(&crate::to_wkt(&crs).unwrap()).unwrap();
+        assert_eq!(format!("{crs:?}"), format!("{reparsed:?}"));
+        let reparsed = parse_wkt(&crate::to_wkt2(&crs).unwrap()).unwrap();
+        assert_eq!(format!("{crs:?}"), format!("{reparsed:?}"));
     }
 
     #[test]
