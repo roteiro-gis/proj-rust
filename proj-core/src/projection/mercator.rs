@@ -9,6 +9,7 @@ use crate::projection::{
 ///
 /// Distinct from Web Mercator (EPSG:3857), which uses spherical formulas.
 /// This uses the full ellipsoidal equations. EPSG example: 3395 (WGS 84 / World Mercator).
+#[derive(Clone)]
 pub(crate) struct Mercator {
     a_k0: f64,
     e: f64,

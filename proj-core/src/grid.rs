@@ -70,6 +70,7 @@ pub struct VerticalGridSample {
 }
 
 #[derive(Debug, Error, Clone)]
+#[non_exhaustive]
 pub enum GridError {
     #[error("grid not found: {0}")]
     NotFound(String),
@@ -95,6 +96,17 @@ pub trait GridProvider: Send + Sync {
 pub struct GridHandle {
     definition: GridDefinition,
     data: Arc<CachedGridData>,
+}
+
+impl std::fmt::Debug for GridHandle {
+    /// Summary form: grid data can be hundreds of megabytes, so print the
+    /// definition and content checksum instead of the samples.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GridHandle")
+            .field("definition", &self.definition)
+            .field("checksum", &self.data.checksum)
+            .finish_non_exhaustive()
+    }
 }
 
 impl GridHandle {

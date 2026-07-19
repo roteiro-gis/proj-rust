@@ -25,7 +25,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [crs_parse, wkt_roundtrip, ntv2_parse, gtx_parse, geotiff_parse]
+        target: [crs_parse, wkt_roundtrip, projjson_roundtrip, ntv2_parse, gtx_parse, geotiff_parse]
     steps:
       - uses: actions/checkout@v4
       - name: Install Rust nightly

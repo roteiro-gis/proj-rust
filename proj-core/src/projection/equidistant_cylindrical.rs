@@ -9,6 +9,7 @@ use crate::projection::{
 ///
 /// The simplest projection: x = a * cos(lat_ts) * normalized(lon - lon0), y = a * lat.
 /// When lat_ts = 0, this is the standard Plate Carree.
+#[derive(Clone)]
 pub(crate) struct EquidistantCylindrical {
     a_cos_lat_ts: f64,
     a: f64,

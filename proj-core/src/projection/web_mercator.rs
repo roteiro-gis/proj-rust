@@ -11,6 +11,7 @@ use crate::projection::{
 ///
 /// Uses the spherical Mercator formulas with WGS84's semi-major axis,
 /// matching the EPSG:3857 / "Pseudo-Mercator" definition.
+#[derive(Clone)]
 pub(crate) struct WebMercator {
     a: f64,
 }

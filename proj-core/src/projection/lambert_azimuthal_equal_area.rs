@@ -20,6 +20,7 @@ enum Aspect {
 ///
 /// This implements EPSG method 9820, including oblique/equatorial and polar
 /// aspects on ellipsoids and spheres.
+#[derive(Clone)]
 pub(crate) struct LambertAzimuthalEqualArea {
     a: f64,
     e2: f64,

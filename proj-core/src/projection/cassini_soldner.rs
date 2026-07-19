@@ -8,6 +8,7 @@ use crate::projection::{
 /// Cassini-Soldner projection.
 ///
 /// Implements EPSG method 9806 for older cadastral and national grid systems.
+#[derive(Clone)]
 pub(crate) struct CassiniSoldner {
     a: f64,
     e2: f64,

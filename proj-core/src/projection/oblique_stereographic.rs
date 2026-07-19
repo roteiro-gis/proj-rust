@@ -13,6 +13,7 @@ const RHO_EPSILON: f64 = 1e-9;
 ///
 /// This is the EPSG 9809 conformal-sphere method used by systems such as
 /// RD New, not Snyder's single-stage ellipsoidal stereographic.
+#[derive(Clone)]
 pub(crate) struct ObliqueStereographic {
     e: f64,
     e2: f64,

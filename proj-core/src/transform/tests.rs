@@ -1833,3 +1833,19 @@ fn parallel_batch_transform_3d_matches_sequential_on_large_input() {
 
     assert_eq!(parallel, sequential);
 }
+
+#[test]
+fn cloned_transform_produces_identical_results() {
+    let original = Transform::new("EPSG:4326", "EPSG:32618").unwrap();
+    let cloned = original.clone();
+
+    let input = (-74.006, 40.7128);
+    assert_eq!(
+        original.convert(input).unwrap(),
+        cloned.convert(input).unwrap()
+    );
+
+    let debug = format!("{original:?}");
+    assert!(debug.contains("Transform"), "debug output: {debug}");
+    assert!(debug.contains("32618"), "debug output: {debug}");
+}

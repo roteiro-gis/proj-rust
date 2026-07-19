@@ -46,8 +46,10 @@
 
 mod proj_string;
 mod projjson;
+mod projjson_writer;
 mod semantics;
 mod wkt;
+mod wkt2_writer;
 mod wkt_writer;
 
 use proj_core::{
@@ -57,7 +59,10 @@ use proj_core::{
 };
 
 /// Parse error.
+///
+/// `#[non_exhaustive]`: match the variants you handle and keep a wildcard arm.
 #[derive(Debug, thiserror::Error)]
+#[non_exhaustive]
 pub enum ParseError {
     #[error("failed to parse CRS string: {0}")]
     Parse(String),
@@ -106,6 +111,27 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
 /// meters.
 pub fn to_wkt(crs: &CrsDef) -> Result<String> {
     wkt_writer::to_wkt(crs)
+}
+
+/// Serialize a CRS definition as WKT2 (ISO 19162) `GEOGCRS`, `PROJCRS`, or
+/// `COMPOUNDCRS`.
+///
+/// Projection false easting/northing parameters are emitted in the CRS native
+/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
+/// meters. The emitted text reparses through [`parse_crs`] to an equivalent
+/// definition.
+pub fn to_wkt2(crs: &CrsDef) -> Result<String> {
+    wkt2_writer::to_wkt2(crs)
+}
+
+/// Serialize a CRS definition as PROJJSON.
+///
+/// The emitted document reparses through [`parse_crs`] to an equivalent
+/// definition; EPSG identities present on the definition are preserved.
+pub fn to_projjson(crs: &CrsDef) -> Result<String> {
+    let value = projjson_writer::to_projjson_value(crs)?;
+    serde_json::to_string(&value)
+        .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
 }
 
 fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {

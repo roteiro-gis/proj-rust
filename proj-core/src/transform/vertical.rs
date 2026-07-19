@@ -13,6 +13,7 @@ use crate::selector;
 use std::borrow::Cow;
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub(super) enum VerticalTransform {
     None {
         diagnostics: VerticalTransformDiagnostics,
@@ -31,6 +32,7 @@ pub(super) enum VerticalTransform {
     },
 }
 
+#[derive(Clone)]
 pub(super) struct CompiledVerticalGridShift {
     handle: GridHandle,
     direction: VerticalGridShiftDirection,
@@ -46,6 +48,7 @@ enum VerticalGridShiftDirection {
     GravityToEllipsoid,
 }
 
+#[derive(Clone)]
 enum VerticalSampleHorizontal {
     Geographic,
     Projected {

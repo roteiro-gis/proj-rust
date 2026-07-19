@@ -17,15 +17,18 @@ const SWISS_INVERSE_ITERATIONS: usize = 10;
 /// uses easting/northing at the projection centre. The Swiss right-angle form
 /// is evaluated with its dedicated conformal-sphere equations to avoid the
 /// numerically singular Hotine centre-line offset at 90 degrees.
+#[derive(Clone)]
 pub(crate) struct HotineObliqueMercator {
     kernel: HotineKernel,
 }
 
+#[derive(Clone)]
 enum HotineKernel {
     General(GeneralHotineObliqueMercator),
     Swiss(SwissObliqueMercator),
 }
 
+#[derive(Clone)]
 struct GeneralHotineObliqueMercator {
     e: f64,
     a_const: f64,
@@ -150,6 +153,7 @@ impl GeneralHotineObliqueMercator {
     }
 }
 
+#[derive(Clone)]
 struct SwissObliqueMercator {
     e: f64,
     half_e: f64,

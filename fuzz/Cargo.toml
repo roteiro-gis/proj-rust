@@ -28,6 +28,13 @@ doc = false
 bench = false
 
 [[bin]]
+name = "projjson_roundtrip"
+path = "fuzz_targets/projjson_roundtrip.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
 name = "ntv2_parse"
 path = "fuzz_targets/ntv2_parse.rs"
 test = false

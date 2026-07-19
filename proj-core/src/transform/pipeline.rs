@@ -20,6 +20,7 @@ pub(super) const PARALLEL_MIN_TOTAL_ITEMS: usize = 16_384;
 #[cfg(feature = "rayon")]
 pub(super) const PARALLEL_MIN_ITEMS_PER_THREAD: usize = 4_096;
 
+#[derive(Clone)]
 pub(super) struct CompiledOperationPipeline {
     steps: SmallVec<[CompiledStep; 8]>,
     pub(super) source_xy_units: PipelineSourceXyUnits,
@@ -29,10 +30,11 @@ pub(super) struct CompiledOperationPipeline {
     pub(super) transforms_ellipsoidal_height: bool,
 }
 
+#[derive(Clone)]
 pub(super) struct CompiledOperationFallback {
     pub(super) operation: SelectedOperationKind,
     pub(super) direction: OperationStepDirection,
-    pub(super) metadata: CoordinateOperationMetadata,
+    pub(super) metadata: std::sync::Arc<CoordinateOperationMetadata>,
     pub(super) pipeline: CompiledOperationPipeline,
 }
 
@@ -107,6 +109,7 @@ pub(super) struct PipelineExecutionOutcome {
     pub(super) vertical: VerticalTransformDiagnostics,
 }
 
+#[derive(Clone)]
 enum CompiledStep {
     ProjectionForward {
         projection: Projection,

@@ -39,17 +39,39 @@ use pipeline::PARALLEL_MIN_ITEMS_PER_THREAD;
 use pipeline::{PipelineSourceXyUnits, PipelineTargetXyUnits};
 
 /// A reusable coordinate transformation between two CRS.
+#[derive(Clone)]
 pub struct Transform {
     source: CrsDef,
     target: CrsDef,
     selected_operation_kind: SelectedOperationKind,
     selected_direction: OperationStepDirection,
-    selected_operation: CoordinateOperationMetadata,
+    selected_operation: std::sync::Arc<CoordinateOperationMetadata>,
     diagnostics: OperationSelectionDiagnostics,
     vertical_transform: VerticalTransform,
     selection_options: SelectionOptions,
     pipeline: CompiledOperationPipeline,
     fallback_pipelines: Vec<CompiledOperationFallback>,
+}
+
+impl std::fmt::Debug for Transform {
+    /// Summary form: compiled pipelines and grid data are internals; the
+    /// CRS pair and the selected operation identify the transform.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Transform")
+            .field("source", &self.source)
+            .field("target", &self.target)
+            .field("selected_operation", &self.selected_operation)
+            .finish_non_exhaustive()
+    }
+}
+
+/// `Transform` must stay cheaply shareable across threads and duplicable;
+/// a field losing one of these auto traits is a semver break, so fail the
+/// build instead.
+#[allow(dead_code)]
+fn assert_transform_auto_traits() {
+    fn assert_traits<T: Send + Sync + Clone + std::fmt::Debug>() {}
+    assert_traits::<Transform>();
 }
 
 /// Trait for `geo-types` geometries that can be transformed as whole values.
@@ -218,7 +240,7 @@ impl Transform {
             target: to.clone(),
             selected_operation_kind: selected.operation,
             selected_direction: selected.direction,
-            selected_operation: selected.metadata,
+            selected_operation: std::sync::Arc::new(selected.metadata),
             diagnostics: selected.diagnostics,
             vertical_transform,
             selection_options: options,
@@ -229,7 +251,7 @@ impl Transform {
 
     /// Transform a single coordinate.
     pub fn convert<T: Transformable>(&self, coord: T) -> Result<T> {
-        let c = coord.into_coord();
+        let c = coord.to_coord();
         let result = self.convert_coord(c)?;
         Ok(T::from_coord(result))
     }
@@ -271,7 +293,7 @@ impl Transform {
 
     /// Transform a single 3D coordinate.
     pub fn convert_3d<T: Transformable3D>(&self, coord: T) -> Result<T> {
-        let c = coord.into_coord3d();
+        let c = coord.to_coord3d();
         let result = self.convert_coord3d(c)?;
         Ok(T::from_coord3d(result))
     }
@@ -288,7 +310,7 @@ impl Transform {
         &self,
         coord: T,
     ) -> Result<TransformOutcome<T>> {
-        let c = coord.into_coord();
+        let c = coord.to_coord();
         let outcome = self.convert_coord_with_diagnostics(c)?;
         Ok(TransformOutcome {
             coord: T::from_coord(outcome.coord),
@@ -307,7 +329,7 @@ impl Transform {
         &self,
         coord: T,
     ) -> Result<TransformOutcome<T>> {
-        let c = coord.into_coord3d();
+        let c = coord.to_coord3d();
         let outcome = self.convert_coord3d_with_diagnostics(c)?;
         Ok(TransformOutcome {
             coord: T::from_coord3d(outcome.coord),
@@ -388,7 +410,7 @@ impl Transform {
             fallback_pipelines.push(CompiledOperationFallback {
                 operation: fallback.operation.clone(),
                 direction,
-                metadata,
+                metadata: std::sync::Arc::new(metadata),
                 pipeline,
             });
         }
@@ -398,7 +420,7 @@ impl Transform {
             selected_reasons: self.diagnostics.selected_reasons.clone(),
             fallback_operations: fallback_pipelines
                 .iter()
-                .map(|fallback| fallback.metadata.clone())
+                .map(|fallback| (*fallback.metadata).clone())
                 .collect(),
             skipped_operations: Vec::new(),
             approximate: self.diagnostics.approximate,
@@ -409,7 +431,7 @@ impl Transform {
             target: self.source.clone(),
             selected_operation_kind,
             selected_direction,
-            selected_operation,
+            selected_operation: std::sync::Arc::new(selected_operation),
             diagnostics,
             vertical_transform,
             selection_options: inverse_options,
@@ -706,13 +728,19 @@ impl Transform {
     }
 
     /// Batch transform (sequential).
-    pub fn convert_batch<T: Transformable + Clone>(&self, coords: &[T]) -> Result<Vec<T>> {
-        coords.iter().map(|c| self.convert(c.clone())).collect()
+    pub fn convert_batch<T: Transformable>(&self, coords: &[T]) -> Result<Vec<T>> {
+        coords
+            .iter()
+            .map(|c| self.convert_coord(c.to_coord()).map(T::from_coord))
+            .collect()
     }
 
     /// Batch transform of 3D coordinates (sequential).
-    pub fn convert_batch_3d<T: Transformable3D + Clone>(&self, coords: &[T]) -> Result<Vec<T>> {
-        coords.iter().map(|c| self.convert_3d(c.clone())).collect()
+    pub fn convert_batch_3d<T: Transformable3D>(&self, coords: &[T]) -> Result<Vec<T>> {
+        coords
+            .iter()
+            .map(|c| self.convert_coord3d(c.to_coord3d()).map(T::from_coord3d))
+            .collect()
     }
 
     /// Transform 2D coordinates in place without allocating.

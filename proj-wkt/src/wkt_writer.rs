@@ -121,7 +121,7 @@ fn format_projection_parameters(
         .collect()
 }
 
-fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
+pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
     match method {
         ProjectionMethod::WebMercator => "Popular_Visualisation_Pseudo_Mercator",
         ProjectionMethod::TransverseMercator { .. } => "Transverse_Mercator",
@@ -157,7 +157,7 @@ fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
     }
 }
 
-fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionParam> {
+pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionParam> {
     match method {
         ProjectionMethod::WebMercator => vec![
             angle_param("central_meridian", 0.0),
@@ -458,7 +458,7 @@ fn authority_code(code: u32) -> Option<u32> {
     (code != 0).then_some(code)
 }
 
-fn datum_wkt(datum: &Datum, datum_epsg: Option<u32>) -> Result<DatumWkt> {
+pub(crate) fn datum_wkt(datum: &Datum, datum_epsg: Option<u32>) -> Result<DatumWkt> {
     if let Some(code) = datum_epsg {
         if let Some(known) = known_datum(code) {
             return Ok(known.with_datum(datum));
@@ -512,7 +512,7 @@ fn ellipsoid_wkt(ellipsoid: proj_core::Ellipsoid, epsg: Option<u32>) -> Ellipsoi
     }
 }
 
-fn linear_unit_wkt(unit: LinearUnit) -> Result<LinearUnitWkt> {
+pub(crate) fn linear_unit_wkt(unit: LinearUnit) -> Result<LinearUnitWkt> {
     let factor = checked_number("linear unit", "meters_per_unit", unit.meters_per_unit())?;
     if approx_eq(factor, 1.0) {
         return Ok(LinearUnitWkt {
@@ -550,7 +550,7 @@ fn linear_unit_wkt(unit: LinearUnit) -> Result<LinearUnitWkt> {
     })
 }
 
-fn vertical_datum_name(code: u32) -> &'static str {
+pub(crate) fn vertical_datum_name(code: u32) -> &'static str {
     match code {
         1027 => "EGM2008 geoid",
         5102 => "National Geodetic Vertical Datum 1929",
@@ -569,7 +569,7 @@ fn wkt_name<'a>(name: &'a str, fallback: &'a str) -> &'a str {
     }
 }
 
-fn quote(value: &str) -> String {
+pub(crate) fn quote(value: &str) -> String {
     format!(r#""{}""#, value.replace('"', "\"\""))
 }
 
@@ -583,7 +583,7 @@ fn checked_number(method: &str, name: &str, value: f64) -> Result<f64> {
     }
 }
 
-fn format_f64(value: f64) -> String {
+pub(crate) fn format_f64(value: f64) -> String {
     if value == 0.0 {
         "0".to_string()
     } else if (value - value.round()).abs() <= 1e-9 {
@@ -615,11 +615,11 @@ fn scale_param(name: &'static str, value: f64) -> ProjectionParam {
 }
 
 #[derive(Clone, Copy)]
-struct ProjectionParam {
-    method: &'static str,
-    name: &'static str,
-    value: f64,
-    kind: ParameterKind,
+pub(crate) struct ProjectionParam {
+    pub(crate) method: &'static str,
+    pub(crate) name: &'static str,
+    pub(crate) value: f64,
+    pub(crate) kind: ParameterKind,
 }
 
 impl ProjectionParam {
@@ -634,16 +634,16 @@ impl ProjectionParam {
 }
 
 #[derive(Clone, Copy)]
-enum ParameterKind {
+pub(crate) enum ParameterKind {
     Angle,
     Length,
     Scale,
 }
 
-struct DatumWkt {
-    name: String,
-    datum_epsg: Option<u32>,
-    ellipsoid: EllipsoidWkt,
+pub(crate) struct DatumWkt {
+    pub(crate) name: String,
+    pub(crate) datum_epsg: Option<u32>,
+    pub(crate) ellipsoid: EllipsoidWkt,
 }
 
 #[derive(Clone)]
@@ -682,17 +682,17 @@ impl EllipsoidTemplate {
     }
 }
 
-struct EllipsoidWkt {
-    name: String,
-    epsg: Option<u32>,
-    semi_major_axis: f64,
-    inverse_flattening: f64,
+pub(crate) struct EllipsoidWkt {
+    pub(crate) name: String,
+    pub(crate) epsg: Option<u32>,
+    pub(crate) semi_major_axis: f64,
+    pub(crate) inverse_flattening: f64,
 }
 
-struct LinearUnitWkt {
-    name: &'static str,
-    factor: String,
-    epsg: Option<u32>,
+pub(crate) struct LinearUnitWkt {
+    pub(crate) name: &'static str,
+    pub(crate) factor: String,
+    pub(crate) epsg: Option<u32>,
 }
 
 fn known_datum(code: u32) -> Option<&'static DatumTemplate> {

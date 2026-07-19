@@ -249,6 +249,37 @@ pub(crate) fn resolve_structured_datum(
     })
 }
 
+/// Resolve a structured datum, falling back to a custom datum built from the
+/// ellipsoid numbers when the datum name is not recognized at all. A known
+/// datum name with contradictory ellipsoid numbers stays an error instead of
+/// silently becoming a different datum. The custom fallback keeps the
+/// parse→emit→parse cycle closed: the serializers emit
+/// `Unknown datum`/`Unknown ellipsoid` with numeric parameters for
+/// definitions without a registry identity.
+pub(crate) fn resolve_structured_datum_or_custom(
+    scope: DatumAliasScope,
+    datum_name: &str,
+    ellipsoid: &StructuredEllipsoid,
+) -> Option<Datum> {
+    if let Some(datum) = resolve_structured_datum(scope, datum_name, ellipsoid) {
+        return Some(datum);
+    }
+    if resolve_named_datum(scope, datum_name).is_some() {
+        return None;
+    }
+    custom_datum_from_structured_ellipsoid(ellipsoid)
+}
+
+fn custom_datum_from_structured_ellipsoid(ellipsoid: &StructuredEllipsoid) -> Option<Datum> {
+    let ellipsoid = if ellipsoid.inverse_flattening == 0.0 {
+        proj_core::Ellipsoid::sphere(ellipsoid.semi_major_axis).ok()?
+    } else {
+        proj_core::Ellipsoid::from_a_rf(ellipsoid.semi_major_axis, ellipsoid.inverse_flattening)
+            .ok()?
+    };
+    Datum::new(ellipsoid, proj_core::DatumToWgs84::Unknown).ok()
+}
+
 pub(crate) fn resolve_named_datum(scope: DatumAliasScope, datum_name: &str) -> Option<Datum> {
     datum_candidates().iter().find_map(|candidate| {
         datum_alias_matches(candidate, scope, datum_name).then_some(candidate.datum.clone())

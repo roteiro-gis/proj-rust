@@ -4,6 +4,7 @@
 /// - **Geographic CRS**: degrees (x = longitude, y = latitude)
 /// - **Projected CRS**: the CRS's native linear unit (x = easting, y = northing)
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord {
     pub x: f64,
     pub y: f64,
@@ -22,6 +23,7 @@ impl Coord {
 /// - **Projected CRS**: x/y are easting/northing in the CRS's native linear unit
 /// - `z` is preserved only when source and target vertical semantics are unchanged
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord3D {
     pub x: f64,
     pub y: f64,
@@ -43,6 +45,7 @@ impl Coord3D {
 /// Bounds transformation APIs accept at most
 /// [`MAX_BOUNDS_DENSIFY_POINTS`] intermediate samples per edge.
 #[derive(Debug, Clone, Copy, PartialEq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Bounds {
     pub min_x: f64,
     pub min_y: f64,
@@ -135,7 +138,7 @@ impl From<Coord> for geo_types::Coord<f64> {
 /// The transform returns the same type as the input, so `geo_types::Coord<f64>` in
 /// gives `geo_types::Coord<f64>` out, and `(f64, f64)` in gives `(f64, f64)` out.
 pub trait Transformable: Sized {
-    fn into_coord(self) -> Coord;
+    fn to_coord(&self) -> Coord;
     fn from_coord(c: Coord) -> Self;
 }
 
@@ -145,13 +148,13 @@ pub trait Transformable: Sized {
 /// The transform returns the same type as the input, so `(f64, f64, f64)` in gives
 /// `(f64, f64, f64)` out and [`Coord3D`] in gives [`Coord3D`] out.
 pub trait Transformable3D: Sized {
-    fn into_coord3d(self) -> Coord3D;
+    fn to_coord3d(&self) -> Coord3D;
     fn from_coord3d(c: Coord3D) -> Self;
 }
 
 impl Transformable for Coord {
-    fn into_coord(self) -> Coord {
-        self
+    fn to_coord(&self) -> Coord {
+        *self
     }
     fn from_coord(c: Coord) -> Self {
         c
@@ -159,7 +162,7 @@ impl Transformable for Coord {
 }
 
 impl Transformable for (f64, f64) {
-    fn into_coord(self) -> Coord {
+    fn to_coord(&self) -> Coord {
         Coord {
             x: self.0,
             y: self.1,
@@ -171,8 +174,8 @@ impl Transformable for (f64, f64) {
 }
 
 impl Transformable3D for Coord3D {
-    fn into_coord3d(self) -> Coord3D {
-        self
+    fn to_coord3d(&self) -> Coord3D {
+        *self
     }
 
     fn from_coord3d(c: Coord3D) -> Self {
@@ -181,7 +184,7 @@ impl Transformable3D for Coord3D {
 }
 
 impl Transformable3D for (f64, f64, f64) {
-    fn into_coord3d(self) -> Coord3D {
+    fn to_coord3d(&self) -> Coord3D {
         Coord3D {
             x: self.0,
             y: self.1,
@@ -196,7 +199,7 @@ impl Transformable3D for (f64, f64, f64) {
 
 #[cfg(feature = "geo-types")]
 impl Transformable for geo_types::Coord<f64> {
-    fn into_coord(self) -> Coord {
+    fn to_coord(&self) -> Coord {
         Coord {
             x: self.x,
             y: self.y,
@@ -241,7 +244,7 @@ mod tests {
     #[test]
     fn transformable_roundtrip_tuple() {
         let original = (10.0, 20.0);
-        let coord = original.into_coord();
+        let coord = original.to_coord();
         let back = <(f64, f64)>::from_coord(coord);
         assert_eq!(original, back);
     }
@@ -249,7 +252,7 @@ mod tests {
     #[test]
     fn transformable3d_roundtrip_tuple() {
         let original = (10.0, 20.0, 30.0);
-        let coord = original.into_coord3d();
+        let coord = original.to_coord3d();
         let back = <(f64, f64, f64)>::from_coord3d(coord);
         assert_eq!(original, back);
     }
@@ -268,5 +271,25 @@ mod tests {
         assert!(!Bounds::new(-10.0, 20.0, f64::INFINITY, 40.0).is_valid());
         assert!(!Bounds::new(30.0, 20.0, -10.0, 40.0).is_valid());
         assert!(!Bounds::new(-10.0, 40.0, 30.0, 20.0).is_valid());
+    }
+}
+
+#[cfg(all(test, feature = "serde"))]
+mod serde_tests {
+    use super::*;
+
+    #[test]
+    fn coordinate_types_roundtrip_through_json() {
+        let coord = Coord::new(-74.006, 40.7128);
+        let json = serde_json::to_string(&coord).unwrap();
+        assert_eq!(serde_json::from_str::<Coord>(&json).unwrap(), coord);
+
+        let coord3d = Coord3D::new(-74.006, 40.7128, 15.0);
+        let json = serde_json::to_string(&coord3d).unwrap();
+        assert_eq!(serde_json::from_str::<Coord3D>(&json).unwrap(), coord3d);
+
+        let bounds = Bounds::new(-75.0, 40.0, -73.0, 41.0);
+        let json = serde_json::to_string(&bounds).unwrap();
+        assert_eq!(serde_json::from_str::<Bounds>(&json).unwrap(), bounds);
     }
 }

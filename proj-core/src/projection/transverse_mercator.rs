@@ -16,6 +16,7 @@ use crate::projection::{
 /// flattening keep sub-nanometer accuracy over the full ±150° domain around
 /// the central meridian, including the poles, where the classic Snyder
 /// series loses longitude to catastrophic cancellation.
+#[derive(Clone)]
 pub(crate) struct TransverseMercator {
     /// Semi-major axis.
     a: f64,

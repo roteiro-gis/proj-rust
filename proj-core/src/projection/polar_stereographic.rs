@@ -14,6 +14,7 @@ use crate::projection::{
 ///
 /// Used by EPSG:3413 (NSIDC Sea Ice Polar Stereographic North),
 /// EPSG:3031 (Antarctic Polar Stereographic), and others.
+#[derive(Clone)]
 pub(crate) struct PolarStereographic {
     /// Central meridian / straight vertical longitude (radians).
     lon0: f64,
