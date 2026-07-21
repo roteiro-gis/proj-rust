@@ -1849,3 +1849,54 @@ fn cloned_transform_produces_identical_results() {
     assert!(debug.contains("Transform"), "debug output: {debug}");
     assert!(debug.contains("32618"), "debug output: {debug}");
 }
+
+#[test]
+fn geoid_grid_with_helmert_horizontal_fails_closed() {
+    // A geoid-grid vertical transform composed with a Helmert horizontal
+    // pipeline would drop the datum shift's ellipsoidal-height change;
+    // construction must reject it with a typed error.
+    let grid_root = write_test_gtx(&[-30.0, -30.0, -30.0, -30.0]);
+    let source = registry::lookup_epsg(4979).unwrap();
+    let target_horizontal = GeographicCrsDef::new(0, datum::OSGB36, "custom OSGB36 geographic");
+    let target_vertical = registry::lookup_vertical_epsg(5703).unwrap();
+    let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+        0,
+        HorizontalCrsDef::Geographic(target_horizontal),
+        target_vertical,
+        "custom OSGB36 + NAVD88 height",
+    )));
+    let helmert = CoordinateOperation {
+        id: None,
+        name: "custom WGS 84 to OSGB36".into(),
+        source_crs_epsg: Some(4326),
+        target_crs_epsg: None,
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: Some(crate::operation::OperationAccuracy { meters: 5.0 }),
+        areas_of_use: SmallVec::new(),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        superseded: false,
+        method: OperationMethod::Helmert {
+            params: datum::OSGB36.helmert_to_wgs84().unwrap().inverse(),
+        },
+    };
+
+    let err = Transform::from_crs_defs_with_selection_options(
+        &source,
+        &target,
+        SelectionOptions {
+            grid_provider: Some(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+            vertical_grid_operations: vec![test_vertical_grid_operation()],
+            coordinate_operations: vec![helmert],
+            ..SelectionOptions::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("geoid-grid"),
+        "unexpected error: {err}"
+    );
+}

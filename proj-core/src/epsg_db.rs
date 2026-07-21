@@ -19,11 +19,11 @@ pub(crate) const PROVENANCE_JSON: &str = include_str!("../data/epsg.provenance.j
 // The container layout is defined once in `proj-epsg-format`, shared with
 // the `gen-registry` writer.
 use proj_epsg_format::{
-    COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_HELMERT, DATUM_SHIFT_IDENTITY,
-    DATUM_SHIFT_UNKNOWN, ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED,
-    FLAG_SUPERSEDED, GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX,
-    GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR, HEADER_SIZE, HORIZONTAL_CRS_GEOGRAPHIC,
-    HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
+    COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_IDENTITY, DATUM_SHIFT_UNKNOWN,
+    ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED, FLAG_SUPERSEDED,
+    GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
+    GRID_INTERPOLATION_BILINEAR, HEADER_SIZE, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED,
+    MAGIC, METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_EQUIDISTANT_CYL,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
     METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO,
     METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
@@ -70,6 +70,7 @@ struct CompoundRecord {
 struct RegistryDb {
     datums: BTreeMap<u32, Datum>,
     datum_ellipsoid_codes: BTreeMap<u32, u32>,
+    datum_codes_by_alias: BTreeMap<String, u32>,
     geographic_crs: BTreeMap<u32, GeographicRecord>,
     projected_crs: BTreeMap<u32, ProjectedRecord>,
     vertical_crs: BTreeMap<u32, VerticalRecord>,
@@ -113,6 +114,7 @@ fn parse_db() -> RegistryDb {
     let num_grids = read_u32(EPSG_DATA, 36) as usize;
     let num_operations = read_u32(EPSG_DATA, 40) as usize;
     let num_vertical_operations = read_u32(EPSG_DATA, 44) as usize;
+    let num_datum_aliases = read_u32(EPSG_DATA, 48) as usize;
 
     let mut offset = HEADER_SIZE;
 
@@ -142,24 +144,13 @@ fn parse_db() -> RegistryDb {
         let to_wgs84 = match EPSG_DATA[offset + 8] {
             DATUM_SHIFT_UNKNOWN => DatumToWgs84::Unknown,
             DATUM_SHIFT_IDENTITY => DatumToWgs84::Identity,
-            DATUM_SHIFT_HELMERT => DatumToWgs84::Helmert(
-                HelmertParams::new(
-                    read_f64(EPSG_DATA, offset + 16),
-                    read_f64(EPSG_DATA, offset + 24),
-                    read_f64(EPSG_DATA, offset + 32),
-                    read_f64(EPSG_DATA, offset + 40),
-                    read_f64(EPSG_DATA, offset + 48),
-                    read_f64(EPSG_DATA, offset + 56),
-                    read_f64(EPSG_DATA, offset + 64),
-                )
-                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code} Helmert params: {err}")),
-            ),
             other => panic!("unsupported datum shift kind: {other}"),
         };
         datums.insert(
             code,
             Datum::new(ellipsoid, to_wgs84)
-                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}")),
+                .unwrap_or_else(|err| panic!("invalid datum EPSG:{code}: {err}"))
+                .with_epsg(code),
         );
         datum_ellipsoid_codes.insert(code, ellipsoid_code);
         offset += DATUM_RECORD_SIZE;
@@ -520,9 +511,20 @@ fn parse_db() -> RegistryDb {
         }
     }
 
+    let mut datum_codes_by_alias = BTreeMap::new();
+    for _ in 0..num_datum_aliases {
+        let code = read_u32(EPSG_DATA, offset);
+        let alias_len = read_u16(EPSG_DATA, offset + 4) as usize;
+        let alias = read_static_string(EPSG_DATA, offset + 6, alias_len);
+        datum_codes_by_alias.insert(normalize_datum_alias(alias), code);
+        offset += 6 + alias_len;
+    }
+    let _ = offset;
+
     RegistryDb {
         datums,
         datum_ellipsoid_codes,
+        datum_codes_by_alias,
         geographic_crs,
         projected_crs,
         vertical_crs,
@@ -659,6 +661,23 @@ fn read_static_string(data: &'static [u8], offset: usize, len: usize) -> &'stati
 
 pub(crate) fn lookup_datum(code: u32) -> Option<Datum> {
     db().datums.get(&code).cloned()
+}
+
+/// Case- and punctuation-insensitive datum alias normalization; matches the
+/// normalization the generator's alias table is queried with.
+fn normalize_datum_alias(name: &str) -> String {
+    name.chars()
+        .filter(char::is_ascii_alphanumeric)
+        .map(|c| c.to_ascii_lowercase())
+        .collect()
+}
+
+pub(crate) fn lookup_datum_code_by_name(name: &str) -> Option<u32> {
+    let normalized = normalize_datum_alias(name);
+    if normalized.is_empty() {
+        return None;
+    }
+    db().datum_codes_by_alias.get(&normalized).copied()
 }
 
 pub(crate) fn lookup_ellipsoid_code_for_datum(code: u32) -> Option<u32> {
