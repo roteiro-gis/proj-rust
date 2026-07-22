@@ -1770,6 +1770,96 @@
     "description": "NYC 4326→32662 EqCyl precise inverse"
   },
   {
+    "from_epsg": 4242,
+    "to_epsg": 24200,
+    "input_x": -76.8,
+    "input_y": 18.0,
+    "expected_x": 271181.2980760896,
+    "expected_y": 150011.4238461517,
+    "tolerance": 0.001,
+    "description": "Kingston 4242→24200 LCC 1SP"
+  },
+  {
+    "from_epsg": 24200,
+    "to_epsg": 4242,
+    "input_x": 271181.2980760896,
+    "input_y": 150011.4238461517,
+    "expected_x": -76.8,
+    "expected_y": 18.0,
+    "tolerance": 1e-9,
+    "description": "Kingston 24200→4242 LCC 1SP inverse"
+  },
+  {
+    "from_epsg": 4267,
+    "to_epsg": 6201,
+    "input_x": -84.37,
+    "input_y": 43.75,
+    "expected_x": 1990309.1138959893,
+    "expected_y": 157995.08298693498,
+    "tolerance": 0.001,
+    "description": "Michigan Central 4267→6201 LCC Michigan"
+  },
+  {
+    "from_epsg": 6201,
+    "to_epsg": 4267,
+    "input_x": 1990309.1138959893,
+    "input_y": 157995.08298693498,
+    "expected_x": -84.37,
+    "expected_y": 43.75000000000001,
+    "tolerance": 1e-9,
+    "description": "Michigan Central 6201→4267 LCC Michigan inverse"
+  },
+  {
+    "from_epsg": 9547,
+    "to_epsg": 9549,
+    "input_x": 6.7,
+    "input_y": 45.2,
+    "expected_x": 140832.32200805977,
+    "expected_y": 51858.97323946923,
+    "tolerance": 0.001,
+    "description": "Lyon-Turin 9547→9549 LCC 1SP variant B"
+  },
+  {
+    "from_epsg": 9549,
+    "to_epsg": 9547,
+    "input_x": 140832.32200805977,
+    "input_y": 51858.97323946923,
+    "expected_x": 6.7,
+    "expected_y": 45.20000000000002,
+    "tolerance": 1e-9,
+    "description": "Lyon-Turin 9549→9547 LCC 1SP variant B inverse"
+  },
+  {
+    "from_epsg": 4686,
+    "to_epsg": 6247,
+    "input_x": -74.25,
+    "input_y": 4.8,
+    "expected_x": 80859.03296027493,
+    "expected_y": 122543.1742925066,
+    "tolerance": 0.001,
+    "description": "Bogota 4686→6247 Colombia Urban"
+  },
+  {
+    "from_epsg": 4686,
+    "to_epsg": 6247,
+    "input_x": -74.0,
+    "input_y": 4.6,
+    "expected_x": 108607.67815375591,
+    "expected_y": 100418.79321328922,
+    "tolerance": 0.001,
+    "description": "Bogota SE 4686→6247 Colombia Urban"
+  },
+  {
+    "from_epsg": 6247,
+    "to_epsg": 4686,
+    "input_x": 80859.03296027493,
+    "input_y": 122543.1742925066,
+    "expected_x": -74.24999999907845,
+    "expected_y": 4.799999996702549,
+    "tolerance": 1e-9,
+    "description": "Bogota 6247→4686 Colombia Urban inverse"
+  },
+  {
     "from_epsg": 4326,
     "to_epsg": 32618,
     "input_x": -75.0,

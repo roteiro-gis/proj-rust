@@ -146,6 +146,13 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
             variant_b: false, ..
         } => "Hotine_Oblique_Mercator",
         ProjectionMethod::CassiniSoldner { .. } => "Cassini_Soldner",
+        ProjectionMethod::ColombiaUrban { .. } => "Colombia_Urban",
+        ProjectionMethod::LambertConformalConicMichigan { .. } => {
+            "Lambert_Conformal_Conic_2SP_Michigan"
+        }
+        ProjectionMethod::LambertConformalConic1SPVariantB { .. } => {
+            "Lambert_Conformal_Conic_1SP_Variant_B"
+        }
         ProjectionMethod::Mercator { lat_ts, .. } => {
             if approx_eq(lat_ts, 0.0) {
                 "Mercator_1SP"
@@ -203,16 +210,26 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             lat0,
             lat1,
             lat2,
+            k0,
             false_easting,
             false_northing,
-        } => vec![
-            angle_param("latitude_of_origin", lat0),
-            angle_param("central_meridian", lon0),
-            angle_param("standard_parallel_1", lat1),
-            angle_param("standard_parallel_2", lat2),
-            length_param("false_easting", false_easting),
-            length_param("false_northing", false_northing),
-        ],
+        } => {
+            let mut params = vec![
+                angle_param("latitude_of_origin", lat0),
+                angle_param("central_meridian", lon0),
+                angle_param("standard_parallel_1", lat1),
+                angle_param("standard_parallel_2", lat2),
+            ];
+            // Only the 1SP variant carries a scale factor in WKT1.
+            if approx_eq(lat1, lat2) {
+                params.push(scale_param("scale_factor", k0));
+            }
+            params.extend([
+                length_param("false_easting", false_easting),
+                length_param("false_northing", false_northing),
+            ]);
+            params
+        }
         ProjectionMethod::AlbersEqualArea {
             lon0,
             lat0,
@@ -330,6 +347,51 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
         } => vec![
             angle_param("central_meridian", lon0),
             angle_param("standard_parallel_1", lat_ts),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::ColombiaUrban {
+            lon0,
+            lat0,
+            h0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            length_param("projection_plane_origin_height", h0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::LambertConformalConicMichigan {
+            lon0,
+            lat0,
+            lat1,
+            lat2,
+            ellipsoid_scaling_factor,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            angle_param("standard_parallel_1", lat1),
+            angle_param("standard_parallel_2", lat2),
+            scale_param("ellipsoid_scaling_factor", ellipsoid_scaling_factor),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::LambertConformalConic1SPVariantB {
+            lon0,
+            lat0,
+            k0,
+            lat_false_origin,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            scale_param("scale_factor", k0),
+            angle_param("latitude_of_false_origin", lat_false_origin),
+            angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
         ],
@@ -1341,6 +1403,7 @@ mod tests {
                 lat0: 33.0,
                 lat1: 33.0,
                 lat2: 33.0,
+                k0: 1.0,
                 false_easting: 0.0,
                 false_northing: 0.0,
             },
@@ -1455,6 +1518,7 @@ mod tests {
                     lat0: 33.0,
                     lat1: 33.0,
                     lat2: 33.0,
+                    k0: 1.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
                 },
@@ -1466,6 +1530,7 @@ mod tests {
                     lat0: 23.0,
                     lat1: 33.0,
                     lat2: 45.0,
+                    k0: 1.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
                 },

@@ -28,14 +28,14 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1089875,
-    "sha256": "sha256:d09219ba2334807620430b94cf6898c0a9f2dcf7e320a0a558cf359390363505"
+    "byte_len": 1094339,
+    "sha256": "sha256:2f2d9b46917ee6ce26576832d1831a9665a096798035740fba8e9f9b3b4f7bf1"
   },
   "counts": {
     "ellipsoids": 44,
     "datums": 585,
     "geographic_crs": 598,
-    "projected_crs": 5171,
+    "projected_crs": 5210,
     "vertical_crs": 293,
     "compound_crs": 684,
     "extents": 848,
@@ -47,12 +47,15 @@
   "supported_projection_methods": {
     "Albers Equal Area": 5,
     "Cassini-Soldner": 12,
+    "Colombia Urban": 14,
     "Equidistant Cylindrical": 7,
     "Hotine Oblique Mercator A": 10,
     "Hotine Oblique Mercator B": 11,
     "Lambert Azimuthal Equal Area": 8,
     "Lambert Azimuthal Equal Area (Spherical)": 13,
     "Lambert Conformal Conic": 4,
+    "Lambert Conic Conformal (1SP variant B)": 16,
+    "Lambert Conic Conformal (2SP Michigan)": 15,
     "Mercator": 3,
     "Oblique Stereographic": 9,
     "Polar Stereographic": 6,

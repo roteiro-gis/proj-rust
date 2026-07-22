@@ -638,6 +638,45 @@ pub enum ProjectionMethod {
         lat1: f64,
         /// Second standard parallel (degrees). Set equal to lat1 for 1SP variant.
         lat2: f64,
+        /// Scale factor at the natural origin (1SP variant); 1.0 for 2SP.
+        k0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
+
+    /// Lambert Conic Conformal (2SP Michigan), EPSG method 1051: LCC 2SP
+    /// with an ellipsoid scaling factor applied to the semi-major axis.
+    LambertConformalConicMichigan {
+        /// Central meridian (degrees).
+        lon0: f64,
+        /// Latitude of false origin (degrees).
+        lat0: f64,
+        /// First standard parallel (degrees).
+        lat1: f64,
+        /// Second standard parallel (degrees).
+        lat2: f64,
+        /// Ellipsoid scaling factor (EPSG parameter 1038).
+        ellipsoid_scaling_factor: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
+
+    /// Lambert Conic Conformal (1SP variant B), EPSG method 1102: the cone
+    /// is defined at the natural origin with a scale factor, while false
+    /// easting/northing apply at a separate false origin.
+    LambertConformalConic1SPVariantB {
+        /// Longitude of false origin (degrees).
+        lon0: f64,
+        /// Latitude of natural origin (degrees).
+        lat0: f64,
+        /// Scale factor at the natural origin.
+        k0: f64,
+        /// Latitude of false origin (degrees).
+        lat_false_origin: f64,
         /// False easting (meters).
         false_easting: f64,
         /// False northing (meters).
@@ -755,6 +794,16 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+    /// Colombia Urban (EPSG method 1052): plane projection at the elevation
+    /// of the mapped city. `h0` is the projection plane origin height in
+    /// meters.
+    ColombiaUrban {
+        lon0: f64,
+        lat0: f64,
+        h0: f64,
+        false_easting: f64,
+        false_northing: f64,
+    },
 }
 
 fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> bool {
@@ -810,6 +859,7 @@ fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> 
                 lat0: a_lat0,
                 lat1: a_lat1,
                 lat2: a_lat2,
+                k0: a_k0,
                 false_easting: a_false_easting,
                 false_northing: a_false_northing,
             },
@@ -818,11 +868,13 @@ fn projection_methods_equivalent(a: &ProjectionMethod, b: &ProjectionMethod) -> 
                 lat0: b_lat0,
                 lat1: b_lat1,
                 lat2: b_lat2,
+                k0: b_k0,
                 false_easting: b_false_easting,
                 false_northing: b_false_northing,
             },
         ) => {
-            approx_eq(*a_lon0, *b_lon0)
+            approx_eq(*a_k0, *b_k0)
+                && approx_eq(*a_lon0, *b_lon0)
                 && approx_eq(*a_lat0, *b_lat0)
                 && approx_eq(*a_lat1, *b_lat1)
                 && approx_eq(*a_lat2, *b_lat2)

@@ -51,6 +51,9 @@ pub const METHOD_HOTINE_OBLIQUE_MERCATOR_A: u8 = 10;
 pub const METHOD_HOTINE_OBLIQUE_MERCATOR_B: u8 = 11;
 pub const METHOD_CASSINI_SOLDNER: u8 = 12;
 pub const METHOD_LAEA_SPHERICAL: u8 = 13;
+pub const METHOD_COLOMBIA_URBAN: u8 = 14;
+pub const METHOD_LCC_MICHIGAN: u8 = 15;
+pub const METHOD_LCC_1SP_VARIANT_B: u8 = 16;
 
 // Coordinate operation step tags.
 pub const OP_IDENTITY: u8 = 0;
