@@ -141,12 +141,13 @@ use proj_epsg_format::{
     METHOD_ALBERS, METHOD_AMERICAN_POLYCONIC, METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER,
     METHOD_COLOMBIA_URBAN, METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
-    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LAEA,
-    METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
-    METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_TRANSVERSE_MERCATOR,
-    METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT, PROJ_CRS_RECORD_BASE_SIZE,
-    VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS,
-    VERTICAL_CRS_RECORD_BASE_SIZE, VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
+    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE,
+    METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
+    METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
+    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
+    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
+    VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
+    VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
 const PROVENANCE_SCHEMA_VERSION: u16 = 5;
@@ -386,6 +387,10 @@ fn method_code_to_id(code: i64) -> Option<u8> {
         // construction, as in C PROJ.
         1125 | 9832 => Some(METHOD_AZIMUTHAL_EQUIDISTANT),
         9831 => Some(METHOD_GUAM),
+        // C PROJ has no implementation of 9830; ours follows the EPSG
+        // Guidance Note directly.
+        9830 => Some(METHOD_POLAR_STEREO_VARIANT_C),
+        9813 => Some(METHOD_LABORDE),
         1024 => Some(METHOD_WEB_MERCATOR),
         _ => None,
     }
@@ -410,23 +415,36 @@ struct ConvParams {
     params: BTreeMap<i64, (f64, i64)>,
 }
 
-fn get_degrees(cp: &ConvParams, codes: &[i64]) -> f64 {
+fn get_degrees(cp: &ConvParams, codes: &[i64], angle_uoms: &BTreeMap<i64, f64>) -> f64 {
     for &code in codes {
         if let Some(&(value, uom)) = cp.params.get(&code) {
+            // Sexagesimal DMS (9110) is an encoding, not a multiplier, and
+            // has no conv_factor in proj.db.
             return if uom == 9110 {
                 convert_dms_to_degrees(value)
             } else {
+                // Exact degrees-per-unit factors, cross-checked against
+                // proj.db's (decimal-rounded) radians-per-unit so a wrong
+                // entry here or a newly used unit fails generation loudly.
                 let factor = match uom {
                     9102 | 9122 => 1.0,
                     9101 => 180.0 / PI,
-                    9105 => 1.0 / 3600.0,
-                    9104 => 1.0 / 60.0,
-                    9107 => 180.0 / 200.0,
+                    9103 => 1.0 / 60.0,
+                    9104 => 1.0 / 3600.0,
+                    9105 => 0.9,
                     _ => panic!(
                         "unsupported angular unit EPSG:{uom} for parameter EPSG:{code} in conversion method EPSG:{}",
                         cp.method_code
                     ),
                 };
+                let db_degrees = angle_uoms.get(&uom).copied().unwrap_or_else(|| {
+                    panic!("angular unit EPSG:{uom} missing from proj.db unit_of_measure")
+                }) * 180.0
+                    / PI;
+                assert!(
+                    ((factor - db_degrees) / factor).abs() < 1e-12,
+                    "angular unit EPSG:{uom}: hardcoded factor {factor} disagrees with proj.db {db_degrees}"
+                );
                 value * factor
             };
         }
@@ -462,12 +480,21 @@ fn parse_u32_code(text: &str) -> Option<u32> {
     text.trim().parse::<u32>().ok()
 }
 
-fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64>) -> [f64; 7] {
+fn encode_params(
+    method_id: u8,
+    cp: &ConvParams,
+    linear_uoms: &BTreeMap<i64, f64>,
+    angle_uoms: &BTreeMap<i64, f64>,
+) -> [f64; 7] {
     match method_id {
         METHOD_WEB_MERCATOR => [0.0; 7],
         METHOD_TRANSVERSE_MERCATOR => [
-            get_degrees(cp, &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN, LAT_FALSE_ORIGIN]),
+            get_degrees(
+                cp,
+                &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN],
+                angle_uoms,
+            ),
+            get_degrees(cp, &[LAT_ORIGIN, LAT_FALSE_ORIGIN], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_meters(cp, &[FALSE_EASTING, EASTING_FALSE_ORIGIN], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING, NORTHING_FALSE_ORIGIN], linear_uoms),
@@ -475,8 +502,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_MERCATOR => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -484,12 +511,16 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_LCC => [
-            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
-            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN], angle_uoms),
             // The 1SP method (9801) has no standard parallels: both fall
             // back to the natural-origin latitude, and the scale factor
             // applies at that origin.
-            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_FALSE_ORIGIN, LAT_ORIGIN]),
+            get_degrees(
+                cp,
+                &[LAT_1ST_PARALLEL, LAT_FALSE_ORIGIN, LAT_ORIGIN],
+                angle_uoms,
+            ),
             get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_degrees(
@@ -500,30 +531,57 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
                     LAT_FALSE_ORIGIN,
                     LAT_ORIGIN,
                 ],
+                angle_uoms,
             ),
             get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_ALBERS => [
-            get_degrees(cp, &[LON_FALSE_ORIGIN]),
-            get_degrees(cp, &[LAT_FALSE_ORIGIN]),
-            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            get_degrees(cp, &[LON_FALSE_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_1ST_PARALLEL], angle_uoms),
             get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
             0.0,
-            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_degrees(cp, &[LAT_2ND_PARALLEL], angle_uoms),
             get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_POLAR_STEREO => [
-            get_degrees(cp, &[LON_ORIGIN, LON_OF_ORIGIN]),
-            get_degrees(cp, &[LAT_STD_PARALLEL, LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN, LON_OF_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_STD_PARALLEL, LAT_ORIGIN], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
             0.0,
             0.0,
         ],
+        METHOD_POLAR_STEREO_VARIANT_C => [
+            get_degrees(cp, &[LON_OF_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_STD_PARALLEL], angle_uoms),
+            0.0,
+            get_meters(cp, &[EASTING_FALSE_ORIGIN], linear_uoms),
+            get_meters(cp, &[NORTHING_FALSE_ORIGIN], linear_uoms),
+            0.0,
+            0.0,
+        ],
+        METHOD_LABORDE => [
+            get_degrees(cp, &[LON_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[AZIMUTH_INITIAL_LINE], angle_uoms),
+            get_meters(cp, &[FALSE_EASTING], linear_uoms),
+            get_meters(cp, &[FALSE_NORTHING], linear_uoms),
+            get_scale(cp, &[SCALE_FACTOR_PROJECTION_CENTRE]),
+            0.0,
+        ],
         METHOD_EQUIDISTANT_CYL => [
-            get_degrees(cp, &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN]),
-            get_degrees(cp, &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL, LAT_ORIGIN]),
+            get_degrees(
+                cp,
+                &[LON_ORIGIN, LON_FALSE_ORIGIN, LON_OF_ORIGIN],
+                angle_uoms,
+            ),
+            get_degrees(
+                cp,
+                &[LAT_1ST_PARALLEL, LAT_STD_PARALLEL, LAT_ORIGIN],
+                angle_uoms,
+            ),
             0.0,
             get_meters(cp, &[FALSE_EASTING, EASTING_FALSE_ORIGIN], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING, NORTHING_FALSE_ORIGIN], linear_uoms),
@@ -531,26 +589,26 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_LCC_MICHIGAN => [
-            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
-            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN]),
-            get_degrees(cp, &[LAT_1ST_PARALLEL]),
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN, LAT_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_1ST_PARALLEL], angle_uoms),
             get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
             get_scale(cp, &[ELLIPSOID_SCALING_FACTOR]),
-            get_degrees(cp, &[LAT_2ND_PARALLEL]),
+            get_degrees(cp, &[LAT_2ND_PARALLEL], angle_uoms),
             get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_LCC_1SP_VARIANT_B => [
-            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_FALSE_ORIGIN, LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_meters(cp, &[EASTING_FALSE_ORIGIN, FALSE_EASTING], linear_uoms),
-            get_degrees(cp, &[LAT_FALSE_ORIGIN]),
+            get_degrees(cp, &[LAT_FALSE_ORIGIN], angle_uoms),
             0.0,
             get_meters(cp, &[NORTHING_FALSE_ORIGIN, FALSE_NORTHING], linear_uoms),
         ],
         METHOD_COLOMBIA_URBAN => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             get_meters(cp, &[PROJECTION_PLANE_HEIGHT], linear_uoms),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -558,16 +616,16 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_KROVAK_NORTH_ORIENTATED | METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED => [
-            get_degrees(cp, &[LON_OF_ORIGIN]),
-            get_degrees(cp, &[LAT_PROJECTION_CENTRE]),
-            get_degrees(cp, &[COLAT_CONE_AXIS]),
+            get_degrees(cp, &[LON_OF_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[COLAT_CONE_AXIS], angle_uoms),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_scale(cp, &[SCALE_FACTOR_PSEUDO_STD_PARALLEL]),
-            get_degrees(cp, &[LAT_PSEUDO_STD_PARALLEL]),
+            get_degrees(cp, &[LAT_PSEUDO_STD_PARALLEL], angle_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
         ],
         METHOD_EQUAL_EARTH => [
-            get_degrees(cp, &[LON_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
             0.0,
             0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
@@ -576,8 +634,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_AMERICAN_POLYCONIC | METHOD_AZIMUTHAL_EQUIDISTANT | METHOD_GUAM => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -585,8 +643,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_LAEA => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -594,8 +652,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_LAEA_SPHERICAL => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -603,8 +661,8 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_OBLIQUE_STEREO => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR]),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -612,26 +670,26 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             0.0,
         ],
         METHOD_HOTINE_OBLIQUE_MERCATOR_A => [
-            get_degrees(cp, &[LAT_PROJECTION_CENTRE]),
-            get_degrees(cp, &[LON_PROJECTION_CENTRE]),
-            get_degrees(cp, &[AZIMUTH_INITIAL_LINE]),
-            get_degrees(cp, &[RECTIFIED_GRID_ANGLE]),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[LON_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[AZIMUTH_INITIAL_LINE], angle_uoms),
+            get_degrees(cp, &[RECTIFIED_GRID_ANGLE], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR_PROJECTION_CENTRE]),
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
         ],
         METHOD_HOTINE_OBLIQUE_MERCATOR_B => [
-            get_degrees(cp, &[LAT_PROJECTION_CENTRE]),
-            get_degrees(cp, &[LON_PROJECTION_CENTRE]),
-            get_degrees(cp, &[AZIMUTH_INITIAL_LINE]),
-            get_degrees(cp, &[RECTIFIED_GRID_ANGLE]),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[LON_PROJECTION_CENTRE], angle_uoms),
+            get_degrees(cp, &[AZIMUTH_INITIAL_LINE], angle_uoms),
+            get_degrees(cp, &[RECTIFIED_GRID_ANGLE], angle_uoms),
             get_scale(cp, &[SCALE_FACTOR_PROJECTION_CENTRE]),
             get_meters(cp, &[EASTING_PROJECTION_CENTRE], linear_uoms),
             get_meters(cp, &[NORTHING_PROJECTION_CENTRE], linear_uoms),
         ],
         METHOD_CASSINI_SOLDNER => [
-            get_degrees(cp, &[LON_ORIGIN]),
-            get_degrees(cp, &[LAT_ORIGIN]),
+            get_degrees(cp, &[LON_ORIGIN], angle_uoms),
+            get_degrees(cp, &[LAT_ORIGIN], angle_uoms),
             0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
@@ -1970,7 +2028,7 @@ fn main() {
             let Some(method_id) = method_code_to_id(conv.method_code) else {
                 continue;
             };
-            let params = encode_params(method_id, &conv, &linear_uoms);
+            let params = encode_params(method_id, &conv, &linear_uoms, &angle_uoms);
             proj_crs.push(ProjCrs {
                 code,
                 base_geographic_crs_code,

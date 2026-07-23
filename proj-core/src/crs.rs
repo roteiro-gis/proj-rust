@@ -894,6 +894,37 @@ pub enum ProjectionMethod {
         /// False northing (meters).
         false_northing: f64,
     },
+
+    /// Polar Stereographic variant C (EPSG method 9830): defined by a
+    /// standard parallel, with the false origin on that parallel instead of
+    /// at the pole (Terre Adelie grids).
+    PolarStereographicVariantC {
+        /// Longitude of origin (degrees).
+        lon0: f64,
+        /// Latitude of standard parallel (degrees).
+        lat_ts: f64,
+        /// Easting at false origin (meters).
+        easting_false_origin: f64,
+        /// Northing at false origin (meters).
+        northing_false_origin: f64,
+    },
+
+    /// Laborde Oblique Mercator (EPSG method 9813): the Madagascar grid's
+    /// conformal-sphere oblique construction.
+    LabordeObliqueMercator {
+        /// Longitude of projection centre (degrees).
+        lon0: f64,
+        /// Latitude of projection centre (degrees).
+        lat0: f64,
+        /// Azimuth at projection centre (degrees).
+        azimuth: f64,
+        /// Scale factor at projection centre.
+        k0: f64,
+        /// False easting (meters).
+        false_easting: f64,
+        /// False northing (meters).
+        false_northing: f64,
+    },
 }
 
 impl ProjectionMethod {
@@ -1147,6 +1178,38 @@ impl ProjectionMethod {
                 0.0,
                 0.0,
             ],
+            ProjectionMethod::PolarStereographicVariantC {
+                lon0,
+                lat_ts,
+                easting_false_origin,
+                northing_false_origin,
+            } => [
+                lon0,
+                lat_ts,
+                easting_false_origin,
+                northing_false_origin,
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ],
+            ProjectionMethod::LabordeObliqueMercator {
+                lon0,
+                lat0,
+                azimuth,
+                k0,
+                false_easting,
+                false_northing,
+            } => [
+                lon0,
+                lat0,
+                azimuth,
+                k0,
+                false_easting,
+                false_northing,
+                0.0,
+                0.0,
+            ],
         }
     }
 }
@@ -1237,6 +1300,20 @@ mod tests {
                 lat0: 13.472_466_333_333_33,
                 false_easting: 50_000.0,
                 false_northing: 50_000.0,
+            },
+            ProjectionMethod::PolarStereographicVariantC {
+                lon0: 140.0,
+                lat_ts: -67.0,
+                easting_false_origin: 300_000.0,
+                northing_false_origin: 200_000.0,
+            },
+            ProjectionMethod::LabordeObliqueMercator {
+                lon0: 46.437_229_166_666_67,
+                lat0: -18.9,
+                azimuth: 18.9,
+                k0: 0.9995,
+                false_easting: 400_000.0,
+                false_northing: 800_000.0,
             },
         ];
         for method in &methods {

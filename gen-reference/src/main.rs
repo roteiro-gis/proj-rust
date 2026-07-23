@@ -1040,6 +1040,42 @@ fn main() {
         "Yap 4675→3295 Modified Azimuthal Equidistant",
     ));
 
+    // Grad-unit conversion parameters (regression: the generator once
+    // applied the arc-second factor to grads). Deir ez Zor is degree-based
+    // with grad projection parameters, so it exercises the fix without the
+    // grad-axis geographic CRS question (C PROJ keeps NTF (Paris) axes in
+    // grads while we normalize to degrees — the NTF Paris zones are pinned
+    // by a registry integration test instead).
+    points.extend(transform(
+        4227,
+        22780,
+        40.14,
+        35.33,
+        1e-3,
+        "Deir ez Zor 4227→22780 Levant Stereographic (grads)",
+    ));
+
+    // Laborde Oblique Mercator (EPSG method 9813): Madagascar. Same-datum
+    // pair; the Paris-based 29701 stays out of the corpus (grad axes).
+    points.extend(transform(
+        4297,
+        8441,
+        47.5,
+        -18.9,
+        1e-3,
+        "Antananarivo 4297→8441 Tananarive Laborde Grid",
+    ));
+    if let Some(fwd) = transform(4297, 8441, 47.5, -18.9, 1e-3, "") {
+        points.extend(transform(
+            8441,
+            4297,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Antananarivo 8441→4297 Laborde Grid inverse",
+        ));
+    }
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

@@ -60,6 +60,8 @@ pub const METHOD_EQUAL_EARTH: u8 = 19;
 pub const METHOD_AMERICAN_POLYCONIC: u8 = 20;
 pub const METHOD_AZIMUTHAL_EQUIDISTANT: u8 = 21;
 pub const METHOD_GUAM: u8 = 22;
+pub const METHOD_POLAR_STEREO_VARIANT_C: u8 = 23;
+pub const METHOD_LABORDE: u8 = 24;
 
 // Coordinate operation step tags.
 pub const OP_IDENTITY: u8 = 0;
