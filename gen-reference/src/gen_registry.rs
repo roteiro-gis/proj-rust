@@ -138,8 +138,10 @@ use proj_epsg_format::{
     ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED, FLAG_SUPERSEDED,
     GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2,
     GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC,
-    METHOD_ALBERS, METHOD_CASSINI_SOLDNER, METHOD_COLOMBIA_URBAN, METHOD_EQUIDISTANT_CYL,
-    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_LAEA,
+    METHOD_ALBERS, METHOD_AMERICAN_POLYCONIC, METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER,
+    METHOD_COLOMBIA_URBAN, METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM,
+    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
+    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LAEA,
     METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_TRANSVERSE_MERCATOR,
     METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT, PROJ_CRS_RECORD_BASE_SIZE,
@@ -236,6 +238,9 @@ const RECTIFIED_GRID_ANGLE: i64 = 8814;
 const SCALE_FACTOR_PROJECTION_CENTRE: i64 = 8815;
 const EASTING_PROJECTION_CENTRE: i64 = 8816;
 const NORTHING_PROJECTION_CENTRE: i64 = 8817;
+const LAT_PSEUDO_STD_PARALLEL: i64 = 8818;
+const SCALE_FACTOR_PSEUDO_STD_PARALLEL: i64 = 8819;
+const COLAT_CONE_AXIS: i64 = 1036;
 
 #[derive(Clone, Copy)]
 enum DatumShiftKind {
@@ -370,6 +375,17 @@ fn method_code_to_id(code: i64) -> Option<u8> {
         1052 => Some(METHOD_COLOMBIA_URBAN),
         1051 => Some(METHOD_LCC_MICHIGAN),
         1102 => Some(METHOD_LCC_1SP_VARIANT_B),
+        // Krovak's native south/west axes (methods 9819/1042) stay excluded
+        // until axis-order support lands; the north-orientated variants are
+        // plain east/north.
+        1041 => Some(METHOD_KROVAK_NORTH_ORIENTATED),
+        1043 => Some(METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED),
+        1078 => Some(METHOD_EQUAL_EARTH),
+        9818 => Some(METHOD_AMERICAN_POLYCONIC),
+        // 9832 (Modified Azimuthal Equidistant) uses the same geodesic
+        // construction, as in C PROJ.
+        1125 | 9832 => Some(METHOD_AZIMUTHAL_EQUIDISTANT),
+        9831 => Some(METHOD_GUAM),
         1024 => Some(METHOD_WEB_MERCATOR),
         _ => None,
     }
@@ -536,6 +552,33 @@ fn encode_params(method_id: u8, cp: &ConvParams, linear_uoms: &BTreeMap<i64, f64
             get_degrees(cp, &[LON_ORIGIN]),
             get_degrees(cp, &[LAT_ORIGIN]),
             get_meters(cp, &[PROJECTION_PLANE_HEIGHT], linear_uoms),
+            get_meters(cp, &[FALSE_EASTING], linear_uoms),
+            get_meters(cp, &[FALSE_NORTHING], linear_uoms),
+            0.0,
+            0.0,
+        ],
+        METHOD_KROVAK_NORTH_ORIENTATED | METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED => [
+            get_degrees(cp, &[LON_OF_ORIGIN]),
+            get_degrees(cp, &[LAT_PROJECTION_CENTRE]),
+            get_degrees(cp, &[COLAT_CONE_AXIS]),
+            get_meters(cp, &[FALSE_EASTING], linear_uoms),
+            get_scale(cp, &[SCALE_FACTOR_PSEUDO_STD_PARALLEL]),
+            get_degrees(cp, &[LAT_PSEUDO_STD_PARALLEL]),
+            get_meters(cp, &[FALSE_NORTHING], linear_uoms),
+        ],
+        METHOD_EQUAL_EARTH => [
+            get_degrees(cp, &[LON_ORIGIN]),
+            0.0,
+            0.0,
+            get_meters(cp, &[FALSE_EASTING], linear_uoms),
+            get_meters(cp, &[FALSE_NORTHING], linear_uoms),
+            0.0,
+            0.0,
+        ],
+        METHOD_AMERICAN_POLYCONIC | METHOD_AZIMUTHAL_EQUIDISTANT | METHOD_GUAM => [
+            get_degrees(cp, &[LON_ORIGIN]),
+            get_degrees(cp, &[LAT_ORIGIN]),
+            0.0,
             get_meters(cp, &[FALSE_EASTING], linear_uoms),
             get_meters(cp, &[FALSE_NORTHING], linear_uoms),
             0.0,

@@ -337,6 +337,17 @@ mod tests {
             30200, // Cassini-Soldner
             3395,  // Mercator
             32662, // equidistant cylindrical
+            6247,  // Colombia Urban
+            24200, // Lambert conformal conic 1SP
+            6201,  // Lambert conformal conic 2SP Michigan
+            9549,  // Lambert conformal conic 1SP variant B
+            5514,  // Krovak East North
+            5516,  // Modified Krovak East North
+            8857,  // Equal Earth
+            5880,  // American Polyconic
+            27701, // Azimuthal Equidistant (Equi7 Africa)
+            3295,  // Modified Azimuthal Equidistant (Yap Islands)
+            3993,  // Guam Projection
             7415,  // compound projected + gravity height
             7678,  // compound geographic + ellipsoidal height
         ];

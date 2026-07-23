@@ -1,11 +1,11 @@
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::projection::{
-    ensure_finite_lon_lat, ensure_finite_xy, normalize_longitude, validate_angle,
-    validate_latitude_param, validate_lon_lat, validate_offset, validate_projected,
+    authalic_latitude, authalic_q, ensure_finite_lon_lat, ensure_finite_xy, geodetic_from_authalic,
+    normalize_longitude, validate_angle, validate_latitude_param, validate_lon_lat,
+    validate_offset, validate_projected,
 };
 
-const ECCENTRICITY_EPSILON: f64 = 1e-15;
 const POLAR_EPSILON: f64 = 1e-12;
 const RHO_EPSILON: f64 = 1e-9;
 
@@ -136,35 +136,6 @@ impl LambertAzimuthalEqualArea {
             aspect,
         })
     }
-}
-
-fn authalic_q(lat: f64, e2: f64) -> f64 {
-    if e2.abs() < ECCENTRICITY_EPSILON {
-        return 2.0 * lat.sin();
-    }
-
-    let e = e2.sqrt();
-    let sin_lat = lat.sin();
-    let e_sin = e * sin_lat;
-    (1.0 - e2)
-        * (sin_lat / (1.0 - e2 * sin_lat * sin_lat)
-            - (1.0 / (2.0 * e)) * ((1.0 - e_sin) / (1.0 + e_sin)).ln())
-}
-
-fn authalic_latitude(q: f64, q_p: f64) -> f64 {
-    (q / q_p).clamp(-1.0, 1.0).asin()
-}
-
-fn geodetic_from_authalic(beta: f64, e2: f64) -> f64 {
-    if e2.abs() < ECCENTRICITY_EPSILON {
-        return beta;
-    }
-
-    let e4 = e2 * e2;
-    let e6 = e4 * e2;
-    beta + (e2 / 3.0 + 31.0 * e4 / 180.0 + 517.0 * e6 / 5040.0) * (2.0 * beta).sin()
-        + (23.0 * e4 / 360.0 + 251.0 * e6 / 3780.0) * (4.0 * beta).sin()
-        + (761.0 * e6 / 45360.0) * (6.0 * beta).sin()
 }
 
 impl super::ProjectionImpl for LambertAzimuthalEqualArea {

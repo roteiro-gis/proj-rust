@@ -876,6 +876,170 @@ fn main() {
         ));
     }
 
+    // Krovak East North (EPSG method 1041) and Modified Krovak East North
+    // (1043), same-datum pairs so the projection math is isolated. Both are
+    // north-orientated, so Czech/Slovak coordinates are negative.
+    points.extend(transform(
+        4156,
+        5514,
+        14.4208,
+        50.088,
+        1e-3,
+        "Prague 4156→5514 Krovak East North",
+    ));
+    points.extend(transform(
+        4156,
+        5514,
+        17.1077,
+        48.1486,
+        1e-3,
+        "Bratislava 4156→5514 Krovak East North",
+    ));
+    if let Some(fwd) = transform(4156, 5514, 14.4208, 50.088, 1e-3, "") {
+        points.extend(transform(
+            5514,
+            4156,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-9,
+            "Prague 5514→4156 Krovak East North inverse",
+        ));
+    }
+    // C PROJ hardcodes the Krovak cone axis at 30°17'17.30311" and ignores
+    // the parameter, while the EPSG conversion for 5516 stores the rounded
+    // 30°17'17.303"; honoring the registry value moves the southing ~3.4 mm,
+    // so the Modified Krovak tolerances are 5 mm / 1e-7°.
+    points.extend(transform(
+        5228,
+        5516,
+        14.4208,
+        50.088,
+        5e-3,
+        "Prague 5228→5516 Modified Krovak East North",
+    ));
+    if let Some(fwd) = transform(5228, 5516, 14.4208, 50.088, 5e-3, "") {
+        points.extend(transform(
+            5516,
+            5228,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Prague 5516→5228 Modified Krovak East North inverse",
+        ));
+    }
+    points.extend(transform(
+        8351,
+        8353,
+        19.15,
+        48.74,
+        1e-3,
+        "Slovakia 8351→8353 JTSK03 Krovak East North",
+    ));
+
+    // Equal Earth (EPSG method 1078): whole-world equal-area, WGS84-based,
+    // so 4326 pairs are projection-only.
+    points.extend(transform(
+        4326,
+        8857,
+        -74.006,
+        40.7128,
+        1e-3,
+        "NYC 4326→8857 Equal Earth Greenwich",
+    ));
+    points.extend(transform(
+        4326,
+        8858,
+        -74.006,
+        40.7128,
+        1e-3,
+        "NYC 4326→8858 Equal Earth Americas",
+    ));
+    if let Some(fwd) = transform(4326, 8857, -74.006, 40.7128, 1e-3, "") {
+        points.extend(transform(
+            8857,
+            4326,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "NYC 8857→4326 Equal Earth inverse",
+        ));
+    }
+    points.extend(transform(
+        4326,
+        8859,
+        139.6917,
+        35.6895,
+        1e-3,
+        "Tokyo 4326→8859 Equal Earth Asia-Pacific",
+    ));
+
+    // American Polyconic (EPSG method 9818): Brazilian national grids.
+    // Same-datum pairs so the points exercise the projection only.
+    points.extend(transform(
+        4674,
+        5880,
+        -43.2,
+        -22.9,
+        1e-3,
+        "Rio 4674→5880 SIRGAS 2000 Brazil Polyconic",
+    ));
+    if let Some(fwd) = transform(4674, 5880, -43.2, -22.9, 1e-3, "") {
+        points.extend(transform(
+            5880,
+            4674,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Rio 5880→4674 Brazil Polyconic inverse",
+        ));
+    }
+    points.extend(transform(
+        4618,
+        29101,
+        -47.9,
+        -15.8,
+        1e-3,
+        "Brasilia 4618→29101 SAD69 Brazil Polyconic",
+    ));
+
+    // Azimuthal Equidistant (EPSG methods 1125/9832) and Guam (9831).
+    // WGS 84 / Equi7 Africa is projection-only from 4326; the Guam 1963
+    // pairs are same-datum.
+    points.extend(transform(
+        4326,
+        27701,
+        36.82,
+        -1.29,
+        1e-3,
+        "Nairobi 4326→27701 Equi7 Africa Azimuthal Equidistant",
+    ));
+    if let Some(fwd) = transform(4326, 27701, 36.82, -1.29, 1e-3, "") {
+        points.extend(transform(
+            27701,
+            4326,
+            fwd.expected_x,
+            fwd.expected_y,
+            1e-7,
+            "Nairobi 27701→4326 Equi7 Africa inverse",
+        ));
+    }
+    points.extend(transform(
+        4675,
+        3993,
+        144.635_331_291_666_66,
+        13.339_038_461_111_11,
+        1e-3,
+        "Guam 4675→3993 Guam SPCS Guam Projection",
+    ));
+    points.extend(transform(
+        4675,
+        3295,
+        138.193_030_011_040_92,
+        9.596_525_859_439_623,
+        1e-3,
+        "Yap 4675→3295 Modified Azimuthal Equidistant",
+    ));
+
     // Colombia Urban (EPSG method 1052): MAGNA-SIRGAS / Bogota urban grid.
     points.extend(transform(
         4686,

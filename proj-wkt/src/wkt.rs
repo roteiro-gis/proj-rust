@@ -506,6 +506,72 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
             false_easting: fe,
             false_northing: fn_,
         },
+        "equalearth" => ProjectionMethod::EqualEarth {
+            lon0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
+        "polyconic" | "americanpolyconic" => ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
+        "azimuthalequidistant" | "modifiedazimuthalequidistant" => {
+            ProjectionMethod::AzimuthalEquidistant {
+                lon0,
+                lat0,
+                false_easting: fe,
+                false_northing: fn_,
+            }
+        }
+        "guamprojection" | "guam" => ProjectionMethod::GuamProjection {
+            lon0,
+            lat0,
+            false_easting: fe,
+            false_northing: fn_,
+        },
+        "krovak"
+        | "krovaknorthorientated"
+        | "krovakmodified"
+        | "modifiedkrovak"
+        | "krovakmodifiednorthorientated" => {
+            let modified = normalized_method != "krovak" && normalized_method.contains("modified");
+            // The cone geometry defaults are the EPSG/PROJ standard values
+            // shared by every Krovak definition.
+            let co_latitude_cone_axis = first_param(&params, &["azimuth", "colatitudeofconeaxis"])
+                .unwrap_or(30.288_139_752_777_78);
+            let lat_pseudo_standard_parallel = first_param(
+                &params,
+                &[
+                    "pseudostandardparallel1",
+                    "latitudeofpseudostandardparallel",
+                ],
+            )
+            .unwrap_or(78.5);
+            let k0 = first_param(&params, &["scalefactoronpseudostandardparallel"]).unwrap_or(k0);
+            if modified {
+                ProjectionMethod::KrovakModifiedNorthOrientated {
+                    lon0,
+                    lat0,
+                    co_latitude_cone_axis,
+                    lat_pseudo_standard_parallel,
+                    k0,
+                    false_easting: fe,
+                    false_northing: fn_,
+                }
+            } else {
+                ProjectionMethod::KrovakNorthOrientated {
+                    lon0,
+                    lat0,
+                    co_latitude_cone_axis,
+                    lat_pseudo_standard_parallel,
+                    k0,
+                    false_easting: fe,
+                    false_northing: fn_,
+                }
+            }
+        }
         "lambertconformalconic2spmichigan" => ProjectionMethod::LambertConformalConicMichigan {
             lon0,
             lat0,

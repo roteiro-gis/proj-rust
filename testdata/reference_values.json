@@ -1830,6 +1830,176 @@
     "description": "Lyon-Turin 9549→9547 LCC 1SP variant B inverse"
   },
   {
+    "from_epsg": 4156,
+    "to_epsg": 5514,
+    "input_x": 14.4208,
+    "input_y": 50.088,
+    "expected_x": -742923.0424160162,
+    "expected_y": -1043025.1069850157,
+    "tolerance": 0.001,
+    "description": "Prague 4156→5514 Krovak East North"
+  },
+  {
+    "from_epsg": 4156,
+    "to_epsg": 5514,
+    "input_x": 17.1077,
+    "input_y": 48.1486,
+    "expected_x": -573787.5517760484,
+    "expected_y": -1280364.6891280175,
+    "tolerance": 0.001,
+    "description": "Bratislava 4156→5514 Krovak East North"
+  },
+  {
+    "from_epsg": 5514,
+    "to_epsg": 4156,
+    "input_x": -742923.0424160162,
+    "input_y": -1043025.1069850157,
+    "expected_x": 14.420800000000002,
+    "expected_y": 50.087999999999994,
+    "tolerance": 1e-9,
+    "description": "Prague 5514→4156 Krovak East North inverse"
+  },
+  {
+    "from_epsg": 5228,
+    "to_epsg": 5516,
+    "input_x": 14.4208,
+    "input_y": 50.088,
+    "expected_x": -5742923.064737221,
+    "expected_y": -6043025.080903009,
+    "tolerance": 0.005,
+    "description": "Prague 5228→5516 Modified Krovak East North"
+  },
+  {
+    "from_epsg": 5516,
+    "to_epsg": 5228,
+    "input_x": -5742923.064737221,
+    "input_y": -6043025.080903009,
+    "expected_x": 14.420800000000606,
+    "expected_y": 50.08800000000002,
+    "tolerance": 1e-7,
+    "description": "Prague 5516→5228 Modified Krovak East North inverse"
+  },
+  {
+    "from_epsg": 8351,
+    "to_epsg": 8353,
+    "input_x": 19.15,
+    "input_y": 48.74,
+    "expected_x": -417553.0699846993,
+    "expected_y": -1228086.2505625456,
+    "tolerance": 0.001,
+    "description": "Slovakia 8351→8353 JTSK03 Krovak East North"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 8857,
+    "input_x": -74.006,
+    "input_y": 40.7128,
+    "expected_x": -6260505.935750319,
+    "expected_y": 5000321.867942547,
+    "tolerance": 0.001,
+    "description": "NYC 4326→8857 Equal Earth Greenwich"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 8858,
+    "input_x": -74.006,
+    "input_y": 40.7128,
+    "expected_x": 1353005.5932814986,
+    "expected_y": 5000321.867942547,
+    "tolerance": 0.001,
+    "description": "NYC 4326→8858 Equal Earth Americas"
+  },
+  {
+    "from_epsg": 8857,
+    "to_epsg": 4326,
+    "input_x": -6260505.935750319,
+    "input_y": 5000321.867942547,
+    "expected_x": -74.00600000000001,
+    "expected_y": 40.712799993499225,
+    "tolerance": 1e-7,
+    "description": "NYC 8857→4326 Equal Earth inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 8859,
+    "input_x": 139.6917,
+    "input_y": 35.6895,
+    "expected_x": -898308.3643893392,
+    "expected_y": 4431956.303865738,
+    "tolerance": 0.001,
+    "description": "Tokyo 4326→8859 Equal Earth Asia-Pacific"
+  },
+  {
+    "from_epsg": 4674,
+    "to_epsg": 5880,
+    "input_x": -43.2,
+    "input_y": -22.9,
+    "expected_x": 6107064.064791936,
+    "expected_y": 7425917.997233426,
+    "tolerance": 0.001,
+    "description": "Rio 4674→5880 SIRGAS 2000 Brazil Polyconic"
+  },
+  {
+    "from_epsg": 5880,
+    "to_epsg": 4674,
+    "input_x": 6107064.064791936,
+    "input_y": 7425917.997233426,
+    "expected_x": -43.20000000000001,
+    "expected_y": -22.900000000000002,
+    "tolerance": 1e-7,
+    "description": "Rio 5880→4674 Brazil Polyconic inverse"
+  },
+  {
+    "from_epsg": 4618,
+    "to_epsg": 29101,
+    "input_x": -47.9,
+    "input_y": -15.8,
+    "expected_x": 5653466.094584227,
+    "expected_y": 8243010.160282712,
+    "tolerance": 0.001,
+    "description": "Brasilia 4618→29101 SAD69 Brazil Polyconic"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 27701,
+    "input_x": 36.82,
+    "input_y": -1.29,
+    "expected_x": 7334614.446717742,
+    "expected_y": 4929069.685564423,
+    "tolerance": 0.001,
+    "description": "Nairobi 4326→27701 Equi7 Africa Azimuthal Equidistant"
+  },
+  {
+    "from_epsg": 27701,
+    "to_epsg": 4326,
+    "input_x": 7334614.446717742,
+    "input_y": 4929069.685564423,
+    "expected_x": 36.82,
+    "expected_y": -1.2900000000000014,
+    "tolerance": 1e-7,
+    "description": "Nairobi 27701→4326 Equi7 Africa inverse"
+  },
+  {
+    "from_epsg": 4675,
+    "to_epsg": 3993,
+    "input_x": 144.63533129166666,
+    "input_y": 13.33903846111111,
+    "expected_x": 37712.481054354175,
+    "expected_y": 35242.00113900984,
+    "tolerance": 0.001,
+    "description": "Guam 4675→3993 Guam SPCS Guam Projection"
+  },
+  {
+    "from_epsg": 4675,
+    "to_epsg": 3295,
+    "input_x": 138.19303001104092,
+    "input_y": 9.596525859439623,
+    "expected_x": 42665.90522385725,
+    "expected_y": 65509.825381037896,
+    "tolerance": 0.001,
+    "description": "Yap 4675→3295 Modified Azimuthal Equidistant"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

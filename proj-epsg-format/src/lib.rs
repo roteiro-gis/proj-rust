@@ -54,6 +54,12 @@ pub const METHOD_LAEA_SPHERICAL: u8 = 13;
 pub const METHOD_COLOMBIA_URBAN: u8 = 14;
 pub const METHOD_LCC_MICHIGAN: u8 = 15;
 pub const METHOD_LCC_1SP_VARIANT_B: u8 = 16;
+pub const METHOD_KROVAK_NORTH_ORIENTATED: u8 = 17;
+pub const METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED: u8 = 18;
+pub const METHOD_EQUAL_EARTH: u8 = 19;
+pub const METHOD_AMERICAN_POLYCONIC: u8 = 20;
+pub const METHOD_AZIMUTHAL_EQUIDISTANT: u8 = 21;
+pub const METHOD_GUAM: u8 = 22;
 
 // Coordinate operation step tags.
 pub const OP_IDENTITY: u8 = 0;

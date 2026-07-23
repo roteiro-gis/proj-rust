@@ -213,6 +213,37 @@ fn corpus_has_adequate_coverage() {
     assert!(epsg_targets.contains(&24200), "missing LCC 1SP");
     assert!(epsg_targets.contains(&6201), "missing LCC 2SP Michigan");
     assert!(epsg_targets.contains(&9549), "missing LCC 1SP variant B");
+    assert!(epsg_targets.contains(&5514), "missing Krovak East North");
+    assert!(
+        epsg_targets.contains(&5516),
+        "missing Modified Krovak East North"
+    );
+    assert!(
+        epsg_targets.contains(&8353),
+        "missing JTSK03 Krovak East North"
+    );
+    assert!(epsg_targets.contains(&8857), "missing Equal Earth");
+    assert!(
+        epsg_targets.contains(&8859),
+        "missing Equal Earth Asia-Pacific"
+    );
+    assert!(
+        epsg_targets.contains(&5880),
+        "missing SIRGAS 2000 Brazil Polyconic"
+    );
+    assert!(
+        epsg_targets.contains(&29101),
+        "missing SAD69 Brazil Polyconic"
+    );
+    assert!(
+        epsg_targets.contains(&27701),
+        "missing Equi7 Africa Azimuthal Equidistant"
+    );
+    assert!(epsg_targets.contains(&3993), "missing Guam Projection");
+    assert!(
+        epsg_targets.contains(&3295),
+        "missing Modified Azimuthal Equidistant"
+    );
 
     // Verify UTM coverage
     let has_utm = epsg_targets.iter().any(|e| (32601..=32660).contains(e));

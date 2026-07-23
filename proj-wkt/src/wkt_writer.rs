@@ -147,6 +147,12 @@ pub(crate) fn projection_wkt_name(method: ProjectionMethod) -> &'static str {
         } => "Hotine_Oblique_Mercator",
         ProjectionMethod::CassiniSoldner { .. } => "Cassini_Soldner",
         ProjectionMethod::ColombiaUrban { .. } => "Colombia_Urban",
+        ProjectionMethod::KrovakNorthOrientated { .. } => "Krovak",
+        ProjectionMethod::KrovakModifiedNorthOrientated { .. } => "Krovak_Modified",
+        ProjectionMethod::EqualEarth { .. } => "Equal_Earth",
+        ProjectionMethod::AmericanPolyconic { .. } => "Polyconic",
+        ProjectionMethod::AzimuthalEquidistant { .. } => "Azimuthal_Equidistant",
+        ProjectionMethod::GuamProjection { .. } => "Guam_Projection",
         ProjectionMethod::LambertConformalConicMichigan { .. } => {
             "Lambert_Conformal_Conic_2SP_Michigan"
         }
@@ -391,6 +397,74 @@ pub(crate) fn projection_parameters(method: ProjectionMethod) -> Vec<ProjectionP
             angle_param("latitude_of_origin", lat0),
             scale_param("scale_factor", k0),
             angle_param("latitude_of_false_origin", lat_false_origin),
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::KrovakNorthOrientated {
+            lon0,
+            lat0,
+            co_latitude_cone_axis,
+            lat_pseudo_standard_parallel,
+            k0,
+            false_easting,
+            false_northing,
+        }
+        | ProjectionMethod::KrovakModifiedNorthOrientated {
+            lon0,
+            lat0,
+            co_latitude_cone_axis,
+            lat_pseudo_standard_parallel,
+            k0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_center", lat0),
+            angle_param("longitude_of_center", lon0),
+            angle_param("azimuth", co_latitude_cone_axis),
+            angle_param("pseudo_standard_parallel_1", lat_pseudo_standard_parallel),
+            scale_param("scale_factor", k0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::EqualEarth {
+            lon0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::AmericanPolyconic {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
+            angle_param("central_meridian", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::AzimuthalEquidistant {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_center", lat0),
+            angle_param("longitude_of_center", lon0),
+            length_param("false_easting", false_easting),
+            length_param("false_northing", false_northing),
+        ],
+        ProjectionMethod::GuamProjection {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        } => vec![
+            angle_param("latitude_of_origin", lat0),
             angle_param("central_meridian", lon0),
             length_param("false_easting", false_easting),
             length_param("false_northing", false_northing),
@@ -1636,6 +1710,98 @@ mod tests {
                     lat_ts: 30.0,
                     false_easting: 0.0,
                     false_northing: 0.0,
+                },
+            ),
+            (
+                "Colombia Urban",
+                ProjectionMethod::ColombiaUrban {
+                    lon0: -74.14659167,
+                    lat0: 4.68048611,
+                    h0: 2550.0,
+                    false_easting: 92_334.879,
+                    false_northing: 109_320.965,
+                },
+            ),
+            (
+                "Lambert Conformal Conic 2SP Michigan",
+                ProjectionMethod::LambertConformalConicMichigan {
+                    lon0: -84.33333333,
+                    lat0: 43.31666667,
+                    lat1: 44.18333333,
+                    lat2: 45.7,
+                    ellipsoid_scaling_factor: 1.0000382,
+                    false_easting: 609601.2192,
+                    false_northing: 0.0,
+                },
+            ),
+            (
+                "Lambert Conformal Conic 1SP variant B",
+                ProjectionMethod::LambertConformalConic1SPVariantB {
+                    lon0: 6.9,
+                    lat0: 45.15,
+                    k0: 1.0000398,
+                    lat_false_origin: 45.15,
+                    false_easting: 700_000.0,
+                    false_northing: 300_000.0,
+                },
+            ),
+            (
+                "Krovak North Orientated",
+                ProjectionMethod::KrovakNorthOrientated {
+                    lon0: 24.83333333,
+                    lat0: 49.5,
+                    co_latitude_cone_axis: 30.28813975,
+                    lat_pseudo_standard_parallel: 78.5,
+                    k0: 0.9999,
+                    false_easting: 0.0,
+                    false_northing: 0.0,
+                },
+            ),
+            (
+                "Krovak Modified North Orientated",
+                ProjectionMethod::KrovakModifiedNorthOrientated {
+                    lon0: 24.83333333,
+                    lat0: 49.5,
+                    co_latitude_cone_axis: 30.28813975,
+                    lat_pseudo_standard_parallel: 78.5,
+                    k0: 0.9999,
+                    false_easting: 5_000_000.0,
+                    false_northing: 5_000_000.0,
+                },
+            ),
+            (
+                "Equal Earth",
+                ProjectionMethod::EqualEarth {
+                    lon0: -90.0,
+                    false_easting: 0.0,
+                    false_northing: 0.0,
+                },
+            ),
+            (
+                "American Polyconic",
+                ProjectionMethod::AmericanPolyconic {
+                    lon0: -54.0,
+                    lat0: 0.0,
+                    false_easting: 5_000_000.0,
+                    false_northing: 10_000_000.0,
+                },
+            ),
+            (
+                "Azimuthal Equidistant",
+                ProjectionMethod::AzimuthalEquidistant {
+                    lon0: 21.5,
+                    lat0: 8.5,
+                    false_easting: 5_621_452.02,
+                    false_northing: 5_990_638.423,
+                },
+            ),
+            (
+                "Guam Projection",
+                ProjectionMethod::GuamProjection {
+                    lon0: 144.74875069444445,
+                    lat0: 13.47246633333333,
+                    false_easting: 50_000.0,
+                    false_northing: 50_000.0,
                 },
             ),
         ]
