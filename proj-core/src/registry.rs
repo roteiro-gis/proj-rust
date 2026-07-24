@@ -354,7 +354,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 1096658);
+        assert_eq!(value["output"]["byte_len"], 1097138);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
         assert_eq!(value["counts"]["grid_resources"], 726);

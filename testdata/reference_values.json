@@ -2000,6 +2000,36 @@
     "description": "Yap 4675→3295 Modified Azimuthal Equidistant"
   },
   {
+    "from_epsg": 4227,
+    "to_epsg": 22780,
+    "input_x": 40.14,
+    "input_y": 35.33,
+    "expected_x": 89981.01614227482,
+    "expected_y": 125742.07454177662,
+    "tolerance": 0.001,
+    "description": "Deir ez Zor 4227→22780 Levant Stereographic (grads)"
+  },
+  {
+    "from_epsg": 4297,
+    "to_epsg": 8441,
+    "input_x": 47.5,
+    "input_y": -18.9,
+    "expected_x": 511921.0541533287,
+    "expected_y": 799665.5204684729,
+    "tolerance": 0.001,
+    "description": "Antananarivo 4297→8441 Tananarive Laborde Grid"
+  },
+  {
+    "from_epsg": 8441,
+    "to_epsg": 4297,
+    "input_x": 511921.0541533287,
+    "input_y": 799665.5204684729,
+    "expected_x": 47.50000000000072,
+    "expected_y": -18.900000000512872,
+    "tolerance": 1e-7,
+    "description": "Antananarivo 8441→4297 Laborde Grid inverse"
+  },
+  {
     "from_epsg": 4686,
     "to_epsg": 6247,
     "input_x": -74.25,

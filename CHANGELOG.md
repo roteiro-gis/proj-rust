@@ -10,44 +10,45 @@
 - make promoted-3D reference generation use the same point area of interest as the corpus test, resolve the last two deferred operation-selection cases, and remove the `pending_fix` skip mechanism so every reference is mandatory
 - accept EPSG-tagged WKT1 `COMPD_CS` definitions whose horizontal component uses the authority-native axis permutation, including SWEREF99 TM + RH2000 height (EPSG:5845), while continuing to reject unsupported custom axis semantics
 - add `Transform::new_horizontal`, `Transform::new_horizontal_with_selection_options`, and `Transform::from_epsg_horizontal` for explicit XY-only transforms from compound authority-code CRSs without silently weakening the vertical-safe constructors
-- add the Azimuthal Equidistant projection family: EPSG methods 1125 (e.g. the WGS 84 / Equi7 continental grids) and 9832 Modified Azimuthal Equidistant (Guam 1963 / Yap Islands) through geodesic azimuth/distance as in C PROJ (Karney's algorithms via the pure-Rust `geographiclib-rs`), and 9831 Guam Projection (Guam 1963 / Guam SPCS) in its closed form; projected CRS coverage grows to 5,231, pinned by C PROJ test vectors and the EPSG Guidance Note worked examples for Yap and Guam
-- replace the meridional-arc series with C PROJ 9's third-flattening expansion (Karney, arXiv:2212.05818), providing the inverse (arc→latitude) the polar Azimuthal Equidistant and Guam projections need; American Polyconic now shares the same engine
-- add the American Polyconic projection (EPSG method 9818, e.g. SIRGAS 2000 / Brazil Polyconic and Panama-Colon 1911 / Panama Polyconic), growing projected CRS coverage to 5,222; verified against C PROJ's own test vectors and reference corpus points
-- add the Equal Earth projection (EPSG method 1078, EPSG:8857/8858/8859), growing projected CRS coverage to 5,218; verified against C PROJ's own test vectors and reference corpus points
-- add the Krovak north-orientated projections (EPSG methods 1041 and 1043, e.g. S-JTSK / Krovak East North and S-JTSK/05 / Modified Krovak East North), growing projected CRS coverage to 5,215; the cone geometry is taken from the EPSG parameters rather than hardcoded as in C PROJ, and the modified variant applies the S-JTSK/05 polynomial distortion correction (documented sub-centimetre divergence from C PROJ on EPSG:5516, whose stored cone-axis co-latitude is rounded to 30°17'17.303" while C PROJ hardcodes 30°17'17.30311")
-- fix `CrsDef::semantically_equivalent` for projection methods added after the comparison ladder was written (Colombia Urban, LCC Michigan, LCC 1SP variant B): identical definitions compared as not equivalent; method equivalence is now an exhaustive canonical-parameters match that new methods must extend to compile
-- fix Lambert Conformal Conic 1SP: the registry only read the 2SP false-origin parameter set, leaving all 235 non-deprecated LCC 1SP CRSs (e.g. Jamaica 1969 / National Grid) unusable at transform construction; the LCC model gains the natural-origin scale factor (`k0`), carried through all parsers and serializers
-- add LCC 2SP Michigan (EPSG method 1051) and LCC 1SP variant B (1102), reusing the LCC implementation via a scaled ellipsoid and a false-origin constructor; projected CRS coverage grows to 5,210
-- add the Colombia Urban projection (EPSG method 1052), growing projected CRS coverage from 5,171 to 5,203 (the MAGNA-SIRGAS urban grids); verified against C PROJ and the EPSG Guidance Note worked example
-- fail closed when a geoid-grid vertical transform would compose with a Helmert/geocentric horizontal pipeline: the datum shift's ellipsoidal-height change cannot yet be applied through a geoid transformation, so construction reports a typed error instead of producing silently wrong heights
-- breaking: registry format v9 — datum records drop their stored to-WGS84 Helmert values (identity is the datum's EPSG code; `Datum` gains `epsg()`/`with_epsg` and `same_datum` compares codes when both sides carry one), and a new datum alias index (1,664 EPSG names and aliases) lets WKT/PROJ-string parsing resolve any registry datum by name instead of only the 8 curated ones, fail-closed on ellipsoid mismatch
-- breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverse iterations report a structured `Error::NonConvergence { context, iterations }`
-- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based (`to_coord(&self)`/`to_coord3d(&self)`), and sequential and Rayon batch transforms no longer require `Clone`
-- breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`; diagnostics conversions share the compiled metadata instead of cloning strings per point
-- add `proj_wkt::to_wkt2`: WKT2 (ISO 19162) serialization for geographic, projected, and compound definitions, sharing the WKT1 serializer's mapping; roundtrips are asserted for all supported methods and fuzzed alongside WKT1
-- registry CRS names are served zero-copy from the embedded blob instead of leaking ~6.7k heap copies at first registry access
-- add `proj_wkt::to_projjson`: full-body PROJJSON serialization for geographic, projected, and compound definitions that reparses to equivalent definitions, sharing the WKT serializer's method/parameter/datum mapping; fixes latent parser gaps the roundtrip surfaced (strict datum equality in PROJJSON canonicalization, projection-method equivalence covering only 5 of 13 methods, unit type tags ignored during axis unit extraction) and adds a `projjson_roundtrip` fuzz target
-- `Transform` implements `Clone` (grid data is Arc-shared) and a summary-form `Debug`; a compile-time assertion pins `Send + Sync + Clone + Debug`
-- add an optional `serde` feature deriving `Serialize`/`Deserialize` for coordinate and operation-metadata value types
-
-- model EPSG supersession: operations with a same-CRS-pair replacement carry a new registry flag (`CoordinateOperation::superseded`) and rank below their replacements during selection, matching C PROJ (selection parity improves from 202 to 217 directly matched probes out of 250); the generator also re-derives its hand-curated list premises from proj.db at generation time
-- add coverage-guided fuzzing (workspace-excluded `fuzz/` crate) for the CRS parsers, the WKT parse→emit→reparse cycle, and the NTv2/GTX/GeoTIFF grid parsers, with seed corpora and a nightly/PR CI workflow
-- fix WKT serialization of compound ellipsoidal-height CRSs: the vertical datum authority is now resolved from the horizontal CRS instead of emitting `VERT_DATUM["Unknown datum"]`, and definition-identity cross-checks no longer reuse the fail-closed operation-selection datum equality (found by the new `wkt_roundtrip` fuzz target)
-- add `proj-epsg-format`, a zero-dependency crate that is now the single source of truth for the embedded registry's binary layout, shared by the `proj-core` reader and the `gen-registry` writer (previously ~40 hand-synced constant definitions); registry bytes are unchanged and the source-audit test forbids redefinitions
-- replace the hand-rolled SHA-256 grid checksum implementation with the `sha2` crate (unchanged output, FIPS 180-4 vectors added)
-- gate supply-chain health with cargo-deny in CI (advisories/licenses/bans/sources), deny unreviewed duplicate dependency versions, and update the release lockfile past RUSTSEC-2026-0186, RUSTSEC-2026-0190, and RUSTSEC-2026-0204
-- add a CI coverage job (cargo-llvm-cov) and a linear-parse-time regression test for adversarial WKT parameter lists; the live C PROJ parity workflow gains a weekly schedule and path-filtered PR triggers
-
-- breaking (behavior): 3D transforms between CRSs without vertical components now propagate datum-shift-induced ellipsoidal height changes instead of preserving the caller's `z`, matching C PROJ's promoted-3D CRS semantics; compound-CRS transforms with gravity-related vertical components are unchanged
-- breaking (behavior): polar stereographic extends the conformal-latitude formula continuously across the equator, so opposite-hemisphere inputs map to their true large-radius coordinates (matching C PROJ) instead of silently mirroring into the projection's hemisphere
-- breaking (behavior): iterative inverse computations (Mercator, Lambert Conformal Conic, Polar Stereographic, Hotine Oblique Mercator, Albers, Oblique Stereographic, geocentric-to-geodetic, NTv2 inverse shift) return a typed error on non-convergence instead of silently returning the last iterate; a shared convergence helper replaces four duplicated latitude iterations
-- replace the Snyder transverse Mercator series with the exact Poder/Engsager formulation C PROJ uses by default: near-pole inverses no longer lose longitude to cancellation, and coordinates beyond the conformal-easting domain produce a typed error
-- compute the exact closed-form Helmert inverse instead of the first-order parameter negation; forward/inverse roundtrips now hold to machine precision at any rotation magnitude
-- wrap out-of-branch longitudes into the grid frame during NTv2 sampling (e.g. 358° resolves like -2°), matching existing GTX behavior
-- rank equally accurate area-matched operations by area-of-use specificity (smaller extent first), as C PROJ does
-- add a 250-entry committed operation-selection parity corpus generated from C PROJ's late-binding choices (`gen-selection-parity`), asserted by a default-run test with 19 fixed documented patterns covering 32 residual registry/tie-break probes (one additional probe is outside the registry subset)
-- expand the reference corpus (161 → 218 points) with precision points for LCC/Albers/Cassini/Mercator/Equidistant Cylindrical, near-pole transverse Mercator inverses, wrong-hemisphere polar stereographic inputs, and mandatory promoted-3D cross-datum height references; the corpus schema gains optional `z` fields
-- fix the property-test RNG seed for deterministic runs and verify the declared MSRV (1.85) in CI
+- add the Laborde Oblique Mercator projection (EPSG method 9813, Tananarive / Laborde Grid)
+- fix grad-unit conversion parameters in the registry generator, which produced wrong coordinates for the CRSs with grad-valued parameters such as the NTF (Paris) Lambert zones
+- add Polar Stereographic variant C (EPSG method 9830, Terre Adelie grids)
+- add the Azimuthal Equidistant family (EPSG methods 1125 and 9832) using Karney geodesics via `geographiclib-rs`, and the Guam projection (EPSG method 9831)
+- replace the meridional-arc series with C PROJ 9's third-flattening expansion and add its inverse
+- add the American Polyconic projection (EPSG method 9818, Brazil Polyconic grids)
+- add the Equal Earth projection (EPSG method 1078)
+- add the Krovak north-orientated projections (EPSG methods 1041 and 1043)
+- fix `CrsDef::semantically_equivalent` returning false for identical definitions of newer projection methods
+- fix Lambert Conformal Conic 1SP registry parameters, which left all LCC 1SP CRSs unusable at transform construction; the LCC model gains the natural-origin scale factor
+- add LCC 2SP Michigan (EPSG method 1051) and LCC 1SP variant B (EPSG method 1102)
+- add the Colombia Urban projection (EPSG method 1052)
+- fail closed when a geoid-grid vertical transform would compose with a Helmert or geocentric horizontal pipeline
+- breaking: registry format v9 replaces stored datum Helmert values with EPSG-code identity and adds a datum name/alias index used by WKT and PROJ-string datum resolution
+- breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverses report a structured `Error::NonConvergence`
+- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based; sequential and Rayon batch transforms no longer require `Clone`
+- breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`
+- add `proj_wkt::to_wkt2` for serializing geographic, projected, and compound definitions to WKT2
+- serve registry CRS names zero-copy from the embedded blob
+- add `proj_wkt::to_projjson` for serializing geographic, projected, and compound definitions to PROJJSON, fixing latent parser gaps surfaced by roundtrip testing
+- implement `Clone` and a summary `Debug` for `Transform`
+- add an optional `serde` feature for coordinate and operation-metadata value types
+- model EPSG supersession in the registry and rank superseded operations below their replacements, improving direct C PROJ selection matches from 202 to 217 of 250 probes
+- add coverage-guided fuzzing for the CRS and grid parsers with a nightly/PR CI workflow
+- fix compound ellipsoidal-height WKT serialization emitting `VERT_DATUM["Unknown datum"]`
+- add `proj-epsg-format`, a shared crate defining the registry binary layout for the reader and generator
+- replace the hand-rolled SHA-256 grid checksum implementation with the `sha2` crate
+- gate supply-chain health with cargo-deny in CI, deny unreviewed duplicate dependency versions, and update the release lockfile past RUSTSEC-2026-0186, RUSTSEC-2026-0190, and RUSTSEC-2026-0204
+- add a CI coverage job and expand the live C PROJ parity workflow triggers
+- breaking: 3D transforms between CRSs without vertical components propagate datum-shift-induced height changes instead of preserving the caller's `z`
+- breaking: polar stereographic maps opposite-hemisphere inputs continuously instead of mirroring them into the projection's hemisphere
+- breaking: iterative inverse computations return a typed error on non-convergence instead of silently returning the last iterate
+- replace the Snyder transverse Mercator series with the exact Poder/Engsager formulation
+- compute the exact closed-form Helmert inverse instead of the first-order parameter negation
+- wrap out-of-branch longitudes into the grid frame during NTv2 sampling
+- rank equally accurate area-matched operations by area-of-use specificity, as C PROJ does
+- add a 250-entry operation-selection parity corpus generated from C PROJ's choices, with 19 documented patterns covering 32 residual registry or tie-break probes and one probe outside the registry subset
+- expand the reference corpus from 161 to 218 points with projection precision, edge-case, and mandatory 3D cross-datum coverage
+- fix the property-test RNG seed for deterministic runs and verify the declared MSRV in CI
 
 ## 0.9.0 - 2026-07-06
 
