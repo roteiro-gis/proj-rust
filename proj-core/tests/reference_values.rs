@@ -15,11 +15,6 @@
 //!   near-pole inverses, wrong-hemisphere polar stereographic inputs)
 //! - 3D points through promoted 3D CRSs, including cross-datum ellipsoidal
 //!   height changes
-//!
-//! Points carrying a `pending_fix` marker are known divergences from C PROJ
-//! that are tracked until the named fix lands; they are skipped by
-//! `corpus_matches_c_proj` and exercised by the ignored
-//! `corpus_pending_fixes_resolved` test.
 
 use proj_core::{AreaOfInterest, Coord, SelectionOptions, Transform};
 use serde::Deserialize;
@@ -40,8 +35,6 @@ struct ReferencePoint {
     #[serde(default)]
     tolerance_z: Option<f64>,
     description: String,
-    #[serde(default)]
-    pending_fix: Option<String>,
 }
 
 fn load_corpus() -> Vec<ReferencePoint> {
@@ -118,15 +111,9 @@ fn corpus_matches_c_proj() {
     assert!(!corpus.is_empty(), "corpus is empty");
 
     let mut pass = 0;
-    let mut pending = 0;
     let mut failures = Vec::new();
 
     for r in &corpus {
-        if let Some(fix) = &r.pending_fix {
-            eprintln!("Skipping pending point ({fix}): {}", r.description);
-            pending += 1;
-            continue;
-        }
         match check_point(r) {
             Ok(()) => pass += 1,
             Err(msg) => failures.push(msg),
@@ -134,10 +121,9 @@ fn corpus_matches_c_proj() {
     }
 
     eprintln!(
-        "Corpus results: {} passed, {} failed, {} pending out of {} total",
+        "Corpus results: {} passed, {} failed out of {} total",
         pass,
         failures.len(),
-        pending,
         corpus.len()
     );
 
@@ -146,34 +132,6 @@ fn corpus_matches_c_proj() {
             "{} of {} reference values failed:\n{}",
             failures.len(),
             corpus.len(),
-            failures.join("\n")
-        );
-    }
-}
-
-/// Tracks known divergences from C PROJ. Every corpus point marked
-/// `pending_fix` fails here until the named fix lands; once a fix lands, the
-/// corpus is regenerated (dropping the marker) and the point moves into
-/// `corpus_matches_c_proj`. Run with `--ignored` to see remaining divergence.
-#[test]
-#[ignore = "documents pending fixes; run explicitly to measure remaining divergence"]
-fn corpus_pending_fixes_resolved() {
-    let corpus = load_corpus();
-    let mut failures = Vec::new();
-    let mut checked = 0;
-
-    for r in corpus.iter().filter(|r| r.pending_fix.is_some()) {
-        checked += 1;
-        if let Err(msg) = check_point(r) {
-            failures.push(format!("[{}] {msg}", r.pending_fix.as_deref().unwrap()));
-        }
-    }
-
-    eprintln!("Pending points checked: {checked}");
-    if !failures.is_empty() {
-        panic!(
-            "{} pending points still diverge:\n{}",
-            failures.len(),
             failures.join("\n")
         );
     }
@@ -266,13 +224,6 @@ fn corpus_has_adequate_coverage() {
         corpus.iter().any(|r| r.input_z.is_some()),
         "missing 3D reference points"
     );
-    assert!(
-        corpus
-            .iter()
-            .any(|r| r.input_z.is_some() && r.pending_fix.is_none()),
-        "missing non-pending 3D reference points"
-    );
-
     // Verify near-pole and wrong-hemisphere edge coverage
     assert!(
         corpus.iter().any(|r| r.input_y.abs() > 89.99),
