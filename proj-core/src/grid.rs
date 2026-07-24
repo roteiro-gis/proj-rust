@@ -57,6 +57,44 @@ pub struct GridDefinition {
     pub resource_names: SmallVec<[String; 2]>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct GridRuntimeCacheKey {
+    id: GridId,
+    name: String,
+    format: GridFormat,
+    interpolation: GridInterpolation,
+    area_of_use: Option<GridAreaCacheKey>,
+    resource_names: SmallVec<[String; 2]>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct GridAreaCacheKey {
+    west_bits: u64,
+    south_bits: u64,
+    east_bits: u64,
+    north_bits: u64,
+    name: String,
+}
+
+impl From<&GridDefinition> for GridRuntimeCacheKey {
+    fn from(grid: &GridDefinition) -> Self {
+        Self {
+            id: grid.id,
+            name: grid.name.clone(),
+            format: grid.format,
+            interpolation: grid.interpolation,
+            area_of_use: grid.area_of_use.as_ref().map(|area| GridAreaCacheKey {
+                west_bits: area.west.to_bits(),
+                south_bits: area.south.to_bits(),
+                east_bits: area.east.to_bits(),
+                north_bits: area.north.to_bits(),
+                name: area.name.clone(),
+            }),
+            resource_names: grid.resource_names.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct GridSample {
     pub lon_shift_radians: f64,
@@ -182,8 +220,8 @@ impl GridHandle {
 
 pub(crate) struct GridRuntime {
     providers: Vec<Arc<dyn GridProvider>>,
-    definition_cache: Mutex<HashMap<String, GridDefinition>>,
-    handle_cache: Mutex<HashMap<String, GridHandle>>,
+    definition_cache: Mutex<HashMap<GridRuntimeCacheKey, GridDefinition>>,
+    handle_cache: Mutex<HashMap<GridRuntimeCacheKey, GridHandle>>,
 }
 
 impl GridRuntime {
@@ -258,13 +296,8 @@ impl GridRuntime {
     }
 }
 
-fn grid_runtime_cache_key(grid: &GridDefinition) -> String {
-    let mut key = format!("{}|{:?}", grid.id.0, grid.format);
-    for resource in &grid.resource_names {
-        key.push('|');
-        key.push_str(resource);
-    }
-    key
+fn grid_runtime_cache_key(grid: &GridDefinition) -> GridRuntimeCacheKey {
+    grid.into()
 }
 
 #[derive(Default)]
@@ -300,7 +333,7 @@ impl GridProvider for EmbeddedGridProvider {
 
 pub struct FilesystemGridProvider {
     roots: Mutex<Vec<FilesystemGridRoot>>,
-    location_cache: Mutex<HashMap<String, FilesystemGridLocation>>,
+    location_cache: Mutex<HashMap<GridRuntimeCacheKey, FilesystemGridLocation>>,
     data_cache: GridDataCache,
     #[cfg(test)]
     locate_searches: std::sync::atomic::AtomicUsize,
@@ -580,18 +613,17 @@ fn open_filesystem_grid_resource_file(
 }
 
 fn read_grid_resource_file(
-    mut file: std::fs::File,
+    file: std::fs::File,
     path: &Path,
     format: GridFormat,
 ) -> std::result::Result<Vec<u8>, GridError> {
-    if let Some(max_bytes) = max_grid_resource_bytes(format) {
-        return read_bounded_grid_resource_file(file, path, format, max_bytes);
-    }
-
-    let mut bytes = Vec::new();
-    file.read_to_end(&mut bytes)
-        .map_err(|err| GridError::Unavailable(format!("{}: {err}", path.display())))?;
-    Ok(bytes)
+    let Some(max_bytes) = max_grid_resource_bytes(format) else {
+        return Err(GridError::UnsupportedFormat(format!(
+            "{}: {format:?}",
+            path.display()
+        )));
+    };
+    read_bounded_grid_resource_file(file, path, format, max_bytes)
 }
 
 #[cfg(test)]
@@ -2490,6 +2522,18 @@ mod tests {
     }
 
     #[test]
+    fn unsupported_grid_format_is_rejected_before_resource_reading() {
+        let root = test_temp_grid_root("unsupported-format-read");
+        let path = root.join("unsupported.grid");
+        std::fs::write(&path, b"untrusted bytes").unwrap();
+        let file = std::fs::File::open(&path).unwrap();
+
+        let error = read_grid_resource_file(file, &path, GridFormat::Unsupported).unwrap_err();
+
+        assert!(matches!(error, GridError::UnsupportedFormat(_)));
+    }
+
+    #[test]
     fn grid_handle_rejects_excessive_ntv2_subfile_count_before_allocation() {
         let mut bytes = vec![0u8; NTV2_HEADER_LEN];
         write_ntv2_global_header(&mut bytes, u32::MAX);
@@ -2710,6 +2754,56 @@ mod tests {
 
         assert!(provider.load(&definition).unwrap().is_some());
         assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 1);
+    }
+
+    #[test]
+    fn filesystem_provider_cache_key_distinguishes_resource_boundaries() {
+        let root = test_temp_grid_root("resource-boundary-cache-key");
+        std::fs::write(root.join("a|b"), []).unwrap();
+        std::fs::write(root.join("a"), []).unwrap();
+
+        let provider = FilesystemGridProvider::new(vec![root]);
+        let mut delimited = test_grid_definition();
+        delimited.resource_names = SmallVec::from_vec(vec!["a|b".into()]);
+        let mut split = test_grid_definition();
+        split.resource_names = SmallVec::from_vec(vec!["a".into(), "b".into()]);
+
+        let delimited_location = provider.locate(&delimited).unwrap();
+        let split_location = provider.locate(&split).unwrap();
+
+        assert_eq!(
+            delimited_location.path.file_name().unwrap(),
+            std::ffi::OsStr::new("a|b")
+        );
+        assert_eq!(
+            split_location.path.file_name().unwrap(),
+            std::ffi::OsStr::new("a")
+        );
+        assert_eq!(provider.locate_searches.load(Ordering::SeqCst), 2);
+    }
+
+    #[test]
+    fn grid_runtime_cache_key_covers_definition_metadata() {
+        let base = test_grid_definition();
+        let mut renamed = base.clone();
+        renamed.name = "different diagnostic name".into();
+        let mut rescoped = base.clone();
+        rescoped.area_of_use = Some(AreaOfUse {
+            west: -10.0,
+            south: -5.0,
+            east: 10.0,
+            north: 5.0,
+            name: "test extent".into(),
+        });
+
+        assert_ne!(
+            grid_runtime_cache_key(&base),
+            grid_runtime_cache_key(&renamed)
+        );
+        assert_ne!(
+            grid_runtime_cache_key(&base),
+            grid_runtime_cache_key(&rescoped)
+        );
     }
 
     #[cfg(unix)]
