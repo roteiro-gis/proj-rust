@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-07-23
 
+- fix `Transform::inverse()` dropping skipped-operation diagnostics; inverse diagnostics now preserve every skip reason and reorient the operation direction, CRS, and datum metadata
+- remove the unnecessary `Clone` bound and per-coordinate clone from Rayon batch transforms; borrowed custom coordinate types now work in both sequential and parallel batch APIs
+- replace delimiter-built grid runtime and filesystem cache keys with typed structural keys, preventing distinct resource-name lists from aliasing the same cached definition, handle, or path
+- reject unsupported grid formats before reading their filesystem resources, so every file-backed grid read has an explicit byte cap
+- make the shared registry string writer fail atomically with a typed error when a UTF-8 value exceeds the `u16` format limit, and remove an internal PROJJSON serializer panic
+- make promoted-3D reference generation use the same point area of interest as the corpus test, resolve the last two deferred operation-selection cases, and remove the `pending_fix` skip mechanism so every reference is mandatory
 - accept EPSG-tagged WKT1 `COMPD_CS` definitions whose horizontal component uses the authority-native axis permutation, including SWEREF99 TM + RH2000 height (EPSG:5845), while continuing to reject unsupported custom axis semantics
 - add `Transform::new_horizontal`, `Transform::new_horizontal_with_selection_options`, and `Transform::from_epsg_horizontal` for explicit XY-only transforms from compound authority-code CRSs without silently weakening the vertical-safe constructors
 - add the Laborde Oblique Mercator projection (EPSG method 9813, Tananarive / Laborde Grid)
@@ -19,19 +25,19 @@
 - fail closed when a geoid-grid vertical transform would compose with a Helmert or geocentric horizontal pipeline
 - breaking: registry format v9 replaces stored datum Helmert values with EPSG-code identity and adds a datum name/alias index used by WKT and PROJ-string datum resolution
 - breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverses report a structured `Error::NonConvergence`
-- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based and `convert_batch`/`convert_batch_3d` no longer require `Clone`
+- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based; sequential and Rayon batch transforms no longer require `Clone`
 - breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`
 - add `proj_wkt::to_wkt2` for serializing geographic, projected, and compound definitions to WKT2
 - serve registry CRS names zero-copy from the embedded blob
 - add `proj_wkt::to_projjson` for serializing geographic, projected, and compound definitions to PROJJSON, fixing latent parser gaps surfaced by roundtrip testing
 - implement `Clone` and a summary `Debug` for `Transform`
 - add an optional `serde` feature for coordinate and operation-metadata value types
-- model EPSG supersession in the registry and rank superseded operations below their replacements
+- model EPSG supersession in the registry and rank superseded operations below their replacements, improving direct C PROJ selection matches from 202 to 217 of 250 probes
 - add coverage-guided fuzzing for the CRS and grid parsers with a nightly/PR CI workflow
 - fix compound ellipsoidal-height WKT serialization emitting `VERT_DATUM["Unknown datum"]`
 - add `proj-epsg-format`, a shared crate defining the registry binary layout for the reader and generator
 - replace the hand-rolled SHA-256 grid checksum implementation with the `sha2` crate
-- gate supply-chain health with cargo-deny in CI
+- gate supply-chain health with cargo-deny in CI, deny unreviewed duplicate dependency versions, and update the release lockfile past RUSTSEC-2026-0186, RUSTSEC-2026-0190, and RUSTSEC-2026-0204
 - add a CI coverage job and expand the live C PROJ parity workflow triggers
 - breaking: 3D transforms between CRSs without vertical components propagate datum-shift-induced height changes instead of preserving the caller's `z`
 - breaking: polar stereographic maps opposite-hemisphere inputs continuously instead of mirroring them into the projection's hemisphere
@@ -40,8 +46,8 @@
 - compute the exact closed-form Helmert inverse instead of the first-order parameter negation
 - wrap out-of-branch longitudes into the grid frame during NTv2 sampling
 - rank equally accurate area-matched operations by area-of-use specificity, as C PROJ does
-- add a committed operation-selection parity corpus generated from C PROJ's choices
-- expand the reference corpus with projection precision, edge-case, and 3D cross-datum coverage
+- add a 250-entry operation-selection parity corpus generated from C PROJ's choices, with 19 documented patterns covering 32 residual registry or tie-break probes and one probe outside the registry subset
+- expand the reference corpus from 161 to 218 points with projection precision, edge-case, and mandatory 3D cross-datum coverage
 - fix the property-test RNG seed for deterministic runs and verify the declared MSRV in CI
 
 ## 0.9.0 - 2026-07-06
