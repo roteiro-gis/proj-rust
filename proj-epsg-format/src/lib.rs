@@ -123,6 +123,32 @@ pub mod read {
 /// Little-endian write primitives. Float canonicalization (NaN bit patterns,
 /// decimal normalization) is generator policy and lives with the generator.
 pub mod write {
+    /// Returned when a string cannot be represented by the registry's `u16`
+    /// byte-length prefix.
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct StringTooLongError {
+        len: usize,
+    }
+
+    impl StringTooLongError {
+        pub fn byte_len(self) -> usize {
+            self.len
+        }
+    }
+
+    impl std::fmt::Display for StringTooLongError {
+        fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            write!(
+                formatter,
+                "string is {} bytes, exceeding the registry limit of {}",
+                self.len,
+                u16::MAX
+            )
+        }
+    }
+
+    impl std::error::Error for StringTooLongError {}
+
     pub fn u16(buf: &mut Vec<u8>, value: u16) {
         buf.extend_from_slice(&value.to_le_bytes());
     }
@@ -132,11 +158,13 @@ pub mod write {
     }
 
     /// `u16` length-prefixed UTF-8 string.
-    pub fn string_u16(buf: &mut Vec<u8>, value: &str) {
+    pub fn string_u16(buf: &mut Vec<u8>, value: &str) -> Result<(), StringTooLongError> {
         let bytes = value.as_bytes();
-        let len = u16::try_from(bytes.len()).expect("string too long for embedded registry");
+        let len =
+            u16::try_from(bytes.len()).map_err(|_| StringTooLongError { len: bytes.len() })?;
         u16(buf, len);
         buf.extend_from_slice(bytes);
+        Ok(())
     }
 }
 
@@ -147,11 +175,22 @@ mod tests {
         let mut buf = Vec::new();
         super::write::u16(&mut buf, 0xBEEF);
         super::write::u32(&mut buf, 0xDEAD_BEEF);
-        super::write::string_u16(&mut buf, "EPSG");
+        super::write::string_u16(&mut buf, "EPSG").unwrap();
 
         assert_eq!(super::read::u16(&buf, 0), 0xBEEF);
         assert_eq!(super::read::u32(&buf, 2), 0xDEAD_BEEF);
         assert_eq!(super::read::u16(&buf, 6), 4);
         assert_eq!(&buf[8..12], b"EPSG");
+    }
+
+    #[test]
+    fn oversized_string_write_is_atomic() {
+        let mut buf = vec![1, 2, 3];
+        let oversized = "x".repeat(usize::from(u16::MAX) + 1);
+
+        let error = super::write::string_u16(&mut buf, &oversized).unwrap_err();
+
+        assert_eq!(error.byte_len(), oversized.len());
+        assert_eq!(buf, [1, 2, 3]);
     }
 }
