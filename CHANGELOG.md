@@ -1,7 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.10.0 - 2026-07-23
 
+- fix `Transform::inverse()` dropping skipped-operation diagnostics; inverse diagnostics now preserve every skip reason and reorient the operation direction, CRS, and datum metadata
+- remove the unnecessary `Clone` bound and per-coordinate clone from Rayon batch transforms; borrowed custom coordinate types now work in both sequential and parallel batch APIs
+- replace delimiter-built grid runtime and filesystem cache keys with typed structural keys, preventing distinct resource-name lists from aliasing the same cached definition, handle, or path
+- reject unsupported grid formats before reading their filesystem resources, so every file-backed grid read has an explicit byte cap
+- make the shared registry string writer fail atomically with a typed error when a UTF-8 value exceeds the `u16` format limit, and remove an internal PROJJSON serializer panic
+- make promoted-3D reference generation use the same point area of interest as the corpus test, resolve the last two deferred operation-selection cases, and remove the `pending_fix` skip mechanism so every reference is mandatory
 - accept EPSG-tagged WKT1 `COMPD_CS` definitions whose horizontal component uses the authority-native axis permutation, including SWEREF99 TM + RH2000 height (EPSG:5845), while continuing to reject unsupported custom axis semantics
 - add `Transform::new_horizontal`, `Transform::new_horizontal_with_selection_options`, and `Transform::from_epsg_horizontal` for explicit XY-only transforms from compound authority-code CRSs without silently weakening the vertical-safe constructors
 - add the Azimuthal Equidistant projection family: EPSG methods 1125 (e.g. the WGS 84 / Equi7 continental grids) and 9832 Modified Azimuthal Equidistant (Guam 1963 / Yap Islands) through geodesic azimuth/distance as in C PROJ (Karney's algorithms via the pure-Rust `geographiclib-rs`), and 9831 Guam Projection (Guam 1963 / Guam SPCS) in its closed form; projected CRS coverage grows to 5,231, pinned by C PROJ test vectors and the EPSG Guidance Note worked examples for Yap and Guam
@@ -16,7 +22,7 @@
 - fail closed when a geoid-grid vertical transform would compose with a Helmert/geocentric horizontal pipeline: the datum shift's ellipsoidal-height change cannot yet be applied through a geoid transformation, so construction reports a typed error instead of producing silently wrong heights
 - breaking: registry format v9 — datum records drop their stored to-WGS84 Helmert values (identity is the datum's EPSG code; `Datum` gains `epsg()`/`with_epsg` and `same_datum` compares codes when both sides carry one), and a new datum alias index (1,664 EPSG names and aliases) lets WKT/PROJ-string parsing resolve any registry datum by name instead of only the 8 curated ones, fail-closed on ellipsoid mismatch
 - breaking: `Error`, `GridError`, and `ParseError` are `#[non_exhaustive]`; non-convergent inverse iterations report a structured `Error::NonConvergence { context, iterations }`
-- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based (`to_coord(&self)`/`to_coord3d(&self)`), and `convert_batch`/`convert_batch_3d` no longer require `Clone`
+- breaking: `Transformable`/`Transformable3D` conversion methods are borrow-based (`to_coord(&self)`/`to_coord3d(&self)`), and sequential and Rayon batch transforms no longer require `Clone`
 - breaking: `TransformOutcome::operation` and `GridCoverageMiss::operation` are `Arc<CoordinateOperationMetadata>`; diagnostics conversions share the compiled metadata instead of cloning strings per point
 - add `proj_wkt::to_wkt2`: WKT2 (ISO 19162) serialization for geographic, projected, and compound definitions, sharing the WKT1 serializer's mapping; roundtrips are asserted for all supported methods and fuzzed alongside WKT1
 - registry CRS names are served zero-copy from the embedded blob instead of leaking ~6.7k heap copies at first registry access
@@ -24,12 +30,12 @@
 - `Transform` implements `Clone` (grid data is Arc-shared) and a summary-form `Debug`; a compile-time assertion pins `Send + Sync + Clone + Debug`
 - add an optional `serde` feature deriving `Serialize`/`Deserialize` for coordinate and operation-metadata value types
 
-- model EPSG supersession: operations with a same-CRS-pair replacement carry a new registry flag (`CoordinateOperation::superseded`) and rank below their replacements during selection, matching C PROJ (selection parity improves from 202 to 218 of 250 probes); the generator also re-derives its hand-curated list premises from proj.db at generation time
+- model EPSG supersession: operations with a same-CRS-pair replacement carry a new registry flag (`CoordinateOperation::superseded`) and rank below their replacements during selection, matching C PROJ (selection parity improves from 202 to 217 directly matched probes out of 250); the generator also re-derives its hand-curated list premises from proj.db at generation time
 - add coverage-guided fuzzing (workspace-excluded `fuzz/` crate) for the CRS parsers, the WKT parse→emit→reparse cycle, and the NTv2/GTX/GeoTIFF grid parsers, with seed corpora and a nightly/PR CI workflow
 - fix WKT serialization of compound ellipsoidal-height CRSs: the vertical datum authority is now resolved from the horizontal CRS instead of emitting `VERT_DATUM["Unknown datum"]`, and definition-identity cross-checks no longer reuse the fail-closed operation-selection datum equality (found by the new `wkt_roundtrip` fuzz target)
 - add `proj-epsg-format`, a zero-dependency crate that is now the single source of truth for the embedded registry's binary layout, shared by the `proj-core` reader and the `gen-registry` writer (previously ~40 hand-synced constant definitions); registry bytes are unchanged and the source-audit test forbids redefinitions
 - replace the hand-rolled SHA-256 grid checksum implementation with the `sha2` crate (unchanged output, FIPS 180-4 vectors added)
-- gate supply-chain health with cargo-deny in CI (advisories/licenses/bans/sources); updated crossbeam-epoch past RUSTSEC-2026-0204
+- gate supply-chain health with cargo-deny in CI (advisories/licenses/bans/sources), deny unreviewed duplicate dependency versions, and update the release lockfile past RUSTSEC-2026-0186, RUSTSEC-2026-0190, and RUSTSEC-2026-0204
 - add a CI coverage job (cargo-llvm-cov) and a linear-parse-time regression test for adversarial WKT parameter lists; the live C PROJ parity workflow gains a weekly schedule and path-filtered PR triggers
 
 - breaking (behavior): 3D transforms between CRSs without vertical components now propagate datum-shift-induced ellipsoidal height changes instead of preserving the caller's `z`, matching C PROJ's promoted-3D CRS semantics; compound-CRS transforms with gravity-related vertical components are unchanged
@@ -39,8 +45,8 @@
 - compute the exact closed-form Helmert inverse instead of the first-order parameter negation; forward/inverse roundtrips now hold to machine precision at any rotation magnitude
 - wrap out-of-branch longitudes into the grid frame during NTv2 sampling (e.g. 358° resolves like -2°), matching existing GTX behavior
 - rank equally accurate area-matched operations by area-of-use specificity (smaller extent first), as C PROJ does
-- add a committed operation-selection parity corpus generated from C PROJ's late-binding choices (`gen-selection-parity`), asserted by a default-run test with documented known divergences (EPSG supersession-driven variant preferences are not modeled yet)
-- expand the reference corpus (161 → 192 points) with precision points for LCC/Albers/Cassini/Mercator/Equidistant Cylindrical, near-pole transverse Mercator inverses, wrong-hemisphere polar stereographic inputs, and promoted-3D cross-datum height references; corpus schema gains optional `z` fields and a `pending_fix` divergence marker
+- add a 250-entry committed operation-selection parity corpus generated from C PROJ's late-binding choices (`gen-selection-parity`), asserted by a default-run test with 19 fixed documented patterns covering 32 residual registry/tie-break probes (one additional probe is outside the registry subset)
+- expand the reference corpus (161 → 218 points) with precision points for LCC/Albers/Cassini/Mercator/Equidistant Cylindrical, near-pole transverse Mercator inverses, wrong-hemisphere polar stereographic inputs, and mandatory promoted-3D cross-datum height references; the corpus schema gains optional `z` fields
 - fix the property-test RNG seed for deterministic runs and verify the declared MSRV (1.85) in CI
 
 ## 0.9.0 - 2026-07-06
