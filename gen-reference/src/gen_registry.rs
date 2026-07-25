@@ -3141,10 +3141,13 @@ fn main() {
     }
 }
 
-use proj_epsg_format::write::string_u16 as write_string_u16;
-
 fn write_f64(buf: &mut Vec<u8>, value: f64) {
     buf.extend_from_slice(&canonical_f64(value).to_le_bytes());
+}
+
+fn write_string_u16(buf: &mut Vec<u8>, value: &str) {
+    proj_epsg_format::write::string_u16(buf, value)
+        .unwrap_or_else(|error| fatal(format!("cannot encode registry string {value:?}: {error}")));
 }
 
 fn write_optional_f64(buf: &mut Vec<u8>, value: Option<f64>) {

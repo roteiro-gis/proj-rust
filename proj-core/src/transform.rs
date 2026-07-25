@@ -58,7 +58,7 @@ fn validate_vertical_composition(
             .any(|fallback| fallback.pipeline.transforms_ellipsoidal_height)
     {
         return Err(Error::OperationSelection(
-            "geoid-grid vertical transforms cannot yet be composed with a horizontal datum              shift that changes ellipsoidal height; transform the horizontal datum and the              vertical reference in separate steps"
+            "geoid-grid vertical transforms cannot yet be composed with a horizontal datum shift that changes ellipsoidal height; transform the horizontal datum and the vertical reference in separate steps"
                 .into(),
         ));
     }
@@ -95,11 +95,8 @@ impl std::fmt::Debug for Transform {
 /// `Transform` must stay cheaply shareable across threads and duplicable;
 /// a field losing one of these auto traits is a semver break, so fail the
 /// build instead.
-#[allow(dead_code)]
-fn assert_transform_auto_traits() {
-    fn assert_traits<T: Send + Sync + Clone + std::fmt::Debug>() {}
-    assert_traits::<Transform>();
-}
+fn assert_transform_auto_traits<T: Send + Sync + Clone + std::fmt::Debug>() {}
+const _: fn() = assert_transform_auto_traits::<Transform>;
 
 /// Trait for `geo-types` geometries that can be transformed as whole values.
 ///
@@ -454,7 +451,24 @@ impl Transform {
                 .iter()
                 .map(|fallback| (*fallback.metadata).clone())
                 .collect(),
-            skipped_operations: Vec::new(),
+            skipped_operations: self
+                .diagnostics
+                .skipped_operations
+                .iter()
+                .cloned()
+                .map(|mut skipped| {
+                    skipped.metadata.direction = skipped.metadata.direction.inverse();
+                    std::mem::swap(
+                        &mut skipped.metadata.source_crs_epsg,
+                        &mut skipped.metadata.target_crs_epsg,
+                    );
+                    std::mem::swap(
+                        &mut skipped.metadata.source_datum_epsg,
+                        &mut skipped.metadata.target_datum_epsg,
+                    );
+                    skipped
+                })
+                .collect(),
             approximate: self.diagnostics.approximate,
             missing_required_grid: self.diagnostics.missing_required_grid.clone(),
         };
@@ -801,7 +815,8 @@ impl Transform {
     /// Transform 2D coordinates from `input` into an existing `output` slice.
     ///
     /// `output` must have exactly the same length as `input`. This API performs
-    /// no allocation and does not require cloning input coordinates.
+    /// no allocation and does not require cloning input coordinates. If a
+    /// coordinate fails, the preceding output elements have already changed.
     pub fn convert_coords_into(&self, input: &[Coord], output: &mut [Coord]) -> Result<()> {
         validate_output_len(input.len(), output.len())?;
         for (source, target) in input.iter().zip(output.iter_mut()) {
@@ -813,7 +828,8 @@ impl Transform {
     /// Transform 3D coordinates from `input` into an existing `output` slice.
     ///
     /// `output` must have exactly the same length as `input`. This API performs
-    /// no allocation and does not require cloning input coordinates.
+    /// no allocation and does not require cloning input coordinates. If a
+    /// coordinate fails, the preceding output elements have already changed.
     pub fn convert_coords_3d_into(&self, input: &[Coord3D], output: &mut [Coord3D]) -> Result<()> {
         validate_output_len(input.len(), output.len())?;
         for (source, target) in input.iter().zip(output.iter_mut()) {
@@ -824,7 +840,7 @@ impl Transform {
 
     /// Batch transform with Rayon parallelism.
     #[cfg(feature = "rayon")]
-    pub fn convert_batch_parallel<T: Transformable + Send + Sync + Clone>(
+    pub fn convert_batch_parallel<T: Transformable + Send + Sync>(
         &self,
         coords: &[T],
     ) -> Result<Vec<T>> {
@@ -836,13 +852,13 @@ impl Transform {
 
         coords
             .par_iter()
-            .map(|coord| self.convert(coord.clone()))
+            .map(|coord| self.convert_coord(coord.to_coord()).map(T::from_coord))
             .collect()
     }
 
     /// Batch transform of 3D coordinates with adaptive Rayon parallelism.
     #[cfg(feature = "rayon")]
-    pub fn convert_batch_parallel_3d<T: Transformable3D + Send + Sync + Clone>(
+    pub fn convert_batch_parallel_3d<T: Transformable3D + Send + Sync>(
         &self,
         coords: &[T],
     ) -> Result<Vec<T>> {
@@ -854,7 +870,10 @@ impl Transform {
 
         coords
             .par_iter()
-            .map(|coord| self.convert_3d(coord.clone()))
+            .map(|coord| {
+                self.convert_coord3d(coord.to_coord3d())
+                    .map(T::from_coord3d)
+            })
             .collect()
     }
 }

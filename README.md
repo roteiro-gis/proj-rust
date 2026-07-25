@@ -11,6 +11,7 @@ C libraries, no build scripts, and no unsafe code.
 ## Crates
 
 - `proj-core`: CRS definitions, operation selection, projection math, datum shifts, grid sampling, and transforms.
+- `proj-epsg-format`: the zero-dependency binary layout shared by the embedded EPSG registry reader and generator.
 - `proj-wkt`: parsing for EPSG codes, WKT, PROJ strings, PROJJSON, and a small `Proj` compatibility facade.
 
 ## Usage
@@ -37,7 +38,10 @@ Coordinates use CRS-native units:
 
 - Geographic CRS coordinates are longitude/latitude in degrees.
 - Projected CRS coordinates use the CRS linear unit, such as metres or US survey feet.
-- `convert_3d()` preserves `z` when no explicit vertical CRS is present, preserves it for matching vertical components, and converts it when matching vertical reference frames use different linear units.
+- Without explicit vertical components, `convert_3d()` treats `z` as
+  ellipsoidal height: projection-only paths preserve it, while horizontal
+  datum shifts can change it. Explicit vertical components preserve, convert,
+  or transform `z` according to their declared reference frames and units.
 
 Strict transform constructors reject a compound-to-2D CRS pair because that
 would silently discard an explicit vertical reference. For an intentionally
@@ -71,7 +75,7 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 | Web Mercator | EPSG:3857 |
 | Transverse Mercator / UTM | EPSG:32601-32660, EPSG:32701-32760 |
 | Polar Stereographic | EPSG:3413, EPSG:3031, EPSG:3995, EPSG:32661, EPSG:32761 |
-| Lambert Conformal Conic | EPSG:2154, EPSG:3347 |
+| Lambert Conformal Conic, including 1SP, Michigan, and 1SP variant B | EPSG:2154, EPSG:3347, EPSG:24200, EPSG:6201, EPSG:9549 |
 | Albers Equal Area | EPSG:5070, EPSG:3005 |
 | Lambert Azimuthal Equal Area | EPSG:3035, EPSG:3408, EPSG:6931, EPSG:9311 |
 | Oblique Stereographic | EPSG:28992, EPSG:2953 |
@@ -79,6 +83,11 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 | Cassini-Soldner | EPSG:30200, EPSG:3377 |
 | Mercator | EPSG:3395 |
 | Equidistant Cylindrical | EPSG:32662 |
+| Colombia Urban | EPSG:6247 |
+| Krovak north-orientated and modified north-orientated | EPSG:5514, EPSG:5516, EPSG:8353 |
+| Equal Earth | EPSG:8857, EPSG:8858, EPSG:8859 |
+| American Polyconic | EPSG:5880, EPSG:29101 |
+| Azimuthal Equidistant, Modified Azimuthal Equidistant, and Guam Projection | EPSG:27701, EPSG:3295, EPSG:3993 |
 
 `Transform::new()` and `Transform::from_crs_defs()` select the best supported operation for a CRS pair. Use `Transform::with_selection_options()` or `Transform::from_crs_defs_with_selection_options()` to set an area of interest, require grid-backed operations, require exact area matches, provide a `GridProvider`, select an explicit registry operation, or provide explicit custom horizontal `CoordinateOperation` candidates.
 
@@ -111,6 +120,7 @@ Grid diagnostics expose selected operation metadata and resolved grid SHA-256 ch
 | `rayon` | yes | Parallel batch transforms via `convert_batch_parallel()` |
 | `geo-types` | yes | `geo_types::Coord<f64>` conversions and geometry transforms |
 | `geotiff` | no | Decode PROJ-format GeoTIFF/COG datum-shift and geoid grids (e.g. RDNAPTRANS2018) via the pure-Rust `geotiff-reader` crate |
+| `serde` | no | `Serialize`/`Deserialize` for coordinate and operation-metadata value types |
 | `c-proj-compat` | no | Reference-compatibility tests against bundled C PROJ |
 
 ## Development

@@ -17,11 +17,6 @@ struct ReferencePoint {
     #[serde(skip_serializing_if = "Option::is_none")]
     tolerance_z: Option<f64>,
     description: String,
-    /// When set, proj-core is known to diverge from this reference value until
-    /// the named fix lands; the default corpus test skips the point and the
-    /// ignored `corpus_pending_fixes_resolved` test tracks it.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pending_fix: Option<String>,
 }
 
 fn transform(from: u32, to: u32, x: f64, y: f64, tol: f64, desc: &str) -> Option<ReferencePoint> {
@@ -63,7 +58,6 @@ fn transform(from: u32, to: u32, x: f64, y: f64, tol: f64, desc: &str) -> Option
         tolerance: tol,
         tolerance_z: None,
         description: desc.to_string(),
-        pending_fix: None,
     })
 }
 
@@ -75,10 +69,11 @@ mod promoted_3d {
     use std::ptr;
 
     use proj_sys::{
-        proj_area_create, proj_area_destroy, proj_context_create, proj_context_destroy,
-        proj_context_errno, proj_create, proj_create_crs_to_crs_from_pj, proj_crs_promote_to_3D,
-        proj_destroy, proj_errno, proj_errno_string, proj_normalize_for_visualization, proj_trans,
-        PJ_CONTEXT, PJ_COORD, PJ_DIRECTION_PJ_FWD, PJ_XYZT,
+        proj_area_create, proj_area_destroy, proj_area_set_bbox, proj_context_create,
+        proj_context_destroy, proj_context_errno, proj_create, proj_create_crs_to_crs_from_pj,
+        proj_crs_promote_to_3D, proj_destroy, proj_errno, proj_errno_string,
+        proj_normalize_for_visualization, proj_trans, PJ_CONTEXT, PJ_COORD, PJ_DIRECTION_PJ_FWD,
+        PJ_XYZT,
     };
 
     fn error_message(err: i32) -> String {
@@ -142,6 +137,10 @@ mod promoted_3d {
         };
 
         let area = proj_area_create();
+        // Match the corpus test's point AOI. Without this, promoted 3D
+        // construction can choose a location-independent operation that
+        // differs from point-aware operation selection.
+        proj_area_set_bbox(area, coord.0, coord.1, coord.0, coord.1);
         let raw = proj_create_crs_to_crs_from_pj(ctx, from_crs, to_crs, area, ptr::null());
         proj_area_destroy(area);
         proj_destroy(from_crs);
@@ -197,7 +196,6 @@ fn transform_3d(
     tol: f64,
     tol_z: f64,
     desc: &str,
-    pending: Option<&str>,
 ) -> Option<ReferencePoint> {
     let (ox, oy, oz) = match promoted_3d::convert(from, to, (x, y, z)) {
         Ok(out) => out,
@@ -223,7 +221,6 @@ fn transform_3d(
         tolerance: tol,
         tolerance_z: Some(tol_z),
         description: desc.to_string(),
-        pending_fix: pending.map(str::to_string),
     })
 }
 
@@ -1111,37 +1108,25 @@ fn main() {
     // Near-pole inverse points for transverse Mercator: project a point close
     // to the pole, then record the inverse as its own reference point. The
     // exact (Poder/Engsager) transverse Mercator recovers these like C PROJ.
-    let near_pole_tm: &[(u32, f64, f64, Option<&str>, &str)] = &[
-        (32618, -75.0, 89.9999999, None, "UTM18N near north pole"),
-        (
-            32618,
-            -70.5,
-            89.999999,
-            None,
-            "UTM18N off-CM near north pole",
-        ),
-        (32718, -72.0, -89.9999999, None, "UTM18S near south pole"),
+    let near_pole_tm: &[(u32, f64, f64, &str)] = &[
+        (32618, -75.0, 89.9999999, "UTM18N near north pole"),
+        (32618, -70.5, 89.999999, "UTM18N off-CM near north pole"),
+        (32718, -72.0, -89.9999999, "UTM18S near south pole"),
     ];
-    for &(epsg, lon, lat, pending, name) in near_pole_tm {
+    for &(epsg, lon, lat, name) in near_pole_tm {
         if let Some(fwd) = transform(4326, epsg, lon, lat, 0.01, &format!("{name} forward")) {
             points.push(fwd);
             if let Some(fwd_again) = transform(4326, epsg, lon, lat, 0.01, "") {
                 // Longitude is ill-conditioned at the pole; C PROJ still
                 // recovers it to ~1e-7 deg, so hold the inverse to 1e-4 deg.
-                points.extend(
-                    transform(
-                        epsg,
-                        4326,
-                        fwd_again.expected_x,
-                        fwd_again.expected_y,
-                        1e-4,
-                        &format!("{name} inverse"),
-                    )
-                    .map(|mut point| {
-                        point.pending_fix = pending.map(str::to_string);
-                        point
-                    }),
-                );
+                points.extend(transform(
+                    epsg,
+                    4326,
+                    fwd_again.expected_x,
+                    fwd_again.expected_y,
+                    1e-4,
+                    &format!("{name} inverse"),
+                ));
             }
         }
     }
@@ -1149,36 +1134,28 @@ fn main() {
     // Wrong-hemisphere inputs for polar stereographic: the conformal-latitude
     // formula extends continuously across the equator to large-radius points,
     // matching C PROJ.
-    let wrong_hemisphere_ps: &[(u32, f64, f64, Option<&str>, &str)] = &[
+    let wrong_hemisphere_ps: &[(u32, f64, f64, &str)] = &[
         (
             3413,
             -45.0,
             -30.0,
-            None,
             "southern point into north polar stereo 4326→3413",
         ),
         (
             3031,
             0.0,
             30.0,
-            None,
             "northern point into south polar stereo 4326→3031",
         ),
         (
             3413,
             -45.0,
             0.0,
-            None,
             "equator into north polar stereo 4326→3413",
         ),
     ];
-    for &(epsg, lon, lat, pending, name) in wrong_hemisphere_ps {
-        points.extend(
-            transform(4326, epsg, lon, lat, 0.01, name).map(|mut point| {
-                point.pending_fix = pending.map(str::to_string);
-                point
-            }),
-        );
+    for &(epsg, lon, lat, name) in wrong_hemisphere_ps {
+        points.extend(transform(4326, epsg, lon, lat, 0.01, name));
     }
 
     // =========================================================================
@@ -1187,19 +1164,8 @@ fn main() {
     //    horizontal pipeline; same-datum paths preserve the input height.
     // =========================================================================
 
-    // (from_epsg, to_epsg, lon, lat, height, tolerance, tolerance_z, name,
-    // pending fix marker)
-    type ThreeDCase = (
-        u32,
-        u32,
-        f64,
-        f64,
-        f64,
-        f64,
-        f64,
-        &'static str,
-        Option<&'static str>,
-    );
+    // (from_epsg, to_epsg, lon, lat, height, tolerance, tolerance_z, name)
+    type ThreeDCase = (u32, u32, f64, f64, f64, f64, f64, &'static str);
     let three_d_points: &[ThreeDCase] = &[
         (
             4326,
@@ -1210,7 +1176,6 @@ fn main() {
             0.001,
             1e-9,
             "NYC 3D 4326→3857 preserves height",
-            None,
         ),
         (
             4267,
@@ -1221,7 +1186,6 @@ fn main() {
             0.001,
             0.01,
             "US Midwest 3D NAD27→WGS84",
-            Some("P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"),
         ),
         (
             4277,
@@ -1232,7 +1196,6 @@ fn main() {
             0.001,
             0.01,
             "London 3D OSGB36→WGS84",
-            None,
         ),
         (
             4230,
@@ -1243,7 +1206,6 @@ fn main() {
             0.001,
             0.01,
             "Paris 3D ED50→WGS84",
-            Some("P1.7 operation selection parity: C PROJ promoted-3D pair picks a different registry operation"),
         ),
         (
             4326,
@@ -1254,7 +1216,6 @@ fn main() {
             0.001,
             0.01,
             "London 3D WGS84→OSGB36 reverse",
-            None,
         ),
         (
             4326,
@@ -1265,13 +1226,10 @@ fn main() {
             0.01,
             0.01,
             "London 3D WGS84→British National Grid",
-            None,
         ),
     ];
-    for &(from_epsg, to_epsg, x, y, z, tol, tol_z, name, pending) in three_d_points {
-        points.extend(transform_3d(
-            from_epsg, to_epsg, x, y, z, tol, tol_z, name, pending,
-        ));
+    for &(from_epsg, to_epsg, x, y, z, tol, tol_z, name) in three_d_points {
+        points.extend(transform_3d(from_epsg, to_epsg, x, y, z, tol, tol_z, name));
     }
 
     eprintln!("Generated {} reference points", points.len());

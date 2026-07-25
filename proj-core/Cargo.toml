@@ -46,8 +46,9 @@ features = ["bundled_proj"]
 optional = true
 
 # Pure-Rust GeoTIFF/COG grid reader (PROJ-format datum-shift and geoid grids).
-# default-features = false drops the mmap (`local`) and HTTP (`cog`) paths; we
-# only use the in-memory `from_bytes` decoder.
+# default-features = false drops the HTTP (`cog`) path. Upstream's `local`
+# feature gates the reader type that provides the in-memory `from_bytes`
+# decoder used here; proj-core does not open GeoTIFF paths through that API.
 # 0.6.1 replaced the C-backed `zstd-sys` with pure-Rust `ruzstd`, keeping the
 # `geotiff` feature free of C dependencies and build scripts.
 [dependencies.geotiff-reader]

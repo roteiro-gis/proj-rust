@@ -14,17 +14,16 @@ allow = [
     "MIT",
     "Apache-2.0",
     "Apache-2.0 WITH LLVM-exception",
-    "BSD-2-Clause",
-    "BSD-3-Clause",
-    "ISC",
-    "NCSA",
     "Unicode-3.0",
     "Zlib",
 ]
 
 [bans]
-multiple-versions = "warn"
+multiple-versions = "deny"
 wildcards = "deny"
+skip = [
+    { crate = "redox_syscall@0.5.18", reason = "Target-specific transitive dependencies require disjoint redox_syscall release lines" },
+]
 
 [sources]
 unknown-registry = "deny"

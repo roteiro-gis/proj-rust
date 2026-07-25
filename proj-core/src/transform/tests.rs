@@ -437,6 +437,26 @@ fn roundtrip_4326_3413() {
 }
 
 #[test]
+fn paris_ed50_aoi_selects_matching_most_accurate_operation() {
+    let t = Transform::with_selection_options(
+        "EPSG:4230",
+        "EPSG:4326",
+        SelectionOptions::new().with_area_of_interest(AreaOfInterest::source_crs_point(
+            Coord::new(2.3522, 48.8566),
+        )),
+    )
+    .unwrap();
+
+    assert_eq!(t.selected_operation().id, Some(CoordinateOperationId(1311)));
+
+    let actual = t.convert_3d((2.3522, 48.8566, 100.0)).unwrap();
+    let expected = (2.3509296022605057, 48.855688571414994, 152.828982709907);
+    assert!((actual.0 - expected.0).abs() < 1e-12);
+    assert!((actual.1 - expected.1).abs() < 1e-12);
+    assert!((actual.2 - expected.2).abs() < 1e-9);
+}
+
+#[test]
 fn nad83_to_wgs84_uses_registry_operation() {
     let t = Transform::new("EPSG:4269", "EPSG:4326").unwrap();
     let (lon, lat) = t.convert((-74.006, 40.7128)).unwrap();
@@ -853,6 +873,49 @@ fn inverse_reorients_selected_metadata_and_diagnostics() {
             .target_crs_epsg,
         Some(4267)
     );
+}
+
+#[test]
+fn inverse_preserves_and_reorients_skipped_operation_diagnostics() {
+    let forward = Transform::with_selection_options(
+        "EPSG:4230",
+        "EPSG:4326",
+        SelectionOptions::new().with_area_of_interest(AreaOfInterest::source_crs_point(
+            Coord::new(2.3522, 48.8566),
+        )),
+    )
+    .unwrap();
+    let inverse = forward.inverse().unwrap();
+    let forward_skipped = &forward.selection_diagnostics().skipped_operations;
+    let inverse_skipped = &inverse.selection_diagnostics().skipped_operations;
+
+    assert!(!forward_skipped.is_empty());
+    assert_eq!(inverse_skipped.len(), forward_skipped.len());
+    for (forward, inverse) in forward_skipped.iter().zip(inverse_skipped) {
+        assert_eq!(inverse.reason, forward.reason);
+        assert_eq!(inverse.detail, forward.detail);
+        assert_eq!(inverse.metadata.id, forward.metadata.id);
+        assert_eq!(
+            inverse.metadata.direction,
+            forward.metadata.direction.inverse()
+        );
+        assert_eq!(
+            inverse.metadata.source_crs_epsg,
+            forward.metadata.target_crs_epsg
+        );
+        assert_eq!(
+            inverse.metadata.target_crs_epsg,
+            forward.metadata.source_crs_epsg
+        );
+        assert_eq!(
+            inverse.metadata.source_datum_epsg,
+            forward.metadata.target_datum_epsg
+        );
+        assert_eq!(
+            inverse.metadata.target_datum_epsg,
+            forward.metadata.source_datum_epsg
+        );
+    }
 }
 
 #[test]
@@ -1803,6 +1866,38 @@ fn parallel_batch_transform_matches_sequential_on_large_input() {
 
 #[cfg(feature = "rayon")]
 #[test]
+fn parallel_batch_transform_accepts_non_clone_coordinates() {
+    #[derive(Debug, PartialEq)]
+    struct NonCloneCoord(Coord);
+
+    impl Transformable for NonCloneCoord {
+        fn to_coord(&self) -> Coord {
+            self.0
+        }
+
+        fn from_coord(coord: Coord) -> Self {
+            Self(coord)
+        }
+    }
+
+    let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+    let len = rayon::current_num_threads() * PARALLEL_MIN_ITEMS_PER_THREAD;
+    let coords = (0..len)
+        .map(|index| {
+            NonCloneCoord(Coord::new(
+                -179.0 + index as f64 * 0.0001,
+                -80.0 + index as f64 * 0.00005,
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let parallel = t.convert_batch_parallel(&coords).unwrap();
+
+    assert_eq!(parallel.len(), coords.len());
+}
+
+#[cfg(feature = "rayon")]
+#[test]
 fn parallel_batch_transform_3d() {
     let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
     let coords: Vec<(f64, f64, f64)> = (0..100)
@@ -1832,6 +1927,39 @@ fn parallel_batch_transform_3d_matches_sequential_on_large_input() {
     let parallel = t.convert_batch_parallel_3d(&coords).unwrap();
 
     assert_eq!(parallel, sequential);
+}
+
+#[cfg(feature = "rayon")]
+#[test]
+fn parallel_batch_transform_3d_accepts_non_clone_coordinates() {
+    #[derive(Debug, PartialEq)]
+    struct NonCloneCoord3D(Coord3D);
+
+    impl Transformable3D for NonCloneCoord3D {
+        fn to_coord3d(&self) -> Coord3D {
+            self.0
+        }
+
+        fn from_coord3d(coord: Coord3D) -> Self {
+            Self(coord)
+        }
+    }
+
+    let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
+    let len = rayon::current_num_threads() * PARALLEL_MIN_ITEMS_PER_THREAD;
+    let coords = (0..len)
+        .map(|index| {
+            NonCloneCoord3D(Coord3D::new(
+                -179.0 + index as f64 * 0.0001,
+                -80.0 + index as f64 * 0.00005,
+                index as f64,
+            ))
+        })
+        .collect::<Vec<_>>();
+
+    let parallel = t.convert_batch_parallel_3d(&coords).unwrap();
+
+    assert_eq!(parallel.len(), coords.len());
 }
 
 #[test]

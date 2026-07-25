@@ -21,7 +21,10 @@ impl Coord {
 /// At the public API boundary:
 /// - **Geographic CRS**: x/y are longitude/latitude in degrees
 /// - **Projected CRS**: x/y are easting/northing in the CRS's native linear unit
-/// - `z` is preserved only when source and target vertical semantics are unchanged
+/// - without explicit vertical components, `z` is ellipsoidal height and can
+///   change during a horizontal datum shift
+/// - with explicit vertical components, `z` follows their declared height
+///   semantics and units
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord3D {
@@ -143,7 +146,8 @@ pub trait Transformable: Sized {
 }
 
 /// Trait for types that can be transformed through a [`Transform`](crate::Transform)
-/// while preserving a height component when vertical CRS semantics are unchanged.
+/// while carrying a height component through ellipsoidal or explicit vertical
+/// transformations.
 ///
 /// The transform returns the same type as the input, so `(f64, f64, f64)` in gives
 /// `(f64, f64, f64)` out and [`Coord3D`] in gives [`Coord3D`] out.

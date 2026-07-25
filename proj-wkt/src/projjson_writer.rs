@@ -25,13 +25,11 @@ pub(crate) fn to_projjson_value(crs: &CrsDef) -> Result<Value> {
         CrsDef::Projected(projected) => projected_crs_value(projected)?,
         CrsDef::Compound(compound) => compound_crs_value(compound)?,
     };
-    if let Some(object) = value.as_object_mut() {
-        let mut with_schema = Map::new();
-        with_schema.insert("$schema".into(), Value::String(PROJJSON_SCHEMA.into()));
-        with_schema.append(object);
-        return Ok(Value::Object(with_schema));
-    }
-    Ok(value)
+    let object = crs_object_mut(&mut value)?;
+    let mut with_schema = Map::new();
+    with_schema.insert("$schema".into(), Value::String(PROJJSON_SCHEMA.into()));
+    with_schema.append(object);
+    Ok(Value::Object(with_schema))
 }
 
 fn compound_crs_value(compound: &CompoundCrsDef) -> Result<Value> {
@@ -48,7 +46,7 @@ fn compound_crs_value(compound: &CompoundCrsDef) -> Result<Value> {
             };
             let mut value =
                 geographic_crs_value(geographic, Some(compound.vertical_crs().linear_unit()))?;
-            let object = value.as_object_mut().expect("CRS values are objects");
+            let object = crs_object_mut(&mut value)?;
             object.insert(
                 "name".into(),
                 Value::String(nonempty_name(compound.name(), "unnamed compound CRS")),
@@ -76,6 +74,12 @@ fn compound_crs_value(compound: &CompoundCrsDef) -> Result<Value> {
             Ok(Value::Object(object))
         }
     }
+}
+
+fn crs_object_mut(value: &mut Value) -> Result<&mut Map<String, Value>> {
+    value.as_object_mut().ok_or_else(|| {
+        ParseError::Parse("internal PROJJSON serializer produced a non-object CRS value".into())
+    })
 }
 
 fn geographic_crs_value(
