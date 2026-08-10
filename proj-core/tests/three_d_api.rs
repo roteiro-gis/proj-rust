@@ -35,7 +35,9 @@ fn cross_datum_height_roundtrip() {
 
     assert!((roundtripped.0 - original.0).abs() < 1e-6);
     assert!((roundtripped.1 - original.1).abs() < 1e-6);
-    assert!((roundtripped.2 - original.2).abs() < 1e-12);
+    // Cartesian conversion around a Helmert step is accurate to well below a
+    // micrometre, but does not promise picometre-exact geodetic heights.
+    assert!((roundtripped.2 - original.2).abs() < 1e-8);
 }
 
 #[test]

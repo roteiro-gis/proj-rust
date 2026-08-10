@@ -164,6 +164,22 @@ const KNOWN_IDENTITY_BRIDGE_OPERATION_CODES: &[u32] = &[1149];
 const HORIZONTAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["hgridshift", "gridshift"];
 const VERTICAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["geoid_like"];
 
+// `HelmertParams` and the runtime Helmert implementation use the position-vector
+// convention. EPSG stores these methods using the coordinate-frame convention,
+// whose rotation signs are the opposite of position-vector rotations. Normalize
+// them while generating the registry so the compact runtime representation can
+// remain convention-independent.
+const COORDINATE_FRAME_METHOD_CODES: &[i64] = &[
+    1032, // Coordinate Frame rotation (geocentric domain)
+    1056, // Time-dependent Coordinate Frame rotation (geocentric)
+    1057, // Time-dependent Coordinate Frame rotation (geographic 2D)
+    1066, // Time-specific Coordinate Frame rotation (geocentric)
+    1133, // Coordinate Frame rotation full matrix (geographic 2D)
+    1140, // Coordinate Frame rotation full matrix (geographic 3D)
+    9607, // Coordinate Frame rotation (geographic 2D domain)
+    9636, // Molodensky-Badekas (coordinate-frame, geographic 2D domain)
+];
+
 // EPSG:32662 is deprecated upstream but remains part of this crate's documented
 // public support set.
 const EXPLICITLY_SUPPORTED_DEPRECATED_PROJECTED_CRS: &[u32] = &[32662];
@@ -248,6 +264,15 @@ enum DatumShiftKind {
     Unknown,
     Identity,
     Helmert,
+}
+
+fn normalize_helmert_convention(method_code: i64, mut params: [f64; 7]) -> [f64; 7] {
+    if COORDINATE_FRAME_METHOD_CODES.contains(&method_code) {
+        params[3] = -params[3];
+        params[4] = -params[4];
+        params[5] = -params[5];
+    }
+    params
 }
 
 struct DatumInfo {
@@ -2499,6 +2524,7 @@ fn main() {
                         ht.rotation_uom_code,
                         COALESCE(ht.scale_difference, 0.0),
                         ht.scale_difference_uom_code,
+                        ht.method_code,
                         ht.deprecated
                  FROM helmert_transformation_table ht
                  JOIN geodetic_crs src
@@ -2534,7 +2560,8 @@ fn main() {
                     row.get::<_, Option<i64>>(13)?,
                     row.get::<_, f64>(14)?,
                     row.get::<_, Option<i64>>(15)?,
-                    row.get::<_, bool>(16)?,
+                    row.get::<_, i64>(16)?,
+                    row.get::<_, bool>(17)?,
                 ))
             })
             .unwrap()
@@ -2561,31 +2588,34 @@ fn main() {
                 .15
                 .and_then(|uom| scale_uoms.get(&uom).copied())
                 .unwrap_or(0.0);
-            let params = [
-                row.7,
-                row.8,
-                row.9,
-                if row.10 == 0.0 {
-                    0.0
-                } else {
-                    row.10 * rotation_factor * 180.0 / PI * 3600.0
-                },
-                if row.11 == 0.0 {
-                    0.0
-                } else {
-                    row.11 * rotation_factor * 180.0 / PI * 3600.0
-                },
-                if row.12 == 0.0 {
-                    0.0
-                } else {
-                    row.12 * rotation_factor * 180.0 / PI * 3600.0
-                },
-                if row.14 == 0.0 {
-                    0.0
-                } else {
-                    row.14 * scale_factor * 1_000_000.0
-                },
-            ];
+            let params = normalize_helmert_convention(
+                row.16,
+                [
+                    row.7,
+                    row.8,
+                    row.9,
+                    if row.10 == 0.0 {
+                        0.0
+                    } else {
+                        row.10 * rotation_factor * 180.0 / PI * 3600.0
+                    },
+                    if row.11 == 0.0 {
+                        0.0
+                    } else {
+                        row.11 * rotation_factor * 180.0 / PI * 3600.0
+                    },
+                    if row.12 == 0.0 {
+                        0.0
+                    } else {
+                        row.12 * rotation_factor * 180.0 / PI * 3600.0
+                    },
+                    if row.14 == 0.0 {
+                        0.0
+                    } else {
+                        row.14 * scale_factor * 1_000_000.0
+                    },
+                ],
+            );
 
             operations.push(OperationRecord {
                 table_name: "helmert_transformation",
@@ -2596,7 +2626,7 @@ fn main() {
                 source_datum_code: row.4,
                 target_datum_code: row.5,
                 accuracy: row.6,
-                deprecated: row.16,
+                deprecated: row.17,
                 preferred: true,
                 approximate: false,
                 area_codes: Vec::new(),
@@ -3317,6 +3347,19 @@ mod tests {
             canonical_f64(1.2345678901234567).to_bits(),
             1.2345678901235f64.to_bits()
         );
+    }
+
+    #[test]
+    fn coordinate_frame_rotations_are_normalized_to_position_vector() {
+        let params = [1.0, 2.0, 3.0, 0.25, -0.5, 0.75, 4.0];
+
+        for method_code in COORDINATE_FRAME_METHOD_CODES {
+            assert_eq!(
+                normalize_helmert_convention(*method_code, params),
+                [1.0, 2.0, 3.0, -0.25, 0.5, -0.75, 4.0]
+            );
+        }
+        assert_eq!(normalize_helmert_convention(9606, params), params);
     }
 
     #[test]
