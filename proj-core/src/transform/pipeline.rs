@@ -6,8 +6,8 @@ use crate::error::{Error, Result};
 use crate::grid::{GridError, GridHandle, GridRuntime};
 use crate::helmert;
 use crate::operation::{
-    CoordinateOperation, CoordinateOperationMetadata, GridShiftDirection, OperationMethod,
-    OperationStepDirection, VerticalTransformDiagnostics,
+    CoordinateOperation, CoordinateOperationMetadata, GeocentricAffineParams, GridShiftDirection,
+    OperationMethod, OperationStepDirection, VerticalTransformDiagnostics,
 };
 use crate::projection::{make_projection, validate_lon_lat, validate_projected, Projection};
 use crate::registry;
@@ -121,6 +121,10 @@ enum CompiledStep {
         params: HelmertParams,
         inverse: bool,
     },
+    GeocentricAffine {
+        params: GeocentricAffineParams,
+        inverse: bool,
+    },
     GridShift {
         handle: GridHandle,
         direction: GridShiftDirection,
@@ -162,6 +166,14 @@ fn execute_step(step: &CompiledStep, coord: Coord3D) -> Result<Coord3D> {
                 helmert::helmert_inverse(params, coord.x, coord.y, coord.z)
             } else {
                 helmert::helmert_forward(params, coord.x, coord.y, coord.z)
+            };
+            Coord3D::new(x, y, z)
+        }
+        CompiledStep::GeocentricAffine { params, inverse } => {
+            let (x, y, z) = if *inverse {
+                params.inverse(coord.x, coord.y, coord.z)
+            } else {
+                params.forward(coord.x, coord.y, coord.z)
             };
             Coord3D::new(x, y, z)
         }
@@ -330,6 +342,7 @@ pub(super) fn compile_pipeline(
         matches!(
             step,
             CompiledStep::Helmert { .. }
+                | CompiledStep::GeocentricAffine { .. }
                 | CompiledStep::GeodeticToGeocentric { .. }
                 | CompiledStep::GeocentricToGeodetic { .. }
         )
@@ -375,6 +388,19 @@ fn compile_operation(
             steps.push(CompiledStep::Helmert {
                 params: *params,
                 inverse: true,
+            });
+            steps.push(CompiledStep::GeocentricToGeodetic {
+                ellipsoid: target_geo.datum().ellipsoid(),
+            });
+        }
+        (OperationMethod::GeocentricAffine { params }, direction) => {
+            params.validate()?;
+            steps.push(CompiledStep::GeodeticToGeocentric {
+                ellipsoid: source_geo.datum().ellipsoid(),
+            });
+            steps.push(CompiledStep::GeocentricAffine {
+                params: *params,
+                inverse: matches!(direction, OperationStepDirection::Reverse),
             });
             steps.push(CompiledStep::GeocentricToGeodetic {
                 ellipsoid: target_geo.datum().ellipsoid(),

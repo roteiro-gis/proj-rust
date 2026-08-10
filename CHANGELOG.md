@@ -2,6 +2,7 @@
 
 ## 0.10.0 - 2026-07-23
 
+- breaking: registry format v10 adds an exact geocentric-affine operation payload; EPSG Helmert generation now converts parameter units, folds Molodensky-Badekas pivots, preserves full-matrix rotations, and rejects unsupported method semantics
 - normalize EPSG coordinate-frame Helmert rotations to the runtime position-vector convention, fixing tens-of-metres errors in operations such as WGS 84 to Amersfoort / RD New
 - fix `Transform::inverse()` dropping skipped-operation diagnostics; inverse diagnostics now preserve every skip reason and reorient the operation direction, CRS, and datum metadata
 - remove the unnecessary `Clone` bound and per-coordinate clone from Rayon batch transforms; borrowed custom coordinate types now work in both sequential and parallel batch APIs

@@ -3,7 +3,7 @@
   "generator": "gen-reference gen-registry",
   "registry_format": {
     "magic": "0x45505347",
-    "version": 9
+    "version": 10
   },
   "source_database": {
     "kind": "PROJ proj.db",
@@ -28,8 +28,8 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1097138,
-    "sha256": "sha256:e667cd7fc55b5249beabacac23ec916508d45d86cdf2824329198f3776491774"
+    "byte_len": 1097298,
+    "sha256": "sha256:898e40bb0dadccedeb8eb3efd893c36ad75471bb78f8ad72290ede0e599cafe7"
   },
   "counts": {
     "ellipsoids": 44,
@@ -70,6 +70,7 @@
   },
   "supported_operation_payloads": {
     "Concatenated": 3,
+    "GeocentricAffine": 4,
     "GridShift": 2,
     "Helmert": 1
   }

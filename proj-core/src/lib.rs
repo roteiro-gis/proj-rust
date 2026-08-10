@@ -87,12 +87,12 @@ pub use grid::{
 };
 pub use operation::{
     AreaOfInterest, AreaOfInterestCrs, AreaOfUse, CoordinateOperation, CoordinateOperationId,
-    CoordinateOperationMetadata, GridCoverageMiss, GridId, GridInterpolation, GridShiftDirection,
-    OperationAccuracy, OperationMatchKind, OperationMethod, OperationSelectionDiagnostics,
-    OperationStep, OperationStepDirection, SelectionOptions, SelectionPolicy, SelectionReason,
-    SkippedOperation, SkippedOperationReason, TransformOutcome, VerticalGridOffsetConvention,
-    VerticalGridOperation, VerticalGridProvenance, VerticalTransformAction,
-    VerticalTransformDiagnostics,
+    CoordinateOperationMetadata, GeocentricAffineParams, GridCoverageMiss, GridId,
+    GridInterpolation, GridShiftDirection, OperationAccuracy, OperationMatchKind, OperationMethod,
+    OperationSelectionDiagnostics, OperationStep, OperationStepDirection, SelectionOptions,
+    SelectionPolicy, SelectionReason, SkippedOperation, SkippedOperationReason, TransformOutcome,
+    VerticalGridOffsetConvention, VerticalGridOperation, VerticalGridProvenance,
+    VerticalTransformAction, VerticalTransformDiagnostics,
 };
 pub use registry::{
     lookup_authority_code, lookup_datum_code_for_crs, lookup_datum_code_for_name,

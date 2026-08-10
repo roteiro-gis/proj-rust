@@ -144,8 +144,8 @@ use proj_epsg_format::{
     METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE,
     METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
-    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
-    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
+    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GEOCENTRIC_AFFINE,
+    OP_GRID_SHIFT, OP_HELMERT, PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
     VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
     VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
@@ -164,21 +164,12 @@ const KNOWN_IDENTITY_BRIDGE_OPERATION_CODES: &[u32] = &[1149];
 const HORIZONTAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["hgridshift", "gridshift"];
 const VERTICAL_GRID_ALTERNATIVE_METHODS: &[&str] = &["geoid_like"];
 
-// `HelmertParams` and the runtime Helmert implementation use the position-vector
-// convention. EPSG stores these methods using the coordinate-frame convention,
-// whose rotation signs are the opposite of position-vector rotations. Normalize
-// them while generating the registry so the compact runtime representation can
-// remain convention-independent.
-const COORDINATE_FRAME_METHOD_CODES: &[i64] = &[
-    1032, // Coordinate Frame rotation (geocentric domain)
-    1056, // Time-dependent Coordinate Frame rotation (geocentric)
-    1057, // Time-dependent Coordinate Frame rotation (geographic 2D)
-    1066, // Time-specific Coordinate Frame rotation (geocentric)
-    1133, // Coordinate Frame rotation full matrix (geographic 2D)
-    1140, // Coordinate Frame rotation full matrix (geographic 3D)
-    9607, // Coordinate Frame rotation (geographic 2D domain)
-    9636, // Molodensky-Badekas (coordinate-frame, geographic 2D domain)
-];
+const GEOCENTRIC_TRANSLATION_GEOGRAPHIC_2D: i64 = 9603;
+const POSITION_VECTOR_GEOGRAPHIC_2D: i64 = 9606;
+const COORDINATE_FRAME_GEOGRAPHIC_2D: i64 = 9607;
+const MOLODENSKY_BADEKAS_POSITION_VECTOR_GEOGRAPHIC_2D: i64 = 1063;
+const MOLODENSKY_BADEKAS_COORDINATE_FRAME_GEOGRAPHIC_2D: i64 = 9636;
+const COORDINATE_FRAME_FULL_MATRIX_GEOGRAPHIC_2D: i64 = 1133;
 
 // EPSG:32662 is deprecated upstream but remains part of this crate's documented
 // public support set.
@@ -266,15 +257,6 @@ enum DatumShiftKind {
     Helmert,
 }
 
-fn normalize_helmert_convention(method_code: i64, mut params: [f64; 7]) -> [f64; 7] {
-    if COORDINATE_FRAME_METHOD_CODES.contains(&method_code) {
-        params[3] = -params[3];
-        params[4] = -params[4];
-        params[5] = -params[5];
-    }
-    params
-}
-
 struct DatumInfo {
     ellipsoid_code: u32,
     shift_kind: DatumShiftKind,
@@ -336,9 +318,13 @@ struct GridRecord {
     resource_names: Vec<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, PartialEq)]
 enum OperationPayload {
     Helmert([f64; 7]),
+    GeocentricAffine {
+        translation: [f64; 3],
+        matrix: [f64; 9],
+    },
     GridShift {
         grid_id: u32,
         direction: u8,
@@ -347,6 +333,224 @@ enum OperationPayload {
     Concatenated {
         steps: Vec<(u32, u8)>,
     },
+}
+
+struct RawHelmertOperation {
+    method_code: i64,
+    translation: [f64; 3],
+    translation_uom_code: i64,
+    rotation: [Option<f64>; 3],
+    rotation_uom_code: Option<i64>,
+    scale_difference: Option<f64>,
+    scale_difference_uom_code: Option<i64>,
+    pivot: [Option<f64>; 3],
+    pivot_uom_code: Option<i64>,
+    has_dynamic_parameters: bool,
+}
+
+struct LoadedHelmertOperation {
+    code: String,
+    name: String,
+    source_crs_code: String,
+    target_crs_code: String,
+    source_datum_code: u32,
+    target_datum_code: u32,
+    accuracy: Option<f64>,
+    deprecated: bool,
+    raw: RawHelmertOperation,
+}
+
+fn required_unit_factor(
+    factors: &BTreeMap<i64, f64>,
+    code: Option<i64>,
+    quantity: &str,
+) -> Result<f64, String> {
+    let code = code.ok_or_else(|| format!("{quantity} unit is missing"))?;
+    factors
+        .get(&code)
+        .copied()
+        .ok_or_else(|| format!("unsupported {quantity} unit EPSG:{code}"))
+}
+
+fn normalized_rotation_arcseconds(
+    raw: &RawHelmertOperation,
+    angle_uoms: &BTreeMap<i64, f64>,
+) -> Result<[f64; 3], String> {
+    let factor = required_unit_factor(angle_uoms, raw.rotation_uom_code, "rotation")?;
+    let to_arcseconds = factor * 180.0 / PI * 3600.0;
+    Ok([
+        raw.rotation[0].ok_or_else(|| "x rotation is missing".to_string())? * to_arcseconds,
+        raw.rotation[1].ok_or_else(|| "y rotation is missing".to_string())? * to_arcseconds,
+        raw.rotation[2].ok_or_else(|| "z rotation is missing".to_string())? * to_arcseconds,
+    ])
+}
+
+fn normalized_scale_ppm(
+    raw: &RawHelmertOperation,
+    scale_uoms: &BTreeMap<i64, f64>,
+) -> Result<f64, String> {
+    let factor = required_unit_factor(
+        scale_uoms,
+        raw.scale_difference_uom_code,
+        "scale difference",
+    )?;
+    Ok(raw
+        .scale_difference
+        .ok_or_else(|| "scale difference is missing".to_string())?
+        * factor
+        * 1_000_000.0)
+}
+
+fn normalized_pivot(
+    raw: &RawHelmertOperation,
+    linear_uoms: &BTreeMap<i64, f64>,
+) -> Result<Option<[f64; 3]>, String> {
+    match raw.pivot {
+        [None, None, None] => Ok(None),
+        [Some(x), Some(y), Some(z)] => {
+            let factor = required_unit_factor(linear_uoms, raw.pivot_uom_code, "pivot")?;
+            Ok(Some([x * factor, y * factor, z * factor]))
+        }
+        _ => Err("pivot coordinates must be either all present or all absent".to_string()),
+    }
+}
+
+fn fold_molodensky_badekas_pivot(mut params: [f64; 7], pivot: [f64; 3]) -> [f64; 7] {
+    let s = 1.0 + params[6] * 1e-6;
+    let rx = params[3] * PI / (180.0 * 3600.0);
+    let ry = params[4] * PI / (180.0 * 3600.0);
+    let rz = params[5] * PI / (180.0 * 3600.0);
+    let rotated = [
+        pivot[0] - rz * pivot[1] + ry * pivot[2],
+        rz * pivot[0] + pivot[1] - rx * pivot[2],
+        -ry * pivot[0] + rx * pivot[1] + pivot[2],
+    ];
+    params[0] += pivot[0] - s * rotated[0];
+    params[1] += pivot[1] - s * rotated[1];
+    params[2] += pivot[2] - s * rotated[2];
+    params
+}
+
+fn coordinate_frame_full_matrix(rotation_radians: [f64; 3], scale_ppm: f64) -> [f64; 9] {
+    let [rx, ry, rz] = rotation_radians;
+    let (sin_x, cos_x) = rx.sin_cos();
+    let (sin_y, cos_y) = ry.sin_cos();
+    let (sin_z, cos_z) = rz.sin_cos();
+    let scale = 1.0 + scale_ppm * 1e-6;
+
+    [
+        scale * cos_y * cos_z,
+        scale * (cos_x * sin_z + sin_x * sin_y * cos_z),
+        scale * (sin_x * sin_z - cos_x * sin_y * cos_z),
+        scale * -cos_y * sin_z,
+        scale * (cos_x * cos_z - sin_x * sin_y * sin_z),
+        scale * (sin_x * cos_z + cos_x * sin_y * sin_z),
+        scale * sin_y,
+        scale * -sin_x * cos_y,
+        scale * cos_x * cos_y,
+    ]
+}
+
+fn encode_static_helmert(
+    raw: &RawHelmertOperation,
+    linear_uoms: &BTreeMap<i64, f64>,
+    angle_uoms: &BTreeMap<i64, f64>,
+    scale_uoms: &BTreeMap<i64, f64>,
+) -> Result<OperationPayload, String> {
+    if raw.has_dynamic_parameters {
+        return Err("dynamic Helmert rates or epochs are not supported".to_string());
+    }
+
+    let translation_factor =
+        required_unit_factor(linear_uoms, Some(raw.translation_uom_code), "translation")?;
+    let translation = raw.translation.map(|value| value * translation_factor);
+    let pivot = normalized_pivot(raw, linear_uoms)?;
+
+    match raw.method_code {
+        GEOCENTRIC_TRANSLATION_GEOGRAPHIC_2D => {
+            if raw.rotation.iter().flatten().any(|value| *value != 0.0)
+                || raw.scale_difference.is_some_and(|value| value != 0.0)
+                || pivot.is_some()
+            {
+                return Err("geocentric translation contains unexpected parameters".to_string());
+            }
+            Ok(OperationPayload::Helmert([
+                translation[0],
+                translation[1],
+                translation[2],
+                0.0,
+                0.0,
+                0.0,
+                0.0,
+            ]))
+        }
+        POSITION_VECTOR_GEOGRAPHIC_2D | COORDINATE_FRAME_GEOGRAPHIC_2D => {
+            if pivot.is_some() {
+                return Err("seven-parameter Helmert contains an unexpected pivot".to_string());
+            }
+            let mut rotation = normalized_rotation_arcseconds(raw, angle_uoms)?;
+            if raw.method_code == COORDINATE_FRAME_GEOGRAPHIC_2D {
+                rotation = rotation.map(|value| -value);
+            }
+            Ok(OperationPayload::Helmert([
+                translation[0],
+                translation[1],
+                translation[2],
+                rotation[0],
+                rotation[1],
+                rotation[2],
+                normalized_scale_ppm(raw, scale_uoms)?,
+            ]))
+        }
+        MOLODENSKY_BADEKAS_POSITION_VECTOR_GEOGRAPHIC_2D
+        | MOLODENSKY_BADEKAS_COORDINATE_FRAME_GEOGRAPHIC_2D => {
+            let mut rotation = normalized_rotation_arcseconds(raw, angle_uoms)?;
+            if raw.method_code == MOLODENSKY_BADEKAS_COORDINATE_FRAME_GEOGRAPHIC_2D {
+                rotation = rotation.map(|value| -value);
+            }
+            let params = [
+                translation[0],
+                translation[1],
+                translation[2],
+                rotation[0],
+                rotation[1],
+                rotation[2],
+                normalized_scale_ppm(raw, scale_uoms)?,
+            ];
+            let pivot = pivot.ok_or_else(|| "Molodensky-Badekas pivot is missing".to_string())?;
+            Ok(OperationPayload::Helmert(fold_molodensky_badekas_pivot(
+                params, pivot,
+            )))
+        }
+        COORDINATE_FRAME_FULL_MATRIX_GEOGRAPHIC_2D => {
+            if pivot.is_some() {
+                return Err("full-matrix Helmert contains an unexpected pivot".to_string());
+            }
+            let rotation_factor = required_unit_factor(
+                angle_uoms,
+                raw.rotation_uom_code,
+                "rotation",
+            )?;
+            let rotation_radians = [
+                raw.rotation[0].ok_or_else(|| "x rotation is missing".to_string())?
+                    * rotation_factor,
+                raw.rotation[1].ok_or_else(|| "y rotation is missing".to_string())?
+                    * rotation_factor,
+                raw.rotation[2].ok_or_else(|| "z rotation is missing".to_string())?
+                    * rotation_factor,
+            ];
+            Ok(OperationPayload::GeocentricAffine {
+                translation,
+                matrix: coordinate_frame_full_matrix(
+                    rotation_radians,
+                    normalized_scale_ppm(raw, scale_uoms)?,
+                ),
+            })
+        }
+        code => Err(format!(
+            "unsupported static Helmert method EPSG:{code}; add an explicit method-specific representation"
+        )),
+    }
 }
 
 #[derive(Clone)]
@@ -1667,6 +1871,7 @@ fn load_superseded_operations(conn: &Connection) -> BTreeSet<(String, u32)> {
 fn supported_operation_payloads() -> BTreeMap<String, u8> {
     named_codes(&[
         ("Concatenated", OP_CONCATENATED),
+        ("GeocentricAffine", OP_GEOCENTRIC_AFFINE),
         ("GridShift", OP_GRID_SHIFT),
         ("Helmert", OP_HELMERT),
     ])
@@ -2518,13 +2723,27 @@ fn main() {
                         ht.tx,
                         ht.ty,
                         ht.tz,
-                        COALESCE(ht.rx, 0.0),
-                        COALESCE(ht.ry, 0.0),
-                        COALESCE(ht.rz, 0.0),
+                        ht.translation_uom_code,
+                        ht.rx,
+                        ht.ry,
+                        ht.rz,
                         ht.rotation_uom_code,
-                        COALESCE(ht.scale_difference, 0.0),
+                        ht.scale_difference,
                         ht.scale_difference_uom_code,
                         ht.method_code,
+                        ht.px,
+                        ht.py,
+                        ht.pz,
+                        ht.pivot_uom_code,
+                        CASE WHEN ht.rate_tx IS NOT NULL
+                                   OR ht.rate_ty IS NOT NULL
+                                   OR ht.rate_tz IS NOT NULL
+                                   OR ht.rate_rx IS NOT NULL
+                                   OR ht.rate_ry IS NOT NULL
+                                   OR ht.rate_rz IS NOT NULL
+                                   OR ht.rate_scale_difference IS NOT NULL
+                                   OR ht.epoch IS NOT NULL
+                             THEN 1 ELSE 0 END,
                         ht.deprecated
                  FROM helmert_transformation_table ht
                  JOIN geodetic_crs src
@@ -2543,94 +2762,64 @@ fn main() {
             .unwrap();
         for row in stmt
             .query_map([], |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, u32>(4)?,
-                    row.get::<_, u32>(5)?,
-                    row.get::<_, Option<f64>>(6)?,
-                    row.get::<_, f64>(7)?,
-                    row.get::<_, f64>(8)?,
-                    row.get::<_, f64>(9)?,
-                    row.get::<_, f64>(10)?,
-                    row.get::<_, f64>(11)?,
-                    row.get::<_, f64>(12)?,
-                    row.get::<_, Option<i64>>(13)?,
-                    row.get::<_, f64>(14)?,
-                    row.get::<_, Option<i64>>(15)?,
-                    row.get::<_, i64>(16)?,
-                    row.get::<_, bool>(17)?,
-                ))
+                Ok(LoadedHelmertOperation {
+                    code: row.get(0)?,
+                    name: row.get(1)?,
+                    source_crs_code: row.get(2)?,
+                    target_crs_code: row.get(3)?,
+                    source_datum_code: row.get(4)?,
+                    target_datum_code: row.get(5)?,
+                    accuracy: row.get(6)?,
+                    raw: RawHelmertOperation {
+                        translation: [row.get(7)?, row.get(8)?, row.get(9)?],
+                        translation_uom_code: row.get(10)?,
+                        rotation: [row.get(11)?, row.get(12)?, row.get(13)?],
+                        rotation_uom_code: row.get(14)?,
+                        scale_difference: row.get(15)?,
+                        scale_difference_uom_code: row.get(16)?,
+                        method_code: row.get(17)?,
+                        pivot: [row.get(18)?, row.get(19)?, row.get(20)?],
+                        pivot_uom_code: row.get(21)?,
+                        has_dynamic_parameters: row.get(22)?,
+                    },
+                    deprecated: row.get(23)?,
+                })
             })
             .unwrap()
             .flatten()
         {
-            let Some(code) = parse_u32_code(&row.0) else {
+            let Some(code) = parse_u32_code(&row.code) else {
                 continue;
             };
-            let Some(source_crs_code) = parse_u32_code(&row.2) else {
+            let Some(source_crs_code) = parse_u32_code(&row.source_crs_code) else {
                 continue;
             };
-            let Some(target_crs_code) = parse_u32_code(&row.3) else {
+            let Some(target_crs_code) = parse_u32_code(&row.target_crs_code) else {
                 continue;
             };
             if !geo_codes.contains(&source_crs_code) || !geo_codes.contains(&target_crs_code) {
                 continue;
             }
 
-            let rotation_factor = row
-                .13
-                .and_then(|uom| angle_uoms.get(&uom).copied())
-                .unwrap_or(0.0);
-            let scale_factor = row
-                .15
-                .and_then(|uom| scale_uoms.get(&uom).copied())
-                .unwrap_or(0.0);
-            let params = normalize_helmert_convention(
-                row.16,
-                [
-                    row.7,
-                    row.8,
-                    row.9,
-                    if row.10 == 0.0 {
-                        0.0
-                    } else {
-                        row.10 * rotation_factor * 180.0 / PI * 3600.0
-                    },
-                    if row.11 == 0.0 {
-                        0.0
-                    } else {
-                        row.11 * rotation_factor * 180.0 / PI * 3600.0
-                    },
-                    if row.12 == 0.0 {
-                        0.0
-                    } else {
-                        row.12 * rotation_factor * 180.0 / PI * 3600.0
-                    },
-                    if row.14 == 0.0 {
-                        0.0
-                    } else {
-                        row.14 * scale_factor * 1_000_000.0
-                    },
-                ],
-            );
+            let payload = encode_static_helmert(&row.raw, &linear_uoms, &angle_uoms, &scale_uoms)
+                .unwrap_or_else(|message| {
+                    panic!("cannot encode EPSG Helmert operation {code}: {message}")
+                });
 
             operations.push(OperationRecord {
                 table_name: "helmert_transformation",
                 code,
-                name: row.1,
+                name: row.name,
                 source_crs_code,
                 target_crs_code,
-                source_datum_code: row.4,
-                target_datum_code: row.5,
-                accuracy: row.6,
-                deprecated: row.17,
+                source_datum_code: row.source_datum_code,
+                target_datum_code: row.target_datum_code,
+                accuracy: row.accuracy,
+                deprecated: row.deprecated,
                 preferred: true,
                 approximate: false,
                 area_codes: Vec::new(),
-                payload: OperationPayload::Helmert(params),
+                payload,
             });
         }
     }
@@ -3021,6 +3210,7 @@ fn main() {
         buf.extend_from_slice(&operation.code.to_le_bytes());
         buf.push(match operation.payload {
             OperationPayload::Helmert(_) => OP_HELMERT,
+            OperationPayload::GeocentricAffine { .. } => OP_GEOCENTRIC_AFFINE,
             OperationPayload::GridShift { .. } => OP_GRID_SHIFT,
             OperationPayload::Concatenated { .. } => OP_CONCATENATED,
         });
@@ -3051,6 +3241,14 @@ fn main() {
         match &operation.payload {
             OperationPayload::Helmert(params) => {
                 for value in params {
+                    write_f64(&mut buf, *value);
+                }
+            }
+            OperationPayload::GeocentricAffine {
+                translation,
+                matrix,
+            } => {
+                for value in translation.iter().chain(matrix) {
                     write_f64(&mut buf, *value);
                 }
             }
@@ -3350,16 +3548,42 @@ mod tests {
     }
 
     #[test]
-    fn coordinate_frame_rotations_are_normalized_to_position_vector() {
-        let params = [1.0, 2.0, 3.0, 0.25, -0.5, 0.75, 4.0];
-
-        for method_code in COORDINATE_FRAME_METHOD_CODES {
-            assert_eq!(
-                normalize_helmert_convention(*method_code, params),
-                [1.0, 2.0, 3.0, -0.25, 0.5, -0.75, 4.0]
-            );
+    fn coordinate_frame_full_matrix_preserves_exact_rotation() {
+        let matrix = coordinate_frame_full_matrix([0.0, 0.0, PI / 2.0], 0.0);
+        let expected = [0.0, 1.0, 0.0, -1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+        for (actual, expected) in matrix.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-15);
         }
-        assert_eq!(normalize_helmert_convention(9606, params), params);
+    }
+
+    #[test]
+    fn molodensky_badekas_pivot_folds_into_translation() {
+        let params = [1.0, 2.0, 3.0, 0.25, -0.5, 0.75, 4.0];
+        let pivot = [3_000_000.0, 4_000_000.0, 5_000_000.0];
+        let folded = fold_molodensky_badekas_pivot(params, pivot);
+        let point = [3_100_000.0, 4_200_000.0, 5_300_000.0];
+        let scale = 1.0 + params[6] * 1e-6;
+        let rx = params[3] * PI / (180.0 * 3600.0);
+        let ry = params[4] * PI / (180.0 * 3600.0);
+        let rz = params[5] * PI / (180.0 * 3600.0);
+        let relative = [
+            point[0] - pivot[0],
+            point[1] - pivot[1],
+            point[2] - pivot[2],
+        ];
+        let expected = [
+            params[0] + pivot[0] + scale * (relative[0] - rz * relative[1] + ry * relative[2]),
+            params[1] + pivot[1] + scale * (rz * relative[0] + relative[1] - rx * relative[2]),
+            params[2] + pivot[2] + scale * (-ry * relative[0] + rx * relative[1] + relative[2]),
+        ];
+        let actual = [
+            folded[0] + scale * (point[0] - rz * point[1] + ry * point[2]),
+            folded[1] + scale * (rz * point[0] + point[1] - rx * point[2]),
+            folded[2] + scale * (-ry * point[0] + rx * point[1] + point[2]),
+        ];
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-9);
+        }
     }
 
     #[test]
