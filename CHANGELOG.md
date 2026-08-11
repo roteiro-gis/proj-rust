@@ -1,8 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.11.0 - 2026-08-10
 
-- breaking: registry format v10 adds an exact geocentric-affine operation payload; EPSG Helmert generation now converts parameter units, folds Molodensky-Badekas pivots, preserves full-matrix rotations, and rejects unsupported method semantics
+- breaking: add `OperationMethod::GeocentricAffine` and `GeocentricAffineParams` for exact full-matrix transformations, and bump the embedded registry format to v10; exhaustive matches on `OperationMethod` must handle the new variant
+- make EPSG Helmert generation method-specific: convert all parameter units, fold Molodensky-Badekas pivots, preserve full-matrix rotations exactly, and reject unsupported or dynamic semantics instead of silently misinterpreting them
 - normalize EPSG coordinate-frame Helmert rotations to the runtime position-vector convention, fixing tens-of-metres errors in operations such as WGS 84 to Amersfoort / RD New
 
 ## 0.10.0 - 2026-07-23
