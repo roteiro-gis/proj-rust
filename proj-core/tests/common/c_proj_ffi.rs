@@ -57,6 +57,48 @@ impl CProjTransform {
         }
     }
 
+    /// Create a transform from one explicit EPSG coordinate operation.
+    ///
+    /// Using the operation URN avoids late-binding selection differences and
+    /// lets parity tests exercise the same registry record in both engines.
+    pub fn new_coordinate_operation(operation_epsg: u32) -> Result<Self, String> {
+        let definition = CString::new(format!(
+            "urn:ogc:def:coordinateOperation:EPSG::{operation_epsg}"
+        ))
+        .expect("EPSG operation URNs have no NUL");
+
+        unsafe {
+            let ctx = proj_context_create();
+            if ctx.is_null() {
+                return Err("failed to create PROJ context".into());
+            }
+
+            let raw = proj_create(ctx, definition.as_ptr());
+            if raw.is_null() {
+                let message = error_message(proj_context_errno(ctx));
+                proj_context_destroy(ctx);
+                return Err(format!(
+                    "failed to create C PROJ operation EPSG:{operation_epsg}: {message}"
+                ));
+            }
+
+            let normalized = proj_normalize_for_visualization(ctx, raw);
+            proj_destroy(raw);
+            if normalized.is_null() {
+                let message = error_message(proj_context_errno(ctx));
+                proj_context_destroy(ctx);
+                return Err(format!(
+                    "failed to normalize C PROJ operation EPSG:{operation_epsg}: {message}"
+                ));
+            }
+
+            Ok(Self {
+                ctx,
+                pj: normalized,
+            })
+        }
+    }
+
     /// Transform through the 3D promotions of both CRSs
     /// (`proj_crs_promote_to_3D`), so datum-shift-induced ellipsoidal height
     /// changes appear instead of the 2D `push/pop v_3` height passthrough.

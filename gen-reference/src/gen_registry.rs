@@ -3521,6 +3521,32 @@ fn sha256_hex(bytes: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    fn static_helmert(method_code: i64) -> RawHelmertOperation {
+        RawHelmertOperation {
+            method_code,
+            translation: [1.0, 2.0, 3.0],
+            translation_uom_code: 9001,
+            rotation: [Some(0.25), Some(-0.5), Some(0.75)],
+            rotation_uom_code: Some(9104),
+            scale_difference: Some(4.0),
+            scale_difference_uom_code: Some(9202),
+            pivot: [None; 3],
+            pivot_uom_code: None,
+            has_dynamic_parameters: false,
+        }
+    }
+
+    fn helmert_unit_maps() -> (BTreeMap<i64, f64>, BTreeMap<i64, f64>, BTreeMap<i64, f64>) {
+        (
+            BTreeMap::from([(9001, 1.0), (1025, 0.001)]),
+            BTreeMap::from([
+                (9104, PI / (180.0 * 3600.0)),
+                (1031, PI / (180.0 * 3600.0 * 1000.0)),
+            ]),
+            BTreeMap::from([(9202, 1e-6), (1028, 1e-9)]),
+        )
+    }
+
     #[test]
     fn sha256_hex_matches_known_vector() {
         assert_eq!(
@@ -3554,6 +3580,72 @@ mod tests {
         for (actual, expected) in matrix.into_iter().zip(expected) {
             assert!((actual - expected).abs() < 1e-15);
         }
+    }
+
+    #[test]
+    fn static_helmert_encoding_normalizes_every_parameter_unit_and_convention() {
+        let (linear_uoms, angle_uoms, scale_uoms) = helmert_unit_maps();
+        let raw = RawHelmertOperation {
+            method_code: COORDINATE_FRAME_GEOGRAPHIC_2D,
+            translation: [61.55, -10.87, -40.19],
+            translation_uom_code: 1025,
+            rotation: [Some(-39.4924), Some(-32.7221), Some(-32.8979)],
+            rotation_uom_code: Some(1031),
+            scale_difference: Some(-9.994),
+            scale_difference_uom_code: Some(1028),
+            pivot: [None; 3],
+            pivot_uom_code: None,
+            has_dynamic_parameters: false,
+        };
+
+        let OperationPayload::Helmert(actual) =
+            encode_static_helmert(&raw, &linear_uoms, &angle_uoms, &scale_uoms).unwrap()
+        else {
+            panic!("coordinate-frame method must encode as a Helmert payload");
+        };
+        let expected = [
+            0.06155, -0.01087, -0.04019, 0.0394924, 0.0327221, 0.0328979, -0.009994,
+        ];
+        for (actual, expected) in actual.into_iter().zip(expected) {
+            assert!((actual - expected).abs() < 1e-15);
+        }
+    }
+
+    #[test]
+    fn static_helmert_encoding_fails_closed_on_unmodeled_semantics() {
+        let (linear_uoms, angle_uoms, scale_uoms) = helmert_unit_maps();
+
+        let mut dynamic = static_helmert(POSITION_VECTOR_GEOGRAPHIC_2D);
+        dynamic.has_dynamic_parameters = true;
+        assert!(
+            encode_static_helmert(&dynamic, &linear_uoms, &angle_uoms, &scale_uoms)
+                .unwrap_err()
+                .contains("dynamic")
+        );
+
+        let unknown_method = static_helmert(999_999);
+        assert!(
+            encode_static_helmert(&unknown_method, &linear_uoms, &angle_uoms, &scale_uoms)
+                .unwrap_err()
+                .contains("unsupported static Helmert method")
+        );
+
+        let mut unknown_unit = static_helmert(POSITION_VECTOR_GEOGRAPHIC_2D);
+        unknown_unit.rotation_uom_code = Some(999_999);
+        assert!(
+            encode_static_helmert(&unknown_unit, &linear_uoms, &angle_uoms, &scale_uoms)
+                .unwrap_err()
+                .contains("unsupported rotation unit")
+        );
+
+        let mut partial_pivot = static_helmert(MOLODENSKY_BADEKAS_POSITION_VECTOR_GEOGRAPHIC_2D);
+        partial_pivot.pivot = [Some(1.0), None, Some(3.0)];
+        partial_pivot.pivot_uom_code = Some(9001);
+        assert!(
+            encode_static_helmert(&partial_pivot, &linear_uoms, &angle_uoms, &scale_uoms)
+                .unwrap_err()
+                .contains("all present or all absent")
+        );
     }
 
     #[test]
