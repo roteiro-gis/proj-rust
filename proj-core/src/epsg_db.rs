@@ -5,9 +5,9 @@ use crate::datum::{Datum, DatumToWgs84, HelmertParams};
 use crate::ellipsoid::Ellipsoid;
 use crate::grid::{GridDefinition, GridFormat};
 use crate::operation::{
-    AreaOfUse, CoordinateOperation, CoordinateOperationId, GridId, GridInterpolation,
-    GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep, OperationStepDirection,
-    VerticalGridOffsetConvention, VerticalGridOperation,
+    AreaOfUse, CoordinateOperation, CoordinateOperationId, GeocentricAffineParams, GridId,
+    GridInterpolation, GridShiftDirection, OperationAccuracy, OperationMethod, OperationStep,
+    OperationStepDirection, VerticalGridOffsetConvention, VerticalGridOperation,
 };
 use smallvec::SmallVec;
 use std::collections::{BTreeMap, HashMap};
@@ -29,9 +29,9 @@ use proj_epsg_format::{
     METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE,
     METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
-    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GRID_SHIFT, OP_HELMERT,
-    OP_IDENTITY, PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
-    VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
+    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GEOCENTRIC_AFFINE,
+    OP_GRID_SHIFT, OP_HELMERT, OP_IDENTITY, PROJ_CRS_RECORD_BASE_SIZE, VERSION,
+    VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
     VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
@@ -364,6 +364,21 @@ fn parse_db() -> RegistryDb {
                 .unwrap_or_else(|err| panic!("invalid operation Helmert params: {err}"));
                 cursor += 56;
                 OperationMethod::Helmert { params }
+            }
+            OP_GEOCENTRIC_AFFINE => {
+                let translation = [
+                    read_f64(EPSG_DATA, cursor),
+                    read_f64(EPSG_DATA, cursor + 8),
+                    read_f64(EPSG_DATA, cursor + 16),
+                ];
+                let mut matrix = [0.0; 9];
+                for (index, value) in matrix.iter_mut().enumerate() {
+                    *value = read_f64(EPSG_DATA, cursor + 24 + index * 8);
+                }
+                let params = GeocentricAffineParams::new(translation, matrix)
+                    .unwrap_or_else(|err| panic!("invalid geocentric affine params: {err}"));
+                cursor += 96;
+                OperationMethod::GeocentricAffine { params }
             }
             OP_GRID_SHIFT => {
                 let grid_id = read_u32(EPSG_DATA, cursor);

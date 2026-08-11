@@ -341,7 +341,10 @@ mod tests {
         let value: serde_json::Value =
             serde_json::from_str(embedded_registry_provenance_json()).unwrap();
         assert_eq!(value["schema_version"], 5);
-        assert_eq!(value["registry_format"]["version"], 9);
+        assert_eq!(
+            value["registry_format"]["version"],
+            proj_epsg_format::VERSION
+        );
         assert_eq!(
             value["source_database"]["metadata"]["PROJ.VERSION"],
             "9.6.2"
@@ -354,7 +357,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 1097138);
+        assert_eq!(value["output"]["byte_len"], 1097298);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
         assert_eq!(value["counts"]["grid_resources"], 726);

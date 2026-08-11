@@ -16,7 +16,7 @@
 /// `"EPSG"` in big-endian byte order.
 pub const MAGIC: u32 = 0x4550_5347;
 /// Container format version; bump on any layout or semantic change.
-pub const VERSION: u16 = 9;
+pub const VERSION: u16 = 10;
 /// Fixed header: magic (4) + version (2) + reserved (2) + eleven `u32`
 /// section counts.
 pub const HEADER_SIZE: usize = 52;
@@ -68,6 +68,9 @@ pub const OP_IDENTITY: u8 = 0;
 pub const OP_HELMERT: u8 = 1;
 pub const OP_GRID_SHIFT: u8 = 2;
 pub const OP_CONCATENATED: u8 = 3;
+/// General geocentric affine map: three translations followed by a row-major
+/// scaled 3×3 matrix. Used for EPSG full-matrix Helmert methods.
+pub const OP_GEOCENTRIC_AFFINE: u8 = 4;
 
 // Operation flag bits.
 pub const FLAG_DEPRECATED: u8 = 1 << 0;

@@ -159,6 +159,13 @@ fn helmert_and_datum_shift_methods_are_not_candidate_synthesis_paths() {
         )
     });
 
+    assert_hits_allowed("OperationMethod::GeocentricAffine", |hit| {
+        matches!(
+            hit.path.as_str(),
+            "proj-core/src/epsg_db.rs" | "proj-core/src/transform/pipeline.rs"
+        )
+    });
+
     assert_hits_allowed("OperationMethod::DatumShift", |hit| {
         matches!(
             hit.path.as_str(),
@@ -179,6 +186,7 @@ fn registry_format_constants_are_defined_only_in_proj_epsg_format() {
         "const VERSION: u16",
         "const METHOD_WEB_MERCATOR",
         "const OP_HELMERT",
+        "const OP_GEOCENTRIC_AFFINE",
         "const FLAG_DEPRECATED",
         "const GRID_FORMAT_NTV2",
         "const DATUM_RECORD_SIZE",

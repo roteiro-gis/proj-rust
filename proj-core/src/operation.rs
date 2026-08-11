@@ -1,6 +1,7 @@
 use crate::coord::{Bounds, Coord};
 use crate::crs::{LinearUnit, ProjectionMethod};
 use crate::datum::{DatumToWgs84, HelmertParams};
+use crate::error::{Error, Result};
 use smallvec::SmallVec;
 use std::collections::HashSet;
 use std::sync::Arc;
@@ -222,12 +223,98 @@ pub struct OperationStep {
     pub direction: OperationStepDirection,
 }
 
+/// A general affine map in geocentric metres.
+///
+/// The matrix is row-major and includes any scale factor. Unlike
+/// [`HelmertParams`], this representation can exactly carry EPSG full-matrix
+/// rotation methods without reducing them to a small-angle approximation.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct GeocentricAffineParams {
+    translation: [f64; 3],
+    matrix: [f64; 9],
+}
+
+impl GeocentricAffineParams {
+    pub fn new(translation: [f64; 3], matrix: [f64; 9]) -> Result<Self> {
+        let params = Self {
+            translation,
+            matrix,
+        };
+        params.validate()?;
+        Ok(params)
+    }
+
+    pub const fn translation(&self) -> [f64; 3] {
+        self.translation
+    }
+
+    pub const fn matrix(&self) -> [f64; 9] {
+        self.matrix
+    }
+
+    pub fn validate(&self) -> Result<()> {
+        if !self.translation.iter().all(|value| value.is_finite())
+            || !self.matrix.iter().all(|value| value.is_finite())
+        {
+            return Err(Error::InvalidDefinition(
+                "geocentric affine parameters must be finite".into(),
+            ));
+        }
+        if self.determinant().abs() <= 1e-24 {
+            return Err(Error::InvalidDefinition(
+                "geocentric affine matrix must be invertible".into(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn forward(&self, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+        let m = self.matrix;
+        (
+            self.translation[0] + m[0] * x + m[1] * y + m[2] * z,
+            self.translation[1] + m[3] * x + m[4] * y + m[5] * z,
+            self.translation[2] + m[6] * x + m[7] * y + m[8] * z,
+        )
+    }
+
+    pub(crate) fn inverse(&self, x: f64, y: f64, z: f64) -> (f64, f64, f64) {
+        let m = self.matrix;
+        let ux = x - self.translation[0];
+        let uy = y - self.translation[1];
+        let uz = z - self.translation[2];
+        let det = self.determinant();
+        (
+            ((m[4] * m[8] - m[5] * m[7]) * ux
+                + (m[2] * m[7] - m[1] * m[8]) * uy
+                + (m[1] * m[5] - m[2] * m[4]) * uz)
+                / det,
+            ((m[5] * m[6] - m[3] * m[8]) * ux
+                + (m[0] * m[8] - m[2] * m[6]) * uy
+                + (m[2] * m[3] - m[0] * m[5]) * uz)
+                / det,
+            ((m[3] * m[7] - m[4] * m[6]) * ux
+                + (m[1] * m[6] - m[0] * m[7]) * uy
+                + (m[0] * m[4] - m[1] * m[3]) * uz)
+                / det,
+        )
+    }
+
+    fn determinant(&self) -> f64 {
+        let m = self.matrix;
+        m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
+            + m[2] * (m[3] * m[7] - m[4] * m[6])
+    }
+}
+
 /// Enum-backed operation method model used by selection and compilation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OperationMethod {
     Identity,
     Helmert {
         params: HelmertParams,
+    },
+    GeocentricAffine {
+        params: GeocentricAffineParams,
     },
     GridShift {
         grid_id: GridId,
@@ -645,6 +732,36 @@ pub struct TransformOutcome<T> {
 mod tests {
     use super::*;
     use crate::grid::{EmbeddedGridProvider, GridDefinition, GridFormat};
+
+    #[test]
+    fn geocentric_affine_roundtrips_a_general_matrix() {
+        let params = GeocentricAffineParams::new(
+            [1.0, -2.0, 3.0],
+            [1.1, 0.2, -0.1, -0.3, 0.9, 0.4, 0.05, -0.2, 1.2],
+        )
+        .unwrap();
+        let point = (4_000_000.0, 1_000_000.0, 5_000_000.0);
+        let transformed = params.forward(point.0, point.1, point.2);
+        let roundtrip = params.inverse(transformed.0, transformed.1, transformed.2);
+
+        assert!((roundtrip.0 - point.0).abs() < 1e-9);
+        assert!((roundtrip.1 - point.1).abs() < 1e-9);
+        assert!((roundtrip.2 - point.2).abs() < 1e-9);
+    }
+
+    #[test]
+    fn geocentric_affine_rejects_non_finite_and_singular_parameters() {
+        assert!(GeocentricAffineParams::new(
+            [f64::NAN, 0.0, 0.0],
+            [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]
+        )
+        .is_err());
+        assert!(GeocentricAffineParams::new(
+            [0.0; 3],
+            [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0]
+        )
+        .is_err());
+    }
 
     fn vertical_grid_operation(
         name: &str,
