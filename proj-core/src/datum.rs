@@ -105,6 +105,32 @@ impl Datum {
             _ => false,
         }
     }
+
+    /// Returns true if ellipsoidal heights on both datums agree: the same
+    /// datum, or two datums with a zero-parameter shift to WGS 84 on GRS80 or
+    /// WGS 84 (e.g. ETRS89), which C PROJ compiles to `+proj=noop`.
+    pub(crate) fn shares_ellipsoidal_height(&self, other: &Datum) -> bool {
+        let null_to_wgs84 = |datum: &Datum| match &datum.to_wgs84 {
+            DatumToWgs84::Identity => true,
+            DatumToWgs84::Helmert(params) => *params == HelmertParams::identity(),
+            DatumToWgs84::GridShift(_) | DatumToWgs84::Unknown => false,
+        };
+        self.same_datum(other)
+            || (null_to_wgs84(self)
+                && null_to_wgs84(other)
+                && null_helmert_ellipsoids(self.ellipsoid, other.ellipsoid))
+    }
+}
+
+/// True when a zero-parameter Helmert between these ellipsoids is a no-op in
+/// C PROJ: the same ellipsoid, or GRS80 and WGS 84.
+pub(crate) fn null_helmert_ellipsoids(a: Ellipsoid, b: Ellipsoid) -> bool {
+    let same = |a: Ellipsoid, b: Ellipsoid| {
+        (a.semi_major_axis() - b.semi_major_axis()).abs() < 1e-6
+            && (a.flattening() - b.flattening()).abs() < 1e-12
+    };
+    let grs80_or_wgs84 = |e: Ellipsoid| same(e, ellipsoid::GRS80) || same(e, ellipsoid::WGS84);
+    same(a, b) || (grs80_or_wgs84(a) && grs80_or_wgs84(b))
 }
 
 /// WGS84 relationship metadata for a datum definition.

@@ -43,27 +43,48 @@ impl CdnGridProvider {
         })
     }
 
-    fn fetch(&self, name: &str) -> PathBuf {
-        // Tests share the cache; serialize downloads so none reads a partial file.
+    /// Returns the cached grid, downloading it first when missing. Downloads
+    /// go to a per-process `.part` file and are checked before the rename,
+    /// so concurrent test processes never install a partial or corrupt grid.
+    fn fetch(&self, grid: &GridDefinition, name: &str, checksum: &str) -> GridHandle {
+        // Tests in this process share the cache; download each grid once.
         static DOWNLOAD: Mutex<()> = Mutex::new(());
         let _guard = DOWNLOAD
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
         let path = self.cache_dir.join(name);
-        if !path.is_file() {
-            std::fs::create_dir_all(&self.cache_dir).expect("create grid cache dir");
-            let partial = path.with_extension("part");
-            let status = Command::new("curl")
-                .args(["--fail", "--silent", "--show-error", "--location"])
-                .args(["--retry", "3", "--output"])
-                .arg(&partial)
-                .arg(format!("https://cdn.proj.org/{name}"))
-                .status()
-                .expect("run curl");
-            assert!(status.success(), "downloading {name} failed: {status}");
-            std::fs::rename(&partial, &path).expect("move downloaded grid into cache");
+        if path.is_file() {
+            let bytes = std::fs::read(&path).expect("read cached grid");
+            let handle = GridHandle::from_bytes(grid.clone(), &bytes).expect("parse cached grid");
+            assert_eq!(
+                handle.checksum(),
+                checksum,
+                "{name} checksum mismatch; delete {} to download it again",
+                path.display()
+            );
+            return handle;
         }
-        path
+        std::fs::create_dir_all(&self.cache_dir).expect("create grid cache dir");
+        let partial = path.with_extension(format!("{}.part", std::process::id()));
+        let status = Command::new("curl")
+            .args(["--fail", "--silent", "--show-error", "--location"])
+            .args(["--retry", "3", "--output"])
+            .arg(&partial)
+            .arg(format!("https://cdn.proj.org/{name}"))
+            .status()
+            .expect("run curl");
+        assert!(status.success(), "downloading {name} failed: {status}");
+        let bytes = std::fs::read(&partial).expect("read downloaded grid");
+        let handle = GridHandle::from_bytes(grid.clone(), &bytes);
+        let verified = handle
+            .as_ref()
+            .is_ok_and(|handle| handle.checksum() == checksum);
+        if !verified {
+            let _ = std::fs::remove_file(&partial);
+            panic!("downloaded {name} failed verification against {checksum}");
+        }
+        std::fs::rename(&partial, &path).expect("move downloaded grid into cache");
+        handle.unwrap()
     }
 }
 
@@ -73,44 +94,40 @@ impl GridProvider for CdnGridProvider {
     }
 
     fn load(&self, grid: &GridDefinition) -> Result<Option<GridHandle>, GridError> {
-        let Some((name, checksum)) = Self::pinned(grid) else {
-            return Ok(None);
-        };
-        let path = self.fetch(name);
-        let bytes = std::fs::read(&path).expect("read cached grid");
-        let handle = GridHandle::from_bytes(grid.clone(), &bytes)?;
-        assert_eq!(
-            handle.checksum(),
-            checksum,
-            "{name} checksum mismatch; delete {} to download it again",
-            path.display()
-        );
-        Ok(Some(handle))
+        Ok(Self::pinned(grid).map(|(name, checksum)| self.fetch(grid, name, checksum)))
     }
 }
 
 /// Grid provider from `PROJ_RDNAP_GRID_DIR` or `PROJ_NETWORK`, else `None`.
+///
+/// A non-empty `PROJ_RDNAP_GRID_DIR` missing a grid falls back to the network
+/// when enabled, and otherwise fails rather than skipping.
 fn grid_provider() -> Option<Arc<dyn GridProvider>> {
-    if let Some(dir) = std::env::var_os("PROJ_RDNAP_GRID_DIR") {
+    let network = std::env::var("PROJ_NETWORK").is_ok_and(|value| {
+        ["ON", "YES", "TRUE"]
+            .iter()
+            .any(|enabled| value.eq_ignore_ascii_case(enabled))
+    });
+    if let Some(dir) = std::env::var_os("PROJ_RDNAP_GRID_DIR").filter(|dir| !dir.is_empty()) {
         let dir = PathBuf::from(dir);
-        for (name, _) in GRIDS {
-            assert!(
-                dir.join(name).is_file(),
+        let missing = GRIDS
+            .iter()
+            .find(|(name, _)| !dir.join(name).is_file())
+            .map(|(name, _)| *name);
+        match missing {
+            None => return Some(Arc::new(FilesystemGridProvider::new(vec![dir]))),
+            Some(name) => assert!(
+                network,
                 "PROJ_RDNAP_GRID_DIR is set but {name} is missing from {}",
                 dir.display()
-            );
+            ),
         }
-        return Some(Arc::new(FilesystemGridProvider::new(vec![dir])));
     }
-    let network = std::env::var("PROJ_NETWORK").ok()?;
-    ["ON", "YES", "TRUE"]
-        .iter()
-        .any(|value| network.eq_ignore_ascii_case(value))
-        .then(|| {
-            Arc::new(CdnGridProvider {
-                cache_dir: PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("proj-grids"),
-            }) as Arc<dyn GridProvider>
-        })
+    network.then(|| {
+        Arc::new(CdnGridProvider {
+            cache_dir: PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("proj-grids"),
+        }) as Arc<dyn GridProvider>
+    })
 }
 
 fn rd_transform(provider: Arc<dyn GridProvider>) -> Transform {
