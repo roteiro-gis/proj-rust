@@ -1,6 +1,8 @@
 use crate::coord::{Coord, Coord3D};
 use crate::crs::{CrsDef, LinearUnit};
-use crate::datum::{DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams};
+use crate::datum::{
+    null_helmert_ellipsoids, DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams,
+};
 use crate::ellipsoid::Ellipsoid;
 use crate::error::{Error, Result};
 use crate::grid::{GridError, GridHandle, GridRuntime};
@@ -27,6 +29,8 @@ pub(super) struct CompiledOperationPipeline {
     pub(super) target_xy_units: PipelineTargetXyUnits,
     /// True when the steps change ellipsoidal height.
     pub(super) transforms_ellipsoidal_height: bool,
+    /// True when push/pop steps keep ellipsoidal height across a datum shift.
+    pub(super) restores_ellipsoidal_height: bool,
 }
 
 #[derive(Clone)]
@@ -407,18 +411,23 @@ pub(super) fn compile_pipeline(
     }
 
     cancel_redundant_geocentric_framing(&mut steps);
+    drop_null_helmerts(&mut steps);
 
     // Geocentric endpoints always transform height via cart framing.
     // Push/pop pairs restore height, so they do not count.
     let transforms_ellipsoidal_height = source.is_geocentric()
         || target.is_geocentric()
         || steps_transform_ellipsoidal_height(&steps);
+    let restores_ellipsoidal_height = steps
+        .iter()
+        .any(|step| matches!(step, CompiledStep::PushHeight));
 
     Ok(CompiledOperationPipeline {
         steps,
         source_xy_units: PipelineSourceXyUnits::compile(source),
         target_xy_units: PipelineTargetXyUnits::compile(target),
         transforms_ellipsoidal_height,
+        restores_ellipsoidal_height,
     })
 }
 
@@ -483,6 +492,43 @@ fn cancel_redundant_geocentric_framing(steps: &mut SmallVec<[CompiledStep; 8]>) 
         if !removed {
             break;
         }
+    }
+}
+
+/// Drop zero-parameter Helmerts like C PROJ's `+proj=noop`, together with
+/// their geocentric sandwich when the ellipsoids are the same or GRS80 and
+/// WGS 84 (e.g. EPSG:1149 ETRS89 to WGS 84).
+///
+/// Runs after framing cancellation, so geocentric endpoints first cancel
+/// against the sandwich and leave a bare identity Helmert, which is exact.
+fn drop_null_helmerts(steps: &mut SmallVec<[CompiledStep; 8]>) {
+    let mut i = 0;
+    while i < steps.len() {
+        if !matches!(&steps[i], CompiledStep::Helmert { params, .. } if *params == HelmertParams::identity())
+        {
+            i += 1;
+            continue;
+        }
+        let (mut start, mut end) = (i, i + 1);
+        if let (
+            Some(CompiledStep::GeodeticToGeocentric { ellipsoid: source }),
+            Some(CompiledStep::GeocentricToGeodetic { ellipsoid: target }),
+        ) = (i.checked_sub(1).map(|j| &steps[j]), steps.get(i + 1))
+        {
+            if !null_helmert_ellipsoids(*source, *target) {
+                i += 1;
+                continue;
+            }
+            (start, end) = (start - 1, end + 1);
+            if start > 0
+                && matches!(steps[start - 1], CompiledStep::PushHeight)
+                && matches!(steps.get(end), Some(CompiledStep::PopHeight))
+            {
+                (start, end) = (start - 1, end + 1);
+            }
+        }
+        steps.drain(start..end);
+        i = start;
     }
 }
 
@@ -652,17 +698,6 @@ fn preserve_ellipsoidal_height(
         })
 }
 
-/// True for a zero-parameter Helmert that C PROJ compiles to `+proj=noop`:
-/// same ellipsoid on both sides, or GRS80 and WGS 84 (e.g. EPSG:1149
-/// ETRS89 to WGS 84). Other ellipsoid pairs keep the geocentric round trip.
-fn is_null_helmert(step: &CompiledStep, source: Ellipsoid, target: Ellipsoid) -> bool {
-    let grs80_or_wgs84 = |e: Ellipsoid| {
-        ellipsoids_match(e, ellipsoid::GRS80) || ellipsoids_match(e, ellipsoid::WGS84)
-    };
-    matches!(step, CompiledStep::Helmert { params, .. } if *params == HelmertParams::identity())
-        && (ellipsoids_match(source, target) || (grs80_or_wgs84(source) && grs80_or_wgs84(target)))
-}
-
 fn compile_geocentric_sandwich(
     source_ellipsoid: Ellipsoid,
     target_ellipsoid: Ellipsoid,
@@ -670,9 +705,6 @@ fn compile_geocentric_sandwich(
     step: CompiledStep,
     steps: &mut SmallVec<[CompiledStep; 8]>,
 ) {
-    if is_null_helmert(&step, source_ellipsoid, target_ellipsoid) {
-        return;
-    }
     if preserve_height {
         steps.push(CompiledStep::PushHeight);
     }
@@ -939,38 +971,80 @@ mod framing_tests {
         ));
     }
 
-    fn sandwich(source: Ellipsoid, target: Ellipsoid, params: HelmertParams) -> usize {
+    fn sandwich(
+        source: Ellipsoid,
+        target: Ellipsoid,
+        preserve_height: bool,
+        params: HelmertParams,
+    ) -> SmallVec<[CompiledStep; 8]> {
         let mut steps = SmallVec::<[CompiledStep; 8]>::new();
         compile_geocentric_sandwich(
             source,
             target,
-            false,
+            preserve_height,
             CompiledStep::Helmert {
                 params,
                 inverse: true,
             },
             &mut steps,
         );
+        steps
+    }
+
+    fn optimized(mut steps: SmallVec<[CompiledStep; 8]>) -> usize {
+        cancel_redundant_geocentric_framing(&mut steps);
+        drop_null_helmerts(&mut steps);
         steps.len()
     }
 
     #[test]
     fn null_helmert_between_grs80_and_wgs84_compiles_to_noop() {
         let null = HelmertParams::identity();
-        assert_eq!(sandwich(ellipsoid::GRS80, ellipsoid::WGS84, null), 0);
-        assert_eq!(sandwich(ellipsoid::WGS84, ellipsoid::GRS80, null), 0);
-        assert_eq!(
-            sandwich(ellipsoid::BESSEL1841, ellipsoid::BESSEL1841, null),
-            0
-        );
+        for preserve_height in [false, true] {
+            let grs80_to_wgs84 =
+                sandwich(ellipsoid::GRS80, ellipsoid::WGS84, preserve_height, null);
+            assert_eq!(optimized(grs80_to_wgs84), 0);
+            let wgs84_to_grs80 =
+                sandwich(ellipsoid::WGS84, ellipsoid::GRS80, preserve_height, null);
+            assert_eq!(optimized(wgs84_to_grs80), 0);
+            let bessel = sandwich(
+                ellipsoid::BESSEL1841,
+                ellipsoid::BESSEL1841,
+                preserve_height,
+                null,
+            );
+            assert_eq!(optimized(bessel), 0);
+        }
+    }
+
+    #[test]
+    fn null_helmert_between_geocentric_endpoints_cancels_framing_exactly() {
+        // ECEF framing on each endpoint's own ellipsoid must cancel against
+        // the sandwich, not meet across GRS80 and WGS 84.
+        let mut steps = SmallVec::<[CompiledStep; 8]>::new();
+        steps.push(CompiledStep::GeocentricToGeodetic {
+            ellipsoid: ellipsoid::GRS80,
+        });
+        steps.extend(sandwich(
+            ellipsoid::GRS80,
+            ellipsoid::WGS84,
+            false,
+            HelmertParams::identity(),
+        ));
+        steps.push(CompiledStep::GeodeticToGeocentric {
+            ellipsoid: ellipsoid::WGS84,
+        });
+        assert_eq!(optimized(steps), 0);
     }
 
     #[test]
     fn null_helmert_keeps_cart_framing_across_distinct_ellipsoids() {
         let null = HelmertParams::identity();
-        assert_eq!(sandwich(ellipsoid::BESSEL1841, ellipsoid::WGS84, null), 3);
+        let bessel = sandwich(ellipsoid::BESSEL1841, ellipsoid::WGS84, false, null);
+        assert_eq!(optimized(bessel), 3);
         let shift = HelmertParams::translation(1.0, 0.0, 0.0).unwrap();
-        assert_eq!(sandwich(ellipsoid::GRS80, ellipsoid::WGS84, shift), 3);
+        let shifted = sandwich(ellipsoid::GRS80, ellipsoid::WGS84, false, shift);
+        assert_eq!(optimized(shifted), 3);
     }
 
     #[test]

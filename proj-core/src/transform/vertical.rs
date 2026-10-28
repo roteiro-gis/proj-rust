@@ -39,6 +39,9 @@ pub(super) struct CompiledVerticalGridShift {
     source_unit: LinearUnit,
     target_unit: LinearUnit,
     sample_horizontal: VerticalSampleHorizontal,
+    /// True when the grid's ellipsoidal heights are on the datum of the
+    /// endpoint that carries ellipsoidal height.
+    heights_on_endpoint_datum: bool,
     pub(super) diagnostics: VerticalTransformDiagnostics,
 }
 
@@ -196,6 +199,18 @@ impl VerticalTransform {
                     last_coverage_error.unwrap_or_else(|| "vertical grid coverage miss".into()),
                 )))
             }
+        }
+    }
+
+    /// True when every geoid grid's ellipsoidal heights are on the datum of
+    /// the endpoint that carries ellipsoidal height, so the grid composes
+    /// with a horizontal datum shift that preserves that height.
+    pub(super) fn grid_heights_on_endpoint_datum(&self) -> bool {
+        match self {
+            Self::GridShiftList { shifts, .. } => {
+                shifts.iter().all(|shift| shift.heights_on_endpoint_datum)
+            }
+            Self::None { .. } | Self::Preserve { .. } | Self::UnitConvert { .. } => true,
         }
     }
 
@@ -369,6 +384,7 @@ fn compile_vertical_grid_shifts(
         match compile_vertical_grid_shift(
             candidate,
             source_crs,
+            target_crs,
             source_vertical,
             target_vertical,
             direction,
@@ -460,9 +476,11 @@ fn sort_vertical_grid_candidates(candidates: &mut [VerticalGridCandidate<'_>]) {
     });
 }
 
+#[allow(clippy::too_many_arguments)]
 fn compile_vertical_grid_shift(
     candidate: VerticalGridCandidate<'_>,
     source_crs: &CrsDef,
+    target_crs: &CrsDef,
     source_vertical: &VerticalCrsDef,
     target_vertical: &VerticalCrsDef,
     direction: VerticalGridShiftDirection,
@@ -474,6 +492,20 @@ fn compile_vertical_grid_shift(
         VerticalGridOffsetConvention::GeoidHeightMeters => {}
     }
     let handle = grid_runtime.resolve_handle(&operation.grid)?;
+    let ellipsoidal_endpoint = match direction {
+        VerticalGridShiftDirection::EllipsoidToGravity => source_crs,
+        VerticalGridShiftDirection::GravityToEllipsoid => target_crs,
+    };
+    let heights_on_endpoint_datum = match operation.grid_horizontal_crs_epsg {
+        Some(epsg) => registry::lookup_epsg(epsg).is_some_and(|grid_crs| {
+            grid_crs
+                .datum()
+                .shares_ellipsoidal_height(ellipsoidal_endpoint.datum())
+        }),
+        None => source_crs
+            .datum()
+            .shares_ellipsoidal_height(ellipsoidal_endpoint.datum()),
+    };
     Ok(CompiledVerticalGridShift {
         direction,
         source_unit: source_vertical.linear_unit(),
@@ -483,6 +515,7 @@ fn compile_vertical_grid_shift(
             operation.grid_horizontal_crs_epsg,
             options,
         )?,
+        heights_on_endpoint_datum,
         diagnostics: vertical_grid_diagnostics(
             operation,
             &handle,

@@ -2090,6 +2090,70 @@ fn geoid_grid_with_horizontal_only_helmert_composes() {
 }
 
 #[test]
+fn geoid_grid_on_other_datum_with_horizontal_only_helmert_fails_closed() {
+    // The geoid grid's heights are on the OSGB36 target datum, but push/pop
+    // keeps the WGS 84 source height, so the grid would apply to the wrong
+    // ellipsoidal height.
+    let grid_root = write_test_gtx(&[-30.0, -30.0, -30.0, -30.0]);
+    let source = registry::lookup_epsg(4979).unwrap();
+    let target_horizontal = GeographicCrsDef::new(0, datum::OSGB36, "custom OSGB36 geographic");
+    let target_vertical = registry::lookup_vertical_epsg(5703).unwrap();
+    let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+        0,
+        HorizontalCrsDef::Geographic(target_horizontal),
+        target_vertical,
+        "custom OSGB36 + NAVD88 height",
+    )));
+    let helmert = CoordinateOperation {
+        id: None,
+        name: "custom WGS 84 to OSGB36".into(),
+        source_crs_epsg: Some(4326),
+        target_crs_epsg: None,
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: Some(crate::operation::OperationAccuracy { meters: 5.0 }),
+        areas_of_use: SmallVec::new(),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        superseded: false,
+        domain: OperationDomain::HorizontalOnly,
+        method: OperationMethod::Helmert {
+            params: datum::OSGB36.helmert_to_wgs84().unwrap().inverse(),
+        },
+    };
+    let mut geoid = test_vertical_grid_operation();
+    geoid.grid_horizontal_crs_epsg = Some(4277);
+
+    let err = Transform::from_crs_defs_with_selection_options(
+        &source,
+        &target,
+        SelectionOptions {
+            grid_provider: Some(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+            vertical_grid_operations: vec![geoid],
+            coordinate_operations: vec![helmert],
+            ..SelectionOptions::default()
+        },
+    )
+    .unwrap_err();
+
+    assert!(
+        err.to_string().contains("geoid-grid"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
+fn null_helmert_between_geocentric_endpoints_is_exact() {
+    // ETRS89 and WGS 84 geocentric framing must cancel exactly rather than
+    // round-trip across the GRS80 and WGS 84 ellipsoids.
+    let t = Transform::new("EPSG:4936", "EPSG:4978").unwrap();
+    let input = (3_924_096.0, 300_000.0, 5_002_000.0);
+    assert_eq!(t.convert_3d(input).unwrap(), input);
+    assert_eq!(t.inverse().unwrap().convert_3d(input).unwrap(), input);
+}
+
+#[test]
 fn null_helmert_etrs89_to_wgs84_is_a_noop() {
     // EPSG:1149 has zero parameters; C PROJ emits `+proj=noop` for it.
     let t = Transform::new("EPSG:4258", "EPSG:4326").unwrap();

@@ -40,7 +40,8 @@ use pipeline::{PipelineSourceXyUnits, PipelineTargetXyUnits};
 
 /// Geoid grids compose with the pre-datum ellipsoidal height. Reject them on
 /// pipelines that change that height. Horizontal-only Helmert can compose
-/// because push/pop restores it.
+/// because push/pop restores it, but only when the grid's ellipsoidal heights
+/// are on the datum of the endpoint that carries ellipsoidal height.
 fn validate_vertical_composition(
     vertical: &VerticalTransform,
     pipeline: &CompiledOperationPipeline,
@@ -49,15 +50,21 @@ fn validate_vertical_composition(
     if !matches!(vertical, VerticalTransform::GridShiftList { .. }) {
         return Ok(());
     }
-    if pipeline.transforms_ellipsoidal_height
-        || fallbacks
-            .iter()
-            .any(|fallback| fallback.pipeline.transforms_ellipsoidal_height)
-    {
-        return Err(Error::OperationSelection(
-            "geoid-grid vertical transforms cannot yet be composed with a horizontal datum shift that changes ellipsoidal height; transform the horizontal datum and the vertical reference in separate steps"
-                .into(),
-        ));
+    let pipelines =
+        std::iter::once(pipeline).chain(fallbacks.iter().map(|fallback| &fallback.pipeline));
+    for pipeline in pipelines {
+        if pipeline.transforms_ellipsoidal_height {
+            return Err(Error::OperationSelection(
+                "geoid-grid vertical transforms cannot yet be composed with a horizontal datum shift that changes ellipsoidal height; transform the horizontal datum and the vertical reference in separate steps"
+                    .into(),
+            ));
+        }
+        if pipeline.restores_ellipsoidal_height && !vertical.grid_heights_on_endpoint_datum() {
+            return Err(Error::OperationSelection(
+                "geoid-grid vertical transforms cannot yet be composed with a horizontal datum shift when the grid's ellipsoidal heights are on a different datum than the ellipsoidal-height endpoint; transform the horizontal datum and the vertical reference in separate steps"
+                    .into(),
+            ));
+        }
     }
     Ok(())
 }
