@@ -880,7 +880,7 @@ dependencies = [
 
 [[package]]
 name = "proj-core"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "criterion",
  "geo-types",
@@ -902,7 +902,7 @@ dependencies = [
 
 [[package]]
 name = "proj-epsg-format"
-version = "0.12.0"
+version = "0.12.1"
 
 [[package]]
 name = "proj-sys"
@@ -920,7 +920,7 @@ dependencies = [
 
 [[package]]
 name = "proj-wkt"
-version = "0.12.0"
+version = "0.12.1"
 dependencies = [
  "proj-core",
  "serde_json",

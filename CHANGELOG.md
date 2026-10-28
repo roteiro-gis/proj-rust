@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.12.1 - 2026-10-27
+
 - fix RDNAPTRANS2018 (`EPSG:4979` → `EPSG:7415`) failing construction since 0.10: horizontal-only operations into a gravity-related compound now preserve ellipsoidal height like C PROJ's `push`/`pop` `v_3`, composing with geoid grids whose heights are on the ellipsoidal-height endpoint's datum
 - compile zero-parameter Helmerts, including zero `towgs84`, between the same ellipsoid or GRS80 and WGS 84 (for example EPSG:1149 ETRS89 to WGS 84) to a no-op like C PROJ
 - run the RDNAPTRANS2018 parity test in CI by fetching its checksum-pinned grids from `cdn.proj.org` when `PROJ_NETWORK=ON`
