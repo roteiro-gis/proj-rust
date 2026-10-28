@@ -639,14 +639,28 @@ fn compile_operation(
 }
 
 /// Preserve height when the operation is horizontal-only and at least one
-/// requested endpoint is 2D.
+/// requested endpoint has no ellipsoidal height: 2D, or a gravity-related
+/// compound whose height the vertical transform owns.
 fn preserve_ellipsoidal_height(
     domain: OperationDomain,
     requested_pair: Option<(&CrsDef, &CrsDef)>,
 ) -> bool {
     domain == OperationDomain::HorizontalOnly
-        && requested_pair
-            .is_some_and(|(source, target)| source.is_horizontal_2d() || target.is_horizontal_2d())
+        && requested_pair.is_some_and(|(source, target)| {
+            source.operation_domain() == OperationDomain::HorizontalOnly
+                || target.operation_domain() == OperationDomain::HorizontalOnly
+        })
+}
+
+/// True for a zero-parameter Helmert that C PROJ compiles to `+proj=noop`:
+/// same ellipsoid on both sides, or GRS80 and WGS 84 (e.g. EPSG:1149
+/// ETRS89 to WGS 84). Other ellipsoid pairs keep the geocentric round trip.
+fn is_null_helmert(step: &CompiledStep, source: Ellipsoid, target: Ellipsoid) -> bool {
+    let grs80_or_wgs84 = |e: Ellipsoid| {
+        ellipsoids_match(e, ellipsoid::GRS80) || ellipsoids_match(e, ellipsoid::WGS84)
+    };
+    matches!(step, CompiledStep::Helmert { params, .. } if *params == HelmertParams::identity())
+        && (ellipsoids_match(source, target) || (grs80_or_wgs84(source) && grs80_or_wgs84(target)))
 }
 
 fn compile_geocentric_sandwich(
@@ -656,6 +670,9 @@ fn compile_geocentric_sandwich(
     step: CompiledStep,
     steps: &mut SmallVec<[CompiledStep; 8]>,
 ) {
+    if is_null_helmert(&step, source_ellipsoid, target_ellipsoid) {
+        return;
+    }
     if preserve_height {
         steps.push(CompiledStep::PushHeight);
     }
@@ -881,7 +898,7 @@ mod framing_tests {
     }
 
     #[test]
-    fn push_pop_only_when_a_requested_endpoint_is_2d() {
+    fn push_pop_only_when_a_requested_endpoint_has_no_ellipsoidal_height() {
         let geographic = CrsDef::Geographic(crate::crs::GeographicCrsDef::new(
             4326,
             crate::datum::WGS84,
@@ -893,13 +910,24 @@ mod framing_tests {
             crate::datum::WGS84,
             "WGS 84",
         ));
+        let geographic_3d = registry::lookup_epsg(4979).unwrap();
+        let gravity_compound = registry::lookup_epsg(7415).unwrap();
         assert!(preserve_ellipsoidal_height(
             OperationDomain::HorizontalOnly,
             Some((&geographic, &geocentric)),
         ));
+        // A geoid grid owns the height of a gravity-related compound.
+        assert!(preserve_ellipsoidal_height(
+            OperationDomain::HorizontalOnly,
+            Some((&geographic_3d, &gravity_compound)),
+        ));
         assert!(!preserve_ellipsoidal_height(
             OperationDomain::HorizontalOnly,
             Some((&geocentric, &geocentric)),
+        ));
+        assert!(!preserve_ellipsoidal_height(
+            OperationDomain::HorizontalOnly,
+            Some((&geographic_3d, &geographic_3d)),
         ));
         assert!(!preserve_ellipsoidal_height(
             OperationDomain::IncludesHeight,
@@ -909,6 +937,40 @@ mod framing_tests {
             OperationDomain::HorizontalOnly,
             None,
         ));
+    }
+
+    fn sandwich(source: Ellipsoid, target: Ellipsoid, params: HelmertParams) -> usize {
+        let mut steps = SmallVec::<[CompiledStep; 8]>::new();
+        compile_geocentric_sandwich(
+            source,
+            target,
+            false,
+            CompiledStep::Helmert {
+                params,
+                inverse: true,
+            },
+            &mut steps,
+        );
+        steps.len()
+    }
+
+    #[test]
+    fn null_helmert_between_grs80_and_wgs84_compiles_to_noop() {
+        let null = HelmertParams::identity();
+        assert_eq!(sandwich(ellipsoid::GRS80, ellipsoid::WGS84, null), 0);
+        assert_eq!(sandwich(ellipsoid::WGS84, ellipsoid::GRS80, null), 0);
+        assert_eq!(
+            sandwich(ellipsoid::BESSEL1841, ellipsoid::BESSEL1841, null),
+            0
+        );
+    }
+
+    #[test]
+    fn null_helmert_keeps_cart_framing_across_distinct_ellipsoids() {
+        let null = HelmertParams::identity();
+        assert_eq!(sandwich(ellipsoid::BESSEL1841, ellipsoid::WGS84, null), 3);
+        let shift = HelmertParams::translation(1.0, 0.0, 0.0).unwrap();
+        assert_eq!(sandwich(ellipsoid::GRS80, ellipsoid::WGS84, shift), 3);
     }
 
     #[test]

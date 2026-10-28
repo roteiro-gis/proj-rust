@@ -1,30 +1,119 @@
 //! RDNAPTRANS2018 parity: ETRS89/WGS 84 3D (EPSG:4979) <-> RD New + NAP
 //! (EPSG:7415) using PROJ's GeoTIFF grids, checked against PROJ 9.8 output.
 //!
-//! Requires the `geotiff` feature. Grid files are not bundled; point
+//! Requires the `geotiff` feature. Grid files are not bundled. Either point
 //! `PROJ_RDNAP_GRID_DIR` at a directory containing `nl_nsgi_rdtrans2018.tif`
-//! and `nl_nsgi_nlgeo2018.tif` (e.g. downloaded from <https://cdn.proj.org/>).
-//! When the variable is unset or the grids are missing, the tests no-op.
+//! and `nl_nsgi_nlgeo2018.tif`, or set `PROJ_NETWORK=ON` (as for C PROJ) to
+//! fetch them on demand from <https://cdn.proj.org/> into
+//! `CARGO_TARGET_TMPDIR`, checked against pinned SHA-256 checksums.
+//! Without either variable the tests no-op.
 #![cfg(feature = "geotiff")]
 
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
 
-use proj_core::{FilesystemGridProvider, SelectionOptions, Transform};
+use proj_core::{
+    FilesystemGridProvider, GridDefinition, GridError, GridHandle, GridProvider, SelectionOptions,
+    Transform,
+};
 
-const GRIDS: [&str; 2] = ["nl_nsgi_rdtrans2018.tif", "nl_nsgi_nlgeo2018.tif"];
+/// Grid resources and their checksums as reported by [`GridHandle::checksum`].
+const GRIDS: [(&str, &str); 2] = [
+    (
+        "nl_nsgi_rdtrans2018.tif",
+        "sha256:7653831191b424e715a906468962fc60071cfb71a3186b2a58f098bab8bf41de",
+    ),
+    (
+        "nl_nsgi_nlgeo2018.tif",
+        "sha256:f8e32c56bf8940fc3fefbc0e413eb4546633ed598b669c63856cddf8328992c0",
+    ),
+];
 
-/// Returns the grid directory if it exists and contains both grids, else `None`.
-fn grid_dir() -> Option<PathBuf> {
-    let dir = PathBuf::from(std::env::var_os("PROJ_RDNAP_GRID_DIR")?);
-    GRIDS
-        .iter()
-        .all(|name| dir.join(name).is_file())
-        .then_some(dir)
+/// Fetches the pinned RDNAPTRANS grids from the PROJ CDN on first use, like
+/// C PROJ with `PROJ_NETWORK=ON`. Other grids are reported as unavailable.
+struct CdnGridProvider {
+    cache_dir: PathBuf,
 }
 
-fn rd_transform(dir: PathBuf) -> Transform {
-    let provider = Arc::new(FilesystemGridProvider::new(vec![dir]));
+impl CdnGridProvider {
+    fn pinned(grid: &GridDefinition) -> Option<(&'static str, &'static str)> {
+        GRIDS.into_iter().find(|(name, _)| {
+            grid.name == *name || grid.resource_names.iter().any(|resource| resource == name)
+        })
+    }
+
+    fn fetch(&self, name: &str) -> PathBuf {
+        // Tests share the cache; serialize downloads so none reads a partial file.
+        static DOWNLOAD: Mutex<()> = Mutex::new(());
+        let _guard = DOWNLOAD
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let path = self.cache_dir.join(name);
+        if !path.is_file() {
+            std::fs::create_dir_all(&self.cache_dir).expect("create grid cache dir");
+            let partial = path.with_extension("part");
+            let status = Command::new("curl")
+                .args(["--fail", "--silent", "--show-error", "--location"])
+                .args(["--retry", "3", "--output"])
+                .arg(&partial)
+                .arg(format!("https://cdn.proj.org/{name}"))
+                .status()
+                .expect("run curl");
+            assert!(status.success(), "downloading {name} failed: {status}");
+            std::fs::rename(&partial, &path).expect("move downloaded grid into cache");
+        }
+        path
+    }
+}
+
+impl GridProvider for CdnGridProvider {
+    fn definition(&self, grid: &GridDefinition) -> Result<Option<GridDefinition>, GridError> {
+        Ok(Self::pinned(grid).map(|_| grid.clone()))
+    }
+
+    fn load(&self, grid: &GridDefinition) -> Result<Option<GridHandle>, GridError> {
+        let Some((name, checksum)) = Self::pinned(grid) else {
+            return Ok(None);
+        };
+        let path = self.fetch(name);
+        let bytes = std::fs::read(&path).expect("read cached grid");
+        let handle = GridHandle::from_bytes(grid.clone(), &bytes)?;
+        assert_eq!(
+            handle.checksum(),
+            checksum,
+            "{name} checksum mismatch; delete {} to download it again",
+            path.display()
+        );
+        Ok(Some(handle))
+    }
+}
+
+/// Grid provider from `PROJ_RDNAP_GRID_DIR` or `PROJ_NETWORK`, else `None`.
+fn grid_provider() -> Option<Arc<dyn GridProvider>> {
+    if let Some(dir) = std::env::var_os("PROJ_RDNAP_GRID_DIR") {
+        let dir = PathBuf::from(dir);
+        for (name, _) in GRIDS {
+            assert!(
+                dir.join(name).is_file(),
+                "PROJ_RDNAP_GRID_DIR is set but {name} is missing from {}",
+                dir.display()
+            );
+        }
+        return Some(Arc::new(FilesystemGridProvider::new(vec![dir])));
+    }
+    let network = std::env::var("PROJ_NETWORK").ok()?;
+    ["ON", "YES", "TRUE"]
+        .iter()
+        .any(|value| network.eq_ignore_ascii_case(value))
+        .then(|| {
+            Arc::new(CdnGridProvider {
+                cache_dir: PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("proj-grids"),
+            }) as Arc<dyn GridProvider>
+        })
+}
+
+fn rd_transform(provider: Arc<dyn GridProvider>) -> Transform {
     let options = SelectionOptions::new().with_grid_provider(provider);
     Transform::with_selection_options("EPSG:4979", "EPSG:7415", options)
         .expect("EPSG:4979 -> EPSG:7415 transform")
@@ -45,11 +134,11 @@ const INPUT_H: f64 = 50.0;
 
 #[test]
 fn rdnaptrans_forward_matches_proj() {
-    let Some(dir) = grid_dir() else {
-        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR to the RDNAPTRANS2018 grid directory");
+    let Some(provider) = grid_provider() else {
+        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR or PROJ_NETWORK=ON");
         return;
     };
-    let transform = rd_transform(dir);
+    let transform = rd_transform(provider);
 
     let metadata = transform.selected_operation();
     assert!(
@@ -80,11 +169,11 @@ fn rdnaptrans_forward_matches_proj() {
 
 #[test]
 fn rdnaptrans_round_trips() {
-    let Some(dir) = grid_dir() else {
-        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR to the RDNAPTRANS2018 grid directory");
+    let Some(provider) = grid_provider() else {
+        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR or PROJ_NETWORK=ON");
         return;
     };
-    let forward = rd_transform(dir);
+    let forward = rd_transform(provider);
     let inverse = forward.inverse().expect("inverse transform");
 
     let projected = forward

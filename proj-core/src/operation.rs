@@ -348,8 +348,8 @@ pub enum OperationMatchKind {
 /// Whether a coordinate operation treats height as part of the shift.
 ///
 /// `HorizontalOnly` operations preserve height when a requested endpoint is
-/// 2D (`+proj=push +v_3` / `+proj=pop +v_3`). `IncludesHeight` operations may
-/// change it.
+/// 2D or a gravity-related compound (`+proj=push +v_3` / `+proj=pop +v_3`).
+/// `IncludesHeight` operations may change it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum OperationDomain {

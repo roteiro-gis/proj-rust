@@ -44,6 +44,9 @@ jobs:
 
       - name: Test geotiff feature
         run: cargo test -p proj-core --features geotiff --locked
+        env:
+          # Lets the RDNAPTRANS2018 parity test fetch its grids from cdn.proj.org.
+          PROJ_NETWORK: "ON"
 
   gen-reference:
     name: Registry Generator

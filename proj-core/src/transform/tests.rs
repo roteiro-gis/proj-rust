@@ -2036,3 +2036,65 @@ fn geoid_grid_with_helmert_horizontal_fails_closed() {
         "unexpected error: {err}"
     );
 }
+
+#[test]
+fn geoid_grid_with_horizontal_only_helmert_composes() {
+    // A horizontal-only Helmert into a gravity-related compound preserves
+    // ellipsoidal height (C PROJ `push/pop +v_3`), so the geoid grid applies
+    // to the source height as in C PROJ's RDNAPTRANS fallback pipeline.
+    let grid_root = write_test_gtx(&[-30.0, -30.0, -30.0, -30.0]);
+    let source = registry::lookup_epsg(4979).unwrap();
+    let target_horizontal = GeographicCrsDef::new(0, datum::OSGB36, "custom OSGB36 geographic");
+    let target_vertical = registry::lookup_vertical_epsg(5703).unwrap();
+    let target = CrsDef::Compound(Box::new(CompoundCrsDef::new(
+        0,
+        HorizontalCrsDef::Geographic(target_horizontal),
+        target_vertical,
+        "custom OSGB36 + NAVD88 height",
+    )));
+    let helmert = CoordinateOperation {
+        id: None,
+        name: "custom WGS 84 to OSGB36".into(),
+        source_crs_epsg: Some(4326),
+        target_crs_epsg: None,
+        source_datum_epsg: None,
+        target_datum_epsg: None,
+        accuracy: Some(crate::operation::OperationAccuracy { meters: 5.0 }),
+        areas_of_use: SmallVec::new(),
+        deprecated: false,
+        preferred: true,
+        approximate: false,
+        superseded: false,
+        domain: OperationDomain::HorizontalOnly,
+        method: OperationMethod::Helmert {
+            params: datum::OSGB36.helmert_to_wgs84().unwrap().inverse(),
+        },
+    };
+
+    let t = Transform::from_crs_defs_with_selection_options(
+        &source,
+        &target,
+        SelectionOptions {
+            grid_provider: Some(Arc::new(FilesystemGridProvider::new(vec![grid_root]))),
+            vertical_grid_operations: vec![test_vertical_grid_operation()],
+            coordinate_operations: vec![helmert],
+            ..SelectionOptions::default()
+        },
+    )
+    .unwrap();
+
+    assert!(!t.pipeline.transforms_ellipsoidal_height);
+    let (_, _, z) = t.convert_3d((-74.5, 40.5, 10.0)).unwrap();
+    assert!((z - 40.0).abs() < 1e-9, "z {z}");
+    assert!(t.inverse().is_ok());
+}
+
+#[test]
+fn null_helmert_etrs89_to_wgs84_is_a_noop() {
+    // EPSG:1149 has zero parameters; C PROJ emits `+proj=noop` for it.
+    let t = Transform::new("EPSG:4258", "EPSG:4326").unwrap();
+    assert_eq!(
+        t.convert((5.387203, 52.155172)).unwrap(),
+        (5.387203, 52.155172)
+    );
+}
