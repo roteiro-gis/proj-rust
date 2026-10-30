@@ -208,6 +208,8 @@ fn same_pre_accuracy_priority(
     match_kind_priority(left.match_kind) == match_kind_priority(right.match_kind)
         && left.matched_area_of_use.is_some() == right.matched_area_of_use.is_some()
         && left.operation.superseded() == right.operation.superseded()
+        && left.operation.deprecated() == right.operation.deprecated()
+        && left.via_geoid_grid_crs == right.via_geoid_grid_crs
 }
 
 fn match_kind_priority(kind: crate::operation::OperationMatchKind) -> u8 {

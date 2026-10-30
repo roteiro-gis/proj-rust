@@ -52,11 +52,7 @@ const KNOWN_DIVERGENCES: &[(u32, u32, &str, &str)] = &[
         "Europe - Liechtenstein and Switzerland",
         "C PROJ uses EPSG:1766",
     ),
-    (4152, 4326, "USA - CONUS - onshore", "C PROJ uses EPSG:1901"),
-    (4156, 4258, "Slovakia", "C PROJ uses EPSG:4829"),
-    (4156, 4326, "Czechia", "C PROJ uses EPSG:5239"),
     (4168, 4326, "Ghana - offshore", "C PROJ uses EPSG:1569"),
-    (4181, 4258, "Luxembourg", "C PROJ uses EPSG:9938"),
     (4201, 4326, "Burkina Faso", "C PROJ uses EPSG:1100"),
     (4201, 4326, "Cameroon - onshore", "C PROJ uses EPSG:1100"),
     (4201, 4326, "Mali", "C PROJ uses EPSG:1100"),
@@ -80,20 +76,12 @@ const KNOWN_DIVERGENCES: &[(u32, u32, &str, &str)] = &[
         "C PROJ uses EPSG:5062",
     ),
     (4209, 4326, "Lesotho", "C PROJ uses EPSG:1113"),
-    (4209, 4326, "Zambia", "C PROJ uses EPSG:1120"),
     (
         4211,
         4326,
         "Indonesia - Bali Sea west",
         "C PROJ uses EPSG:8452",
     ),
-    (
-        4211,
-        4326,
-        "Indonesia - Bali, Java and western Sumatra onshore",
-        "C PROJ uses EPSG:8452",
-    ),
-    (4214, 4326, "China - Ordos basin", "C PROJ uses EPSG:15936"),
 ];
 
 fn load_corpus() -> Vec<ParityEntry> {

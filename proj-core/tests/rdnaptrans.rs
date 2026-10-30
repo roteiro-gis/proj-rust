@@ -9,17 +9,15 @@
 //! Without either variable the tests no-op.
 #![cfg(feature = "geotiff")]
 
-use std::path::PathBuf;
-use std::process::Command;
-use std::sync::{Arc, Mutex};
+#[path = "common/cdn_grids.rs"]
+mod cdn_grids;
 
-use proj_core::{
-    FilesystemGridProvider, GridDefinition, GridError, GridHandle, GridProvider, SelectionOptions,
-    Transform,
-};
+use std::sync::Arc;
 
-/// Grid resources and their checksums as reported by [`GridHandle::checksum`].
-const GRIDS: [(&str, &str); 2] = [
+use cdn_grids::PinnedGrid;
+use proj_core::{GridProvider, SelectionOptions, SelectionPolicy, Transform};
+
+const GRIDS: &[PinnedGrid] = &[
     (
         "nl_nsgi_rdtrans2018.tif",
         "sha256:7653831191b424e715a906468962fc60071cfb71a3186b2a58f098bab8bf41de",
@@ -30,104 +28,8 @@ const GRIDS: [(&str, &str); 2] = [
     ),
 ];
 
-/// Fetches the pinned RDNAPTRANS grids from the PROJ CDN on first use, like
-/// C PROJ with `PROJ_NETWORK=ON`. Other grids are reported as unavailable.
-struct CdnGridProvider {
-    cache_dir: PathBuf,
-}
-
-impl CdnGridProvider {
-    fn pinned(grid: &GridDefinition) -> Option<(&'static str, &'static str)> {
-        GRIDS.into_iter().find(|(name, _)| {
-            grid.name == *name || grid.resource_names.iter().any(|resource| resource == name)
-        })
-    }
-
-    /// Returns the cached grid, downloading it first when missing. Downloads
-    /// go to a per-process `.part` file and are checked before the rename,
-    /// so concurrent test processes never install a partial or corrupt grid.
-    fn fetch(&self, grid: &GridDefinition, name: &str, checksum: &str) -> GridHandle {
-        // Tests in this process share the cache; download each grid once.
-        static DOWNLOAD: Mutex<()> = Mutex::new(());
-        let _guard = DOWNLOAD
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let path = self.cache_dir.join(name);
-        if path.is_file() {
-            let bytes = std::fs::read(&path).expect("read cached grid");
-            let handle = GridHandle::from_bytes(grid.clone(), &bytes).expect("parse cached grid");
-            assert_eq!(
-                handle.checksum(),
-                checksum,
-                "{name} checksum mismatch; delete {} to download it again",
-                path.display()
-            );
-            return handle;
-        }
-        std::fs::create_dir_all(&self.cache_dir).expect("create grid cache dir");
-        let partial = path.with_extension(format!("{}.part", std::process::id()));
-        let status = Command::new("curl")
-            .args(["--fail", "--silent", "--show-error", "--location"])
-            .args(["--retry", "3", "--output"])
-            .arg(&partial)
-            .arg(format!("https://cdn.proj.org/{name}"))
-            .status()
-            .expect("run curl");
-        assert!(status.success(), "downloading {name} failed: {status}");
-        let bytes = std::fs::read(&partial).expect("read downloaded grid");
-        let handle = GridHandle::from_bytes(grid.clone(), &bytes);
-        let verified = handle
-            .as_ref()
-            .is_ok_and(|handle| handle.checksum() == checksum);
-        if !verified {
-            let _ = std::fs::remove_file(&partial);
-            panic!("downloaded {name} failed verification against {checksum}");
-        }
-        std::fs::rename(&partial, &path).expect("move downloaded grid into cache");
-        handle.unwrap()
-    }
-}
-
-impl GridProvider for CdnGridProvider {
-    fn definition(&self, grid: &GridDefinition) -> Result<Option<GridDefinition>, GridError> {
-        Ok(Self::pinned(grid).map(|_| grid.clone()))
-    }
-
-    fn load(&self, grid: &GridDefinition) -> Result<Option<GridHandle>, GridError> {
-        Ok(Self::pinned(grid).map(|(name, checksum)| self.fetch(grid, name, checksum)))
-    }
-}
-
-/// Grid provider from `PROJ_RDNAP_GRID_DIR` or `PROJ_NETWORK`, else `None`.
-///
-/// A non-empty `PROJ_RDNAP_GRID_DIR` missing a grid falls back to the network
-/// when enabled, and otherwise fails rather than skipping.
 fn grid_provider() -> Option<Arc<dyn GridProvider>> {
-    let network = std::env::var("PROJ_NETWORK").is_ok_and(|value| {
-        ["ON", "YES", "TRUE"]
-            .iter()
-            .any(|enabled| value.eq_ignore_ascii_case(enabled))
-    });
-    if let Some(dir) = std::env::var_os("PROJ_RDNAP_GRID_DIR").filter(|dir| !dir.is_empty()) {
-        let dir = PathBuf::from(dir);
-        let missing = GRIDS
-            .iter()
-            .find(|(name, _)| !dir.join(name).is_file())
-            .map(|(name, _)| *name);
-        match missing {
-            None => return Some(Arc::new(FilesystemGridProvider::new(vec![dir]))),
-            Some(name) => assert!(
-                network,
-                "PROJ_RDNAP_GRID_DIR is set but {name} is missing from {}",
-                dir.display()
-            ),
-        }
-    }
-    network.then(|| {
-        Arc::new(CdnGridProvider {
-            cache_dir: PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("proj-grids"),
-        }) as Arc<dyn GridProvider>
-    })
+    cdn_grids::grid_provider("PROJ_RDNAP_GRID_DIR", GRIDS)
 }
 
 fn rd_transform(provider: Arc<dyn GridProvider>) -> Transform {
@@ -201,6 +103,49 @@ fn rdnaptrans_round_trips() {
     assert!((lon - INPUT_LON).abs() < 1e-8, "lon {lon} vs {INPUT_LON}");
     assert!((lat - INPUT_LAT).abs() < 1e-8, "lat {lat} vs {INPUT_LAT}");
     assert!((h - INPUT_H).abs() < 1e-3, "height {h} vs {INPUT_H}");
+}
+
+#[test]
+fn rdnaptrans_requiring_grids_matches_proj() {
+    let Some(provider) = grid_provider() else {
+        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR or PROJ_NETWORK=ON");
+        return;
+    };
+    // The geoid sampling step must not need a grid-backed WGS 84 to ETRS89
+    // operation: that shift is null.
+    let options = SelectionOptions::new()
+        .with_grid_provider(provider)
+        .with_policy(SelectionPolicy::RequireGrids);
+    let transform = Transform::with_selection_options("EPSG:4979", "EPSG:7415", options)
+        .expect("EPSG:4979 -> EPSG:7415 transform");
+
+    let (x, y, z) = transform
+        .convert_3d((INPUT_LON, INPUT_LAT, INPUT_H))
+        .expect("forward convert_3d");
+
+    assert!((x - PROJ_RD_X).abs() < 1e-3, "RD X {x:.6}");
+    assert!((y - PROJ_RD_Y).abs() < 1e-3, "RD Y {y:.6}");
+    assert!((z - PROJ_NAP).abs() < 1e-3, "NAP height {z:.6}");
+}
+
+#[test]
+fn wgs84_to_rd_new_keeps_the_rdtrans_grid() {
+    let Some(provider) = grid_provider() else {
+        eprintln!("skipping: set PROJ_RDNAP_GRID_DIR or PROJ_NETWORK=ON");
+        return;
+    };
+    // Unlike the BD72 grid, "Amersfoort to ETRS89 (9)" adds no stated
+    // uncertainty to the bridge, so it ties the direct Helmerts and wins.
+    let options = SelectionOptions::new().with_grid_provider(provider);
+    let transform = Transform::with_selection_options("EPSG:4326", "EPSG:28992", options)
+        .expect("EPSG:4326 -> EPSG:28992 transform");
+
+    assert!(transform.selected_operation().uses_grids);
+    let (x, y) = transform
+        .convert((INPUT_LON, INPUT_LAT))
+        .expect("forward convert");
+    assert!((x - PROJ_RD_X).abs() < 1e-3, "RD X {x:.6}");
+    assert!((y - PROJ_RD_Y).abs() < 1e-3, "RD Y {y:.6}");
 }
 
 #[test]

@@ -120,6 +120,13 @@ impl SelectedOperationKind {
             Self::Custom(operation) => operation.accuracy,
         }
     }
+
+    fn registry_operation(&self) -> Option<&CoordinateOperation> {
+        match self {
+            Self::Registry(operation) => Some(operation.as_ref().as_ref()),
+            Self::Identity | Self::Custom(_) => None,
+        }
+    }
 }
 
 pub(crate) struct RankedOperationCandidate {
@@ -128,6 +135,9 @@ pub(crate) struct RankedOperationCandidate {
     pub(crate) match_kind: OperationMatchKind,
     pub(crate) matched_area_of_use: Option<AreaOfUse>,
     pub(crate) reasons: SmallVec<[SelectionReason; 4]>,
+    /// True when the operation passes through the geographic CRS of the geoid
+    /// grid that transforms the heights of this CRS pair.
+    pub(crate) via_geoid_grid_crs: bool,
 }
 
 impl RankedOperationCandidate {
@@ -174,6 +184,7 @@ pub(crate) fn rank_operation_candidates(
                 match_kind: OperationMatchKind::Explicit,
                 matched_area_of_use,
                 reasons,
+                via_geoid_grid_crs: false,
             }],
             skipped: Vec::new(),
         });
@@ -192,6 +203,7 @@ pub(crate) fn rank_operation_candidates(
                 SelectionReason::ExactSourceTarget,
                 SelectionReason::PreferredOperation,
             ]),
+            via_geoid_grid_crs: false,
         });
     }
 
@@ -232,11 +244,13 @@ pub(crate) fn rank_operation_candidates(
             match_kind: OperationMatchKind::Custom,
             matched_area_of_use,
             reasons,
+            via_geoid_grid_crs: false,
         });
     }
 
     let source_endpoint = OperationEndpoint::of(source);
     let target_endpoint = OperationEndpoint::of(target);
+    let geoid_grid_crs = geoid_grid_horizontal_crs(source, target, options);
     for operation in registry::related_operations(source, target) {
         for direction in [
             OperationStepDirection::Forward,
@@ -290,6 +304,7 @@ pub(crate) fn rank_operation_candidates(
                 match_kind,
                 matched_area_of_use,
                 reasons,
+                via_geoid_grid_crs: passes_through_crs(operation, &geoid_grid_crs),
             });
         }
     }
@@ -433,9 +448,46 @@ fn wgs84_pivot_candidates(
                 match_kind: OperationMatchKind::DatumCompatible,
                 matched_area_of_use,
                 reasons,
+                via_geoid_grid_crs: false,
             })
         })
         .collect()
+}
+
+/// Geographic CRSs, other than the endpoints' own, of the geoid grids that
+/// transform the heights of this pair.
+fn geoid_grid_horizontal_crs(
+    source: &CrsDef,
+    target: &CrsDef,
+    options: &SelectionOptions,
+) -> SmallVec<[u32; 2]> {
+    let endpoints = [
+        source.base_geographic_crs_epsg(),
+        target.base_geographic_crs_epsg(),
+    ];
+    registry::vertical_grid_operations_between(source, target)
+        .iter()
+        .chain(&options.vertical_grid_operations)
+        .filter_map(|operation| operation.grid_horizontal_crs_epsg)
+        .filter(|code| !endpoints.contains(&Some(*code)))
+        .collect()
+}
+
+/// True when a concatenated operation has a step starting or ending in one of
+/// `crs_codes`.
+fn passes_through_crs(operation: &CoordinateOperation, crs_codes: &[u32]) -> bool {
+    let OperationMethod::Concatenated { steps } = &operation.method else {
+        return false;
+    };
+    steps
+        .iter()
+        .filter_map(|step| registry::lookup_operation(step.operation_id))
+        .any(|step| {
+            [step.source_crs_epsg, step.target_crs_epsg]
+                .into_iter()
+                .flatten()
+                .any(|code| crs_codes.contains(&code))
+        })
 }
 
 fn compatible_direction(
@@ -691,12 +743,24 @@ fn compare_candidates(
                 .cmp(&left.matched_area_of_use.is_some())
         })
         .then_with(|| {
+            // Deprecated operations lose to current ones regardless of stated
+            // accuracy: C PROJ's operation lookup leaves them out.
+            left.operation
+                .deprecated()
+                .cmp(&right.operation.deprecated())
+        })
+        .then_with(|| {
             // EPSG supersession: prefer the replacement variant over the
             // superseded one regardless of stated accuracy — C PROJ drops
             // superseded operations when a same-pair replacement exists.
             left.operation
                 .superseded()
                 .cmp(&right.operation.superseded())
+        })
+        .then_with(|| {
+            // C PROJ routes the horizontal leg of a compound operation through
+            // the geographic CRS of its geoid grid, not the direct operation.
+            right.via_geoid_grid_crs.cmp(&left.via_geoid_grid_crs)
         })
         .then_with(|| {
             let left_accuracy = left
@@ -721,17 +785,44 @@ fn compare_candidates(
                 .unwrap_or(Ordering::Equal)
         })
         .then_with(|| {
-            left.operation
-                .deprecated()
-                .cmp(&right.operation.deprecated())
-        })
-        .then_with(|| {
             right
                 .operation
                 .grid_format_preference()
                 .cmp(&left.operation.grid_format_preference())
         })
         .then_with(|| right.operation.preferred().cmp(&left.operation.preferred()))
+        .then_with(|| {
+            match (
+                left.operation.registry_operation(),
+                right.operation.registry_operation(),
+            ) {
+                (Some(left), Some(right)) => compare_registry_listing(left, right),
+                _ => Ordering::Equal,
+            }
+        })
+}
+
+/// C PROJ's listing order for operations that tie on everything above: the
+/// larger area of use, the fewer pipeline steps (a null Helmert has none), the
+/// shorter name, then the greater name, so that "Amersfoort to WGS 84 (4)" goes
+/// before "Amersfoort to WGS 84 (3)".
+fn compare_registry_listing(left: &CoordinateOperation, right: &CoordinateOperation) -> Ordering {
+    largest_pseudo_area(right)
+        .partial_cmp(&largest_pseudo_area(left))
+        .unwrap_or(Ordering::Equal)
+        .then_with(|| {
+            crate::epsg_db::is_null_helmert(right).cmp(&crate::epsg_db::is_null_helmert(left))
+        })
+        .then_with(|| left.name.len().cmp(&right.name.len()))
+        .then_with(|| right.name.cmp(&left.name))
+}
+
+fn largest_pseudo_area(operation: &CoordinateOperation) -> f64 {
+    operation
+        .areas_of_use
+        .iter()
+        .map(|area| matched_pseudo_area(Some(area)))
+        .fold(0.0, f64::max)
 }
 
 /// Spherical pseudo-area of a matched area of use: `(sin N − sin S)` times the
@@ -1132,6 +1223,64 @@ mod tests {
         assert_eq!(
             registry::operations_between(&code_less, &wgs84),
             registry::operations_between(&nad27, &wgs84),
+        );
+    }
+
+    #[test]
+    fn deprecated_operations_lose_to_current_ones_whatever_the_stated_accuracy() {
+        let mut compared_pairs = 0;
+        let mut better_stated_accuracy = 0;
+        for deprecated in crate::epsg_db::all_operations().filter(|operation| operation.deprecated)
+        {
+            let (Some(source), Some(target)) = (
+                deprecated.source_crs_epsg.and_then(registry::lookup_epsg),
+                deprecated.target_crs_epsg.and_then(registry::lookup_epsg),
+            ) else {
+                continue;
+            };
+            let ranked = rank_operation_candidates(&source, &target, &SelectionOptions::new())
+                .unwrap()
+                .ranked;
+            let Some(position) = ranked.iter().position(|candidate| {
+                candidate.operation.as_operation().map(|op| op.id) == Some(deprecated.id)
+            }) else {
+                continue;
+            };
+
+            let same_crs_pair = |candidate: &RankedOperationCandidate| {
+                candidate.operation.as_operation().is_some_and(|operation| {
+                    !operation.deprecated
+                        && operation.source_crs_epsg == deprecated.source_crs_epsg
+                        && operation.target_crs_epsg == deprecated.target_crs_epsg
+                })
+            };
+            let current = ranked.iter().filter(|c| same_crs_pair(c)).count();
+            if current == 0 {
+                continue;
+            }
+            compared_pairs += 1;
+            better_stated_accuracy += usize::from(ranked.iter().any(|candidate| {
+                same_crs_pair(candidate)
+                    && match (deprecated.accuracy, candidate.operation.accuracy()) {
+                        (Some(deprecated), Some(current)) => deprecated.meters < current.meters,
+                        _ => false,
+                    }
+            }));
+            assert!(
+                !ranked[position + 1..].iter().any(same_crs_pair),
+                "deprecated {:?} ({}) ranks above a current operation for its CRS pair",
+                deprecated.id,
+                deprecated.name
+            );
+        }
+
+        assert!(
+            compared_pairs >= 100,
+            "only {compared_pairs} pairs compared"
+        );
+        assert!(
+            better_stated_accuracy >= 50,
+            "only {better_stated_accuracy} deprecated operations state a better accuracy"
         );
     }
 

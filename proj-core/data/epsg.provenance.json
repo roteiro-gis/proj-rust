@@ -28,8 +28,8 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1103075,
-    "sha256": "sha256:934545056213208de768cc2c0516faa0d85c7fd476c3ff4d86962c25c20f8372"
+    "byte_len": 1114228,
+    "sha256": "sha256:ffc46c21321d93cab6744dc4b2b97d14dd4ace551177d9f499aa6ee21f168d65"
   },
   "counts": {
     "ellipsoids": 44,
@@ -41,7 +41,7 @@
     "extents": 848,
     "grid_resources": 726,
     "operations": 2157,
-    "vertical_operations": 716,
+    "vertical_operations": 796,
     "datum_aliases": 1664,
     "geocentric_crs": 217
   },

@@ -1456,7 +1456,7 @@ fn identity_bridge_edges(
 
 fn combine_accuracy(left: Option<f64>, right: Option<f64>) -> Option<f64> {
     match (left, right) {
-        (Some(left), Some(right)) => Some(left.max(right)),
+        (Some(left), Some(right)) => Some(left + right),
         (Some(value), None) | (None, Some(value)) => Some(value),
         (None, None) => None,
     }
@@ -1614,6 +1614,7 @@ fn add_generated_operation_graph(
         )
     });
     let mut next_extra_vertical_code = GENERATED_EXTRA_VERTICAL_OPERATION_CODE_BASE;
+    let mut own_crs_bridges = Vec::new();
     for operation in &base_vertical_operations {
         if operation.source_horizontal_crs_code == 0
             || !vertical_operation_uses_supported_grid_resource(ctx.grid_resources, operation)
@@ -1630,10 +1631,13 @@ fn add_generated_operation_graph(
                 continue;
             }
             for target_horizontal in target_horizontal_candidates {
-                if *target_horizontal == operation.source_horizontal_crs_code
-                    || !horizontal_path_pairs
-                        .contains(&(bridge.source_crs_code, *target_horizontal))
-                {
+                if *target_horizontal == operation.source_horizontal_crs_code {
+                    // The bridge alone reaches the geoid's own CRS. Codes for
+                    // these come last so existing generated codes stay put.
+                    own_crs_bridges.push((operation, bridge));
+                    continue;
+                }
+                if !horizontal_path_pairs.contains(&(bridge.source_crs_code, *target_horizontal)) {
                     continue;
                 }
 
@@ -1648,11 +1652,28 @@ fn add_generated_operation_graph(
                     GeneratedVerticalHorizontalCodes {
                         source_horizontal_crs_code: bridge.source_crs_code,
                         target_horizontal_crs_code: *target_horizontal,
-                        grid_horizontal_crs_code: bridge.source_crs_code,
+                        grid_horizontal_crs_code: bridge.target_crs_code,
                     },
                 ));
             }
         }
+    }
+
+    for (operation, bridge) in own_crs_bridges {
+        let code = allocate_generated_code(
+            generated_operation_code_for_epsg_code(operation.code),
+            &mut used_vertical_operation_codes,
+            &mut next_extra_vertical_code,
+        );
+        vertical_operations.push(generated_vertical_bridge_operation(
+            operation,
+            code,
+            GeneratedVerticalHorizontalCodes {
+                source_horizontal_crs_code: bridge.source_crs_code,
+                target_horizontal_crs_code: operation.source_horizontal_crs_code,
+                grid_horizontal_crs_code: bridge.target_crs_code,
+            },
+        ));
     }
 }
 
@@ -3646,6 +3667,14 @@ fn sha256_hex(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn concatenated_accuracy_sums_the_steps_like_c_proj() {
+        assert_eq!(combine_accuracy(Some(1.0), Some(0.25)), Some(1.25));
+        assert_eq!(combine_accuracy(Some(1.0), Some(0.0)), Some(1.0));
+        assert_eq!(combine_accuracy(Some(1.0), None), Some(1.0));
+        assert_eq!(combine_accuracy(None, None), None);
+    }
 
     fn static_helmert(method_code: i64) -> RawHelmertOperation {
         RawHelmertOperation {

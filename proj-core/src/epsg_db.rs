@@ -1020,6 +1020,16 @@ pub(crate) fn lookup_operation(code: u32) -> Option<CoordinateOperation> {
     db().operations.get(&code).cloned()
 }
 
+/// True for a Helmert with all-zero parameters, which compiles to a no-op.
+pub(crate) fn is_null_helmert(operation: &CoordinateOperation) -> bool {
+    matches!(&operation.method, OperationMethod::Helmert { params } if *params == HelmertParams::identity())
+}
+
+#[cfg(test)]
+pub(crate) fn all_operations() -> impl Iterator<Item = &'static CoordinateOperation> {
+    db().operations.values()
+}
+
 pub(crate) fn lookup_vertical_grid_operation(code: u32) -> Option<VerticalGridOperation> {
     db().vertical_grid_operations
         .get(&code)
