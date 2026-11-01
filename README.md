@@ -59,7 +59,8 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 
 `proj-wkt` accepts:
 
-- EPSG authority codes, bare EPSG numbers, EPSG URNs, and OGC `CRS:84`.
+- EPSG authority codes, bare EPSG numbers, compound `EPSG:horizontal+vertical` codes, and OGC URNs and `opengis.net` URIs for EPSG codes.
+- OGC `CRS84`, `CRS83`, and `CRS27` in their short, URN, and URI forms, such as `urn:ogc:def:crs:OGC:1.3:CRS84`.
 - Common PROJ strings for the implemented projection families, including `+proj=cart` / `+proj=geocent` ECEF CRS definitions and legacy `+init=epsg:XXXX`.
 - WKT1 and supported WKT2 geographic/projected/geocentric CRS definitions.
 - WKT1 `GEOCCS`, WKT2 geocentric `GEODCRS`, and PROJJSON Cartesian `GeodeticCRS` for ECEF definitions such as EPSG:4978.

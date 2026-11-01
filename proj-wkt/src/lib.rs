@@ -55,9 +55,9 @@ mod wkt2_writer;
 mod wkt_writer;
 
 use proj_core::{
-    AreaOfInterest, Bounds, Coord, Coord3D, CoordinateOperation, CoordinateOperationId, CrsDef,
-    DatumGridShift, DatumToWgs84, OperationMethod, SelectionOptions, Transform, Transformable,
-    Transformable3D,
+    AreaOfInterest, Bounds, CompoundCrsDef, Coord, Coord3D, CoordinateOperation,
+    CoordinateOperationId, CrsDef, DatumGridShift, DatumToWgs84, OperationMethod, SelectionOptions,
+    Transform, Transformable, Transformable3D,
 };
 
 /// Parse error.
@@ -96,8 +96,12 @@ impl ParsedCrs {
 /// Automatically detects and handles:
 /// - **Authority codes**: `"EPSG:4326"`
 /// - **Bare EPSG codes**: `"4326"` (numeric-only strings)
-/// - **URN format**: `"urn:ogc:def:crs:EPSG::4326"`
-/// - **OGC CRS84**: `"CRS:84"`, `"OGC:CRS84"`
+/// - **Compound EPSG codes**: `"EPSG:32618+5703"` (horizontal + vertical)
+/// - **URN format**: `"urn:ogc:def:crs:EPSG::4326"`, `"urn:ogc:def:crs:OGC:1.3:CRS84"`,
+///   and `"urn:ogc:def:crs,crs:EPSG::32618,crs:EPSG::5703"`
+/// - **OGC URIs**: `"http://www.opengis.net/def/crs/EPSG/0/4326"`,
+///   `"http://www.opengis.net/def/crs/OGC/1.3/CRS84"`
+/// - **OGC CRS84, CRS83, CRS27**: `"CRS:84"`, `"OGC:CRS84"`, `"CRS84"`
 /// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`, `"+proj=cart +datum=WGS84"`
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}` or geocentric `GeodeticCRS`
 /// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `GEOCCS[...]` / `COMPD_CS[...]`
@@ -140,28 +144,26 @@ pub fn to_projjson(crs: &CrsDef) -> Result<String> {
 fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
     let s = s.trim();
 
-    // Normalize common aliases
     let upper = s.to_uppercase();
-    if upper == "CRS:84" || upper == "OGC:CRS84" {
-        return proj_core::lookup_epsg(4326)
-            .map(ParsedCrs::new)
-            .ok_or_else(|| ParseError::Parse("CRS:84 not found in registry".into()));
+    if let Some(code) = ogc_crs_alias(&upper) {
+        return lookup_ogc_crs(code).map(ParsedCrs::new);
     }
 
     if upper.starts_with("URN:") {
         return parse_ogc_crs_urn(s).map(ParsedCrs::new);
     }
 
-    // Try authority code (EPSG:XXXX)
-    if s.contains(':')
-        && !s.starts_with('+')
-        && !upper.starts_with("GEOG")
-        && !upper.starts_with("GEOD")
-        && !upper.starts_with("GEOC")
-        && !upper.starts_with("PROJ")
-    {
-        if let Ok(crs) = proj_core::lookup_authority_code(s) {
-            return Ok(ParsedCrs::new(crs));
+    if upper.starts_with("HTTP://") || upper.starts_with("HTTPS://") {
+        return parse_ogc_crs_uri(s).map(ParsedCrs::new);
+    }
+
+    // EPSG authority code, optionally a horizontal+vertical pair
+    if let Some((authority, codes)) = s.split_once(':') {
+        if authority.trim().eq_ignore_ascii_case("EPSG") {
+            if let Some((horizontal, vertical)) = codes.split_once('+') {
+                return lookup_epsg_compound(horizontal, vertical).map(ParsedCrs::new);
+            }
+            return Ok(ParsedCrs::new(proj_core::lookup_authority_code(s)?));
         }
     }
 
@@ -204,7 +206,80 @@ fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
     )))
 }
 
+/// Short OGC CRS identifier, such as `CRS:84` or `OGC:CRS84`, without its prefix.
+fn ogc_crs_alias(upper: &str) -> Option<&str> {
+    upper
+        .strip_prefix("OGC:")
+        .or_else(|| upper.strip_prefix("CRS:"))
+        .or_else(|| upper.starts_with("CRS").then_some(upper))
+        .filter(|code| ogc_crs_epsg(code).is_some())
+}
+
+/// EPSG CRS equivalent to an OGC CRS code. These are longitude-first by
+/// definition, which is the library's coordinate order for every CRS.
+fn ogc_crs_epsg(code: &str) -> Option<u32> {
+    match code.to_ascii_uppercase().as_str() {
+        "CRS84" | "84" => Some(4326),
+        "CRS83" | "83" => Some(4269),
+        "CRS27" | "27" => Some(4267),
+        _ => None,
+    }
+}
+
+fn lookup_ogc_crs(code: &str) -> Result<CrsDef> {
+    let epsg = ogc_crs_epsg(code)
+        .ok_or_else(|| ParseError::Parse(format!("unsupported OGC CRS code `{code}`")))?;
+    proj_core::lookup_epsg(epsg)
+        .ok_or_else(|| ParseError::Parse(format!("OGC CRS {code} not found in registry")))
+}
+
+fn lookup_epsg_compound(horizontal: &str, vertical: &str) -> Result<CrsDef> {
+    let code = |value: &str| {
+        value
+            .trim()
+            .parse::<u32>()
+            .map_err(|_| ParseError::Parse(format!("invalid EPSG code: {value}")))
+    };
+    let (horizontal, vertical) = (code(horizontal)?, code(vertical)?);
+    let horizontal = proj_core::lookup_epsg(horizontal)
+        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code: {horizontal}")))?;
+    let vertical = proj_core::lookup_vertical_epsg(vertical)
+        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG vertical code: {vertical}")))?;
+    let compound = CompoundCrsDef::from_crs_def(0, horizontal, vertical, "")?;
+    Ok(CrsDef::Compound(Box::new(compound)))
+}
+
+/// Resolve the authority and code of a CRS identifier of the given `kind`.
+fn lookup_authority_crs(kind: &str, s: &str, authority: &str, code: &str) -> Result<CrsDef> {
+    if authority.eq_ignore_ascii_case("OGC") {
+        return lookup_ogc_crs(code);
+    }
+    if authority.is_empty() {
+        return Err(ParseError::Parse(format!(
+            "invalid CRS {kind} `{s}`; missing authority"
+        )));
+    }
+    if !authority.eq_ignore_ascii_case("EPSG") {
+        return Err(ParseError::Parse(format!(
+            "unsupported CRS {kind} authority `{authority}`; only EPSG and OGC are supported"
+        )));
+    }
+    let epsg = code
+        .parse::<u32>()
+        .map_err(|_| ParseError::Parse(format!("invalid EPSG code in CRS {kind} `{s}`")))?;
+    proj_core::lookup_epsg(epsg)
+        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in CRS {kind}: {epsg}")))
+}
+
 fn parse_ogc_crs_urn(s: &str) -> Result<CrsDef> {
+    if let Some(components) = s
+        .get(.."urn:ogc:def:crs,".len())
+        .filter(|prefix| prefix.eq_ignore_ascii_case("urn:ogc:def:crs,"))
+        .map(|prefix| &s[prefix.len()..])
+    {
+        return parse_ogc_compound_crs_urn(s, components);
+    }
+
     let parts = s.split(':').collect::<Vec<_>>();
     if parts.len() != 7
         || !parts[0].eq_ignore_ascii_case("urn")
@@ -217,23 +292,54 @@ fn parse_ogc_crs_urn(s: &str) -> Result<CrsDef> {
         )));
     }
 
-    let authority = parts[4];
-    if authority.is_empty() {
-        return Err(ParseError::Parse(format!(
-            "invalid CRS URN `{s}`; missing authority"
-        )));
-    }
-    if !authority.eq_ignore_ascii_case("EPSG") {
-        return Err(ParseError::Parse(format!(
-            "unsupported CRS URN authority `{authority}`; only EPSG is supported"
-        )));
-    }
+    lookup_authority_crs("URN", s, parts[4], parts[6])
+}
 
-    let code = parts[6]
-        .parse::<u32>()
-        .map_err(|_| ParseError::Parse(format!("invalid EPSG code in CRS URN `{s}`")))?;
-    proj_core::lookup_epsg(code)
-        .ok_or_else(|| ParseError::Parse(format!("unknown EPSG code in CRS URN: {code}")))
+/// Parse the `urn:ogc:def:crs,crs:EPSG::H,crs:EPSG::V` compound form.
+fn parse_ogc_compound_crs_urn(s: &str, components: &str) -> Result<CrsDef> {
+    let component_code = |component: &str| {
+        let parts = component.split(':').collect::<Vec<_>>();
+        match parts.as_slice() {
+            [crs, authority, _version, code]
+                if crs.eq_ignore_ascii_case("crs") && authority.eq_ignore_ascii_case("EPSG") =>
+            {
+                Ok(code.to_string())
+            }
+            _ => Err(ParseError::Parse(format!(
+                "invalid compound CRS URN `{s}`; expected urn:ogc:def:crs,crs:EPSG::CODE,crs:EPSG::CODE"
+            ))),
+        }
+    };
+    let Some((horizontal, vertical)) = components.split_once(',') else {
+        return Err(ParseError::Parse(format!(
+            "invalid compound CRS URN `{s}`; expected two components"
+        )));
+    };
+    lookup_epsg_compound(&component_code(horizontal)?, &component_code(vertical)?)
+}
+
+/// Parse `http(s)://www.opengis.net/def/crs/AUTHORITY/VERSION/CODE` and the
+/// legacy `http://www.opengis.net/gml/srs/epsg.xml#CODE` form.
+fn parse_ogc_crs_uri(s: &str) -> Result<CrsDef> {
+    let invalid = || {
+        ParseError::Parse(format!(
+            "invalid CRS URI `{s}`; expected http://www.opengis.net/def/crs/AUTHORITY/VERSION/CODE"
+        ))
+    };
+    let (_, rest) = s.split_once("://").ok_or_else(invalid)?;
+    let (host, path) = rest.split_once('/').ok_or_else(invalid)?;
+    if !host.eq_ignore_ascii_case("www.opengis.net") && !host.eq_ignore_ascii_case("opengis.net") {
+        return Err(invalid());
+    }
+    if let Some(code) = path.strip_prefix("gml/srs/epsg.xml#") {
+        return lookup_authority_crs("URI", s, "EPSG", code);
+    }
+    match path.trim_end_matches('/').split('/').collect::<Vec<_>>()[..] {
+        ["def", "crs", authority, _version, code] => {
+            lookup_authority_crs("URI", s, authority, code)
+        }
+        _ => Err(invalid()),
+    }
 }
 
 /// Create a [`Transform`] from two CRS strings in any format.
@@ -794,6 +900,70 @@ mod tests {
     #[test]
     fn unsupported_format_error() {
         assert!(parse_crs("not a crs").is_err());
+    }
+
+    #[test]
+    fn ogc_crs_identifiers_resolve_to_their_epsg_equivalents() {
+        for (identifier, epsg) in [
+            ("CRS84", 4326),
+            ("CRS:84", 4326),
+            ("OGC:CRS84", 4326),
+            ("urn:ogc:def:crs:OGC:1.3:CRS84", 4326),
+            ("urn:ogc:def:crs:OGC::CRS84", 4326),
+            ("URN:OGC:DEF:CRS:OGC:1.3:CRS84", 4326),
+            ("http://www.opengis.net/def/crs/OGC/1.3/CRS84", 4326),
+            ("https://www.opengis.net/def/crs/OGC/1.3/CRS84", 4326),
+            ("http://www.opengis.net/def/crs/EPSG/0/3857", 3857),
+            ("http://www.opengis.net/gml/srs/epsg.xml#4326", 4326),
+            ("CRS:83", 4269),
+            ("OGC:CRS27", 4267),
+        ] {
+            let crs = parse_crs(identifier).unwrap_or_else(|err| panic!("{identifier}: {err}"));
+            assert_eq!(crs.epsg(), epsg, "{identifier}");
+        }
+    }
+
+    #[test]
+    fn compound_identifiers_pair_a_horizontal_and_vertical_crs() {
+        for identifier in [
+            "EPSG:32618+5703",
+            "epsg:32618+5703",
+            "urn:ogc:def:crs,crs:EPSG::32618,crs:EPSG::5703",
+            "urn:ogc:def:crs,crs:EPSG:9.9:32618,crs:EPSG:9.9:5703",
+        ] {
+            let crs = parse_crs(identifier).unwrap_or_else(|err| panic!("{identifier}: {err}"));
+            assert!(crs.is_compound(), "{identifier}");
+            assert!(crs.is_projected(), "{identifier}");
+            assert_eq!(crs.base_geographic_crs_epsg(), Some(4326), "{identifier}");
+            assert_eq!(crs.vertical_crs().unwrap().epsg(), 5703, "{identifier}");
+        }
+    }
+
+    #[test]
+    fn invalid_identifiers_explain_what_is_wrong() {
+        for (identifier, expected) in [
+            ("EPSG:99999", "unknown EPSG code: 99999"),
+            ("EPSG:32618+99999", "unknown EPSG vertical code: 99999"),
+            ("EPSG:99999+5703", "unknown EPSG code: 99999"),
+            ("EPSG:abc+5703", "invalid EPSG code"),
+            ("EPSG:4979+5773", "cannot itself be compound"),
+            ("EPSG:4978+5773", "geocentric CRS cannot be used"),
+            ("urn:ogc:def:crs:OGC:1.3:CRS99", "unsupported OGC CRS code"),
+            (
+                "http://www.opengis.net/def/crs/FOO/0/1",
+                "only EPSG and OGC",
+            ),
+            ("http://example.com/def/crs/EPSG/0/4326", "invalid CRS URI"),
+            ("http://www.opengis.net/def/crs/EPSG/0", "invalid CRS URI"),
+            ("urn:ogc:def:crs,crs:EPSG::4326", "expected two components"),
+            (
+                "urn:ogc:def:crs,crs:EPSG:4326,crs:EPSG::5773",
+                "compound CRS URN",
+            ),
+        ] {
+            let err = parse_crs(identifier).unwrap_err().to_string();
+            assert!(err.contains(expected), "{identifier}: {err}");
+        }
     }
 
     #[test]
