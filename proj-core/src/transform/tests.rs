@@ -1700,7 +1700,7 @@ fn transform_bounds_covers_a_pole_inside_a_polar_extent() {
         .transform_bounds(extent, 21)
         .unwrap();
     assert_eq!(south.min_y, -90.0);
-    assert!((south.max_y - -52.3).abs() < 0.1, "{south:?}");
+    assert!((south.max_y - -52.3).abs() < 0.1);
     assert_eq!((south.min_x, south.max_x), (-180.0, 180.0));
 
     let north = Transform::new("EPSG:3413", "EPSG:4326")
@@ -1721,7 +1721,7 @@ fn transform_bounds_reaches_a_pole_on_the_boundary_without_spanning_longitude() 
         .unwrap();
 
     assert_eq!(bounds.min_y, -90.0);
-    assert!(bounds.max_x - bounds.min_x < 180.0, "{bounds:?}");
+    assert!(bounds.max_x - bounds.min_x < 180.0);
 }
 
 #[test]
@@ -1733,8 +1733,8 @@ fn transform_bounds_ignores_poles_outside_the_extent() {
         .transform_bounds(offset, 21)
         .unwrap();
 
-    assert!(bounds.min_y > -80.0, "{bounds:?}");
-    assert!(bounds.max_x - bounds.min_x < 180.0, "{bounds:?}");
+    assert!(bounds.min_y > -80.0);
+    assert!(bounds.max_x - bounds.min_x < 180.0);
 }
 
 #[test]
@@ -1775,7 +1775,7 @@ fn transform_bounds_leaves_projected_targets_unchanged() {
         .unwrap();
 
     assert!(bounds.is_valid());
-    assert!(bounds.min_y > -20_000_000.0, "{bounds:?}");
+    assert!(bounds.min_y > -20_000_000.0);
 }
 
 #[test]
