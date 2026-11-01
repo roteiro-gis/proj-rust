@@ -66,7 +66,7 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 - WKT1 `COMPD_CS` and WKT2 `COMPOUNDCRS` definitions with explicit vertical components.
 - Basic PROJJSON geographic, projected, geocentric, and compound CRS definitions.
 
-Custom definitions are accepted only when they map to this library's CRS model: longitude/east, latitude/north geographic axes in degrees with a Greenwich prime meridian; geocentric ECEF X/Y/Z axes in metres; and projected easting/northing axes in a single linear unit. EPSG-tagged WKT1 definitions may use the authority-native axis order; a pure axis permutation is canonicalized to the library's coordinate order after the embedded definition is validated against the registry. Unsupported custom axis order, axis directions, prime meridian, angular unit, projection, or vertical transformation semantics return errors.
+Custom definitions are accepted only when they map to this library's CRS model: longitude/east, latitude/north geographic axes in degrees with a Greenwich prime meridian; geocentric ECEF X/Y/Z axes in metres; and projected easting/northing axes in a single linear unit. EPSG-tagged WKT1 definitions may use the authority-native axis order; a pure axis permutation is canonicalized to the library's coordinate order after the embedded definition is validated against the registry. The axis order of a projected CRS's base geographic CRS does not affect its coordinates and is not restricted. Unsupported custom axis order, axis directions, prime meridian, angular unit, projection, or vertical transformation semantics return errors.
 
 ## Supported CRS
 

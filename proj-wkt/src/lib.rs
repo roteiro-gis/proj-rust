@@ -796,6 +796,42 @@ mod tests {
         assert!(parse_crs("not a crs").is_err());
     }
 
+    const PROJJSON_LATLON_BASE: &str = r#"{"name":"WGS 84","datum_ensemble":{"name":"World Geodetic System 1984 ensemble","members":[{"name":"World Geodetic System 1984 (Transit)"}],"ellipsoid":{"name":"WGS 84","semi_major_axis":6378137,"inverse_flattening":298.257223563},"accuracy":"2.0","id":{"authority":"EPSG","code":6326}},"coordinate_system":{"subtype":"ellipsoidal","axis":[{"name":"Geodetic latitude","abbreviation":"Lat","direction":"north","unit":"degree"},{"name":"Geodetic longitude","abbreviation":"Lon","direction":"east","unit":"degree"}]},"id":{"authority":"EPSG","code":4326}}"#;
+    const PROJJSON_UTM18N_CONVERSION: &str = r#"{"name":"UTM zone 18N","method":{"name":"Transverse Mercator","id":{"authority":"EPSG","code":9807}},"parameters":[{"name":"Latitude of natural origin","value":0,"unit":"degree"},{"name":"Longitude of natural origin","value":-75,"unit":"degree"},{"name":"Scale factor at natural origin","value":0.9996,"unit":"unity"},{"name":"False easting","value":500000,"unit":"metre"},{"name":"False northing","value":0,"unit":"metre"}]}"#;
+    const PROJJSON_EN_AXES: &str = r#"{"subtype":"Cartesian","axis":[{"name":"Easting","abbreviation":"E","direction":"east","unit":"metre"},{"name":"Northing","abbreviation":"N","direction":"north","unit":"metre"}]}"#;
+
+    fn projjson_utm18n(id: &str) -> String {
+        format!(
+            r#"{{"type":"ProjectedCRS","name":"WGS 84 / UTM zone 18N","base_crs":{PROJJSON_LATLON_BASE},"conversion":{PROJJSON_UTM18N_CONVERSION},"coordinate_system":{PROJJSON_EN_AXES}{id}}}"#
+        )
+    }
+
+    #[test]
+    fn projected_definitions_ignore_base_crs_axis_order() {
+        // PROJ writes `base_crs` latitude-first even for easting/northing CRSs.
+        let tagged = projjson_utm18n(r#","id":{"authority":"EPSG","code":32618}"#);
+        assert_eq!(parse_crs(&tagged).unwrap().epsg(), 32618);
+
+        let custom = parse_crs(&projjson_utm18n("")).unwrap();
+        assert_eq!(custom.epsg(), 0);
+        assert!(custom.is_projected());
+
+        let wkt1 = r#"PROJCS["custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AXIS["Latitude",NORTH],AXIS["Longitude",EAST]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH]]"#;
+        assert!(parse_crs(wkt1).unwrap().is_projected());
+    }
+
+    #[test]
+    fn projected_crs_axis_order_stays_strict() {
+        let swapped = projjson_utm18n("").replace(
+            PROJJSON_EN_AXES,
+            r#"{"subtype":"Cartesian","axis":[{"name":"Northing","abbreviation":"N","direction":"north","unit":"metre"},{"name":"Easting","abbreviation":"E","direction":"east","unit":"metre"}]}"#,
+        );
+        assert!(matches!(
+            parse_crs(&swapped),
+            Err(ParseError::UnsupportedSemantics(_))
+        ));
+    }
+
     #[test]
     fn transform_from_strings() {
         let t = transform_from_crs_strings("EPSG:4326", "EPSG:3857").unwrap();
