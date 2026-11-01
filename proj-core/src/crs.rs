@@ -1,3 +1,4 @@
+use crate::coord::{Bounds, Coord, Coord3D};
 use crate::datum::Datum;
 use crate::error::{Error, Result};
 use crate::operation::OperationDomain;
@@ -224,13 +225,43 @@ impl CrsDef {
         }
     }
 
-    /// Returns true when two CRS definitions map to the same internal semantics.
+    /// Order of the horizontal axes, or `None` for geocentric X/Y/Z.
+    pub fn axis_order(&self) -> Option<AxisOrder> {
+        match self {
+            CrsDef::Geographic(g) => Some(g.axis_order()),
+            CrsDef::Geocentric(_) => None,
+            CrsDef::Projected(p) => Some(p.axis_order()),
+            CrsDef::Compound(c) => Some(c.horizontal().axis_order()),
+        }
+    }
+
+    /// Return this definition with coordinates in `axis_order`.
+    ///
+    /// This is the explicit way to read a latitude-first definition as
+    /// longitude-first, or the reverse. Geocentric definitions are unchanged.
+    pub fn with_axis_order(self, axis_order: AxisOrder) -> Self {
+        match self {
+            CrsDef::Geographic(g) => CrsDef::Geographic(g.with_axis_order(axis_order)),
+            CrsDef::Geocentric(_) => self,
+            CrsDef::Projected(p) => CrsDef::Projected(p.with_axis_order(axis_order)),
+            CrsDef::Compound(c) => {
+                let horizontal = c.horizontal.with_axis_order(axis_order);
+                CrsDef::Compound(Box::new(CompoundCrsDef { horizontal, ..*c }))
+            }
+        }
+    }
+
+    /// Returns true when two CRS definitions map to the same internal
+    /// semantics, including the order of their coordinates.
     pub fn semantically_equivalent(&self, other: &Self) -> bool {
         match (self, other) {
-            (CrsDef::Geographic(a), CrsDef::Geographic(b)) => a.datum().same_datum(b.datum()),
+            (CrsDef::Geographic(a), CrsDef::Geographic(b)) => {
+                a.axis_order() == b.axis_order() && a.datum().same_datum(b.datum())
+            }
             (CrsDef::Geocentric(a), CrsDef::Geocentric(b)) => a.datum().same_datum(b.datum()),
             (CrsDef::Projected(a), CrsDef::Projected(b)) => {
-                a.datum().same_datum(b.datum())
+                a.axis_order() == b.axis_order()
+                    && a.datum().same_datum(b.datum())
                     && approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
                     && projection_methods_equivalent(&a.method(), &b.method())
             }
@@ -240,17 +271,79 @@ impl CrsDef {
     }
 }
 
-/// Definition of a geographic CRS (longitude, latitude in degrees).
+/// Order of the horizontal axes in a CRS's coordinates.
+///
+/// A [`Coord`]'s `x` is a CRS's first axis and `y` its second. Registry
+/// definitions are [`AxisOrder::EastNorth`] whatever order the authority
+/// assigns; a parsed definition carries the order it declares.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum AxisOrder {
+    /// Longitude or easting first.
+    #[default]
+    EastNorth,
+    /// Latitude or northing first.
+    NorthEast,
+}
+
+impl AxisOrder {
+    /// Reorder between this axis order and east/north, in either direction.
+    pub(crate) fn reorder(self, coord: Coord) -> Coord {
+        match self {
+            Self::EastNorth => coord,
+            Self::NorthEast => Coord::new(coord.y, coord.x),
+        }
+    }
+
+    /// [`Self::reorder`] for a coordinate with a height, which keeps its place.
+    pub(crate) fn reorder_3d(self, coord: Coord3D) -> Coord3D {
+        match self {
+            Self::EastNorth => coord,
+            Self::NorthEast => Coord3D::new(coord.y, coord.x, coord.z),
+        }
+    }
+
+    /// [`Self::reorder`] for a bounding box.
+    pub(crate) fn reorder_bounds(self, bounds: Bounds) -> Bounds {
+        match self {
+            Self::EastNorth => bounds,
+            Self::NorthEast => Bounds {
+                min_x: bounds.min_y,
+                min_y: bounds.min_x,
+                max_x: bounds.max_y,
+                max_y: bounds.max_x,
+            },
+        }
+    }
+}
+
+/// Definition of a geographic CRS (longitude and latitude in degrees, in its
+/// [`AxisOrder`]).
 #[derive(Debug, Clone)]
 pub struct GeographicCrsDef {
     epsg: u32,
     datum: Datum,
+    axis_order: AxisOrder,
     name: &'static str,
 }
 
 impl GeographicCrsDef {
     pub const fn new(epsg: u32, datum: Datum, name: &'static str) -> Self {
-        Self { epsg, datum, name }
+        Self {
+            epsg,
+            datum,
+            axis_order: AxisOrder::EastNorth,
+            name,
+        }
+    }
+
+    /// Return this definition with coordinates in `axis_order`.
+    pub fn with_axis_order(mut self, axis_order: AxisOrder) -> Self {
+        self.axis_order = axis_order;
+        self
+    }
+
+    pub const fn axis_order(&self) -> AxisOrder {
+        self.axis_order
     }
 
     pub const fn epsg(&self) -> u32 {
@@ -315,6 +408,7 @@ pub struct ProjectedCrsDef {
     datum: Datum,
     method: ProjectionMethod,
     linear_unit: LinearUnit,
+    axis_order: AxisOrder,
     name: &'static str,
 }
 
@@ -343,8 +437,19 @@ impl ProjectedCrsDef {
             datum,
             method,
             linear_unit,
+            axis_order: AxisOrder::EastNorth,
             name,
         }
+    }
+
+    /// Return this definition with coordinates in `axis_order`.
+    pub fn with_axis_order(mut self, axis_order: AxisOrder) -> Self {
+        self.axis_order = axis_order;
+        self
+    }
+
+    pub const fn axis_order(&self) -> AxisOrder {
+        self.axis_order
     }
 
     pub const fn epsg(&self) -> u32 {
@@ -501,11 +606,29 @@ impl HorizontalCrsDef {
         }
     }
 
+    pub fn axis_order(&self) -> AxisOrder {
+        match self {
+            Self::Geographic(g) => g.axis_order(),
+            Self::Projected(p) => p.axis_order(),
+        }
+    }
+
+    /// Return this definition with coordinates in `axis_order`.
+    pub fn with_axis_order(self, axis_order: AxisOrder) -> Self {
+        match self {
+            Self::Geographic(g) => Self::Geographic(g.with_axis_order(axis_order)),
+            Self::Projected(p) => Self::Projected(p.with_axis_order(axis_order)),
+        }
+    }
+
     pub fn semantically_equivalent(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Geographic(a), Self::Geographic(b)) => a.datum().same_datum(b.datum()),
+            (Self::Geographic(a), Self::Geographic(b)) => {
+                a.axis_order() == b.axis_order() && a.datum().same_datum(b.datum())
+            }
             (Self::Projected(a), Self::Projected(b)) => {
-                a.datum().same_datum(b.datum())
+                a.axis_order() == b.axis_order()
+                    && a.datum().same_datum(b.datum())
                     && approx_eq(a.linear_unit_to_meter(), b.linear_unit_to_meter())
                     && projection_methods_equivalent(&a.method(), &b.method())
             }

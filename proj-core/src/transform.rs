@@ -1,7 +1,7 @@
 use crate::coord::{
     Bounds, Coord, Coord3D, Transformable, Transformable3D, MAX_BOUNDS_DENSIFY_POINTS,
 };
-use crate::crs::{CrsDef, LinearUnit};
+use crate::crs::{AxisOrder, CrsDef, LinearUnit};
 use crate::error::{Error, Result};
 use crate::grid::{GridError, GridRuntime};
 use crate::operation::{
@@ -78,6 +78,10 @@ fn non_metre_height_unit(crs: &CrsDef) -> Option<LinearUnit> {
 pub struct Transform {
     source: CrsDef,
     target: CrsDef,
+    /// Pipelines run in east/north. These are the only place the CRS orders
+    /// apply, at the coordinate boundary in `convert_coord` and its siblings.
+    source_axes: AxisOrder,
+    target_axes: AxisOrder,
     selected_operation_kind: SelectedOperationKind,
     selected_direction: OperationStepDirection,
     selected_operation: std::sync::Arc<CoordinateOperationMetadata>,
@@ -275,6 +279,8 @@ impl Transform {
         Ok(Self {
             source: from.clone(),
             target: to.clone(),
+            source_axes: from.axis_order().unwrap_or_default(),
+            target_axes: to.axis_order().unwrap_or_default(),
             selected_operation_kind: selected.operation,
             selected_direction: selected.direction,
             selected_operation: std::sync::Arc::new(selected.metadata),
@@ -486,6 +492,8 @@ impl Transform {
         Ok(Self {
             source: self.target.clone(),
             target: self.source.clone(),
+            source_axes: self.target_axes,
+            target_axes: self.source_axes,
             selected_operation_kind,
             selected_direction,
             selected_operation: std::sync::Arc::new(selected_operation),
@@ -498,6 +506,9 @@ impl Transform {
     }
 
     /// Reproject a 2D bounding box by sampling its perimeter.
+    ///
+    /// `bounds` is in the source CRS's axis order and the result in the
+    /// target's, so `min_x` is the minimum of each CRS's first axis.
     ///
     /// A geographic target also covers any pole inside a projected source
     /// extent: the result reaches that pole and spans every longitude, although
@@ -513,13 +524,16 @@ impl Transform {
             ));
         }
 
+        let bounds = self.source_axes.reorder_bounds(bounds);
         self.transform_valid_bounds(bounds, densify_points)
+            .map(|bounds| self.target_axes.reorder_bounds(bounds))
     }
 
     /// Reproject a geographic bounding box that crosses the antimeridian.
     ///
     /// `bounds` is interpreted as west/south/east/north in source geographic
-    /// degrees and must satisfy `west > east`. Projected and normal
+    /// degrees, in the source CRS's axis order, and must satisfy `west > east`.
+    /// The result is in the target CRS's axis order. Projected and normal
     /// non-wrapped bounds should use [`Self::transform_bounds`].
     ///
     /// `densify_points` is the number of intermediate samples added per edge
@@ -534,6 +548,7 @@ impl Transform {
                 "wrapped geographic bounds require a geographic source CRS".into(),
             ));
         }
+        let bounds = self.source_axes.reorder_bounds(bounds);
         validate_wrapped_geographic_transform_bounds(bounds)?;
 
         let west_segment = Bounds::new(bounds.min_x, bounds.min_y, 180.0, bounds.max_y);
@@ -542,9 +557,10 @@ impl Transform {
         let east_transformed = self.transform_valid_bounds(east_segment, densify_points)?;
         transformed.expand_to_include(Coord::new(east_transformed.min_x, east_transformed.min_y));
         transformed.expand_to_include(Coord::new(east_transformed.max_x, east_transformed.max_y));
-        Ok(transformed)
+        Ok(self.target_axes.reorder_bounds(transformed))
     }
 
+    /// Sample `bounds` through the pipelines, east/north on both sides.
     fn transform_valid_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
         let segments = bounds_densify_segments(densify_points)?;
 
@@ -560,7 +576,7 @@ impl Transform {
                 Coord::new(bounds.min_x, y),
                 Coord::new(bounds.max_x, y),
             ] {
-                let coord = self.convert_coord(sample)?;
+                let coord = self.convert_east_north(sample)?;
                 if let Some(accum) = &mut transformed {
                     accum.expand_to_include(coord);
                 } else {
@@ -640,28 +656,41 @@ impl Transform {
         ))
     }
 
-    fn convert_coord(&self, c: Coord) -> Result<Coord> {
+    fn convert_east_north(&self, c: Coord) -> Result<Coord> {
         let c = Coord3D::new(c.x, c.y, 0.0);
         self.first_covering(|pipeline| execute_pipeline_xy(pipeline, c))
     }
 
+    fn convert_coord(&self, c: Coord) -> Result<Coord> {
+        self.convert_east_north(self.source_axes.reorder(c))
+            .map(|coord| self.target_axes.reorder(coord))
+    }
+
     fn convert_coord3d(&self, c: Coord3D) -> Result<Coord3D> {
+        let c = self.source_axes.reorder_3d(c);
         self.first_covering(|pipeline| self.execute_pipeline_coord3d(pipeline, c))
+            .map(|coord| self.target_axes.reorder_3d(coord))
     }
 
     fn convert_coord_with_diagnostics(&self, c: Coord) -> Result<TransformOutcome<Coord>> {
+        let c = self.source_axes.reorder(c);
         let c = Coord3D::new(c.x, c.y, 0.0);
-        self.first_covering_with_diagnostics(|pipeline| {
+        let mut outcome = self.first_covering_with_diagnostics(|pipeline| {
             let vertical = vertical_diagnostics(VerticalTransformAction::None, None, None, None);
             Ok((execute_pipeline_xy(pipeline, c)?, vertical))
-        })
+        })?;
+        outcome.coord = self.target_axes.reorder(outcome.coord);
+        Ok(outcome)
     }
 
     fn convert_coord3d_with_diagnostics(&self, c: Coord3D) -> Result<TransformOutcome<Coord3D>> {
-        self.first_covering_with_diagnostics(|pipeline| {
+        let c = self.source_axes.reorder_3d(c);
+        let mut outcome = self.first_covering_with_diagnostics(|pipeline| {
             let outcome = self.execute_pipeline(pipeline, c)?;
             Ok((outcome.coord, outcome.vertical))
-        })
+        })?;
+        outcome.coord = self.target_axes.reorder_3d(outcome.coord);
+        Ok(outcome)
     }
 
     /// True when this pipeline changes ellipsoidal height and no vertical CRS

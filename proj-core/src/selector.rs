@@ -810,8 +810,14 @@ fn resolve_area_point(
             validate_geographic_area_point(point)?;
             Ok(point)
         }
-        crate::operation::AreaOfInterestCrs::SourceCrs => geographic_from_crs_point(source, point),
-        crate::operation::AreaOfInterestCrs::TargetCrs => geographic_from_crs_point(target, point),
+        crate::operation::AreaOfInterestCrs::SourceCrs => geographic_from_crs_point(
+            source,
+            source.axis_order().unwrap_or_default().reorder(point),
+        ),
+        crate::operation::AreaOfInterestCrs::TargetCrs => geographic_from_crs_point(
+            target,
+            target.axis_order().unwrap_or_default().reorder(point),
+        ),
     }
 }
 
@@ -834,6 +840,7 @@ fn resolve_area_bounds(
         crate::operation::AreaOfInterestCrs::SourceCrs => source,
         crate::operation::AreaOfInterestCrs::TargetCrs => target,
     };
+    let bounds = crs.axis_order().unwrap_or_default().reorder_bounds(bounds);
 
     if crs.is_geographic() {
         validate_geographic_area_bounds(bounds)?;

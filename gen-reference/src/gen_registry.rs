@@ -13,7 +13,17 @@ use std::f64::consts::PI;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-type ProjectedCrsRow = (u32, u32, u32, String, String, i64, Option<i64>, Option<f64>);
+type ProjectedCrsRow = (
+    u32,
+    u32,
+    u32,
+    String,
+    String,
+    i64,
+    Option<i64>,
+    Option<f64>,
+    u32,
+);
 
 const EPSG_BIN_FILE: &str = "epsg.bin";
 const PROVENANCE_FILE: &str = "epsg.provenance.json";
@@ -134,20 +144,21 @@ fn walkdir(dir: &Path, name: &str) -> Vec<PathBuf> {
 // The container layout is defined once in `proj-epsg-format`, shared with
 // the `proj-core` reader.
 use proj_epsg_format::{
+    AXIS_ORDER_EAST_NORTH, AXIS_ORDER_NORTH_EAST, AXIS_ORDER_UNSUPPORTED,
     COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_IDENTITY, DATUM_SHIFT_UNKNOWN,
     ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED, FLAG_SUPERSEDED,
-    GEOCENTRIC_CRS_RECORD_BASE_SIZE, GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF,
-    GRID_FORMAT_GTX, GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR, HORIZONTAL_CRS_GEOGRAPHIC,
-    HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS, METHOD_AMERICAN_POLYCONIC,
-    METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER, METHOD_COLOMBIA_URBAN,
-    METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM, METHOD_HOTINE_OBLIQUE_MERCATOR_A,
-    METHOD_HOTINE_OBLIQUE_MERCATOR_B, METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED,
-    METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE, METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC,
-    METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN, METHOD_MERCATOR, METHOD_OBLIQUE_STEREO,
-    METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C, METHOD_TRANSVERSE_MERCATOR,
-    METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GEOCENTRIC_AFFINE, OP_GRID_SHIFT, OP_HELMERT,
-    PROJ_CRS_RECORD_BASE_SIZE, VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL,
-    VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
+    GEOCENTRIC_CRS_RECORD_BASE_SIZE, GEO_CRS_AXIS_ORDER_OFFSET, GEO_CRS_RECORD_BASE_SIZE,
+    GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR,
+    HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS,
+    METHOD_AMERICAN_POLYCONIC, METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER,
+    METHOD_COLOMBIA_URBAN, METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM,
+    METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
+    METHOD_KROVAK_MODIFIED_NORTH_ORIENTATED, METHOD_KROVAK_NORTH_ORIENTATED, METHOD_LABORDE,
+    METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
+    METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
+    METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GEOCENTRIC_AFFINE,
+    OP_GRID_SHIFT, OP_HELMERT, PROJ_CRS_AXIS_ORDER_OFFSET, PROJ_CRS_RECORD_BASE_SIZE, VERSION,
+    VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
     VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
@@ -265,9 +276,59 @@ struct DatumInfo {
     helmert: [f64; 7],
 }
 
+/// Authority axis order tag of each EPSG coordinate system.
+fn load_axis_orders(conn: &Connection) -> BTreeMap<u32, u8> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT a1.coordinate_system_code, a1.orientation, a1.abbrev, a2.orientation
+             FROM axis a1
+             JOIN axis a2
+               ON a2.coordinate_system_auth_name = a1.coordinate_system_auth_name
+              AND a2.coordinate_system_code = a1.coordinate_system_code
+              AND a2.coordinate_system_order = 2
+             WHERE a1.coordinate_system_auth_name = 'EPSG'
+               AND a1.coordinate_system_order = 1",
+        )
+        .unwrap();
+    stmt.query_map([], |row| {
+        let code: u32 = row.get(0)?;
+        let first: String = row.get(1)?;
+        let abbreviation: String = row.get(2)?;
+        let second: String = row.get(3)?;
+        Ok((code, axis_order_tag(&first, &abbreviation, &second)))
+    })
+    .unwrap()
+    .map(|row| row.unwrap())
+    .collect()
+}
+
+/// Classify a coordinate system's first two axes.
+///
+/// Polar systems orient both axes along meridians, so `North along 0°E` says
+/// nothing about which axis plays northing; the abbreviation does. `X` and `Y`
+/// there are the projection's own x and y, which are east/north order.
+fn axis_order_tag(first: &str, first_abbreviation: &str, second: &str) -> u8 {
+    let along_meridian = |orientation: &str| {
+        orientation.starts_with("North along ") || orientation.starts_with("South along ")
+    };
+    match (first, second) {
+        ("east", "north") => AXIS_ORDER_EAST_NORTH,
+        ("north", "east") => AXIS_ORDER_NORTH_EAST,
+        _ if along_meridian(first) && along_meridian(second) => {
+            if first_abbreviation == "N" {
+                AXIS_ORDER_NORTH_EAST
+            } else {
+                AXIS_ORDER_EAST_NORTH
+            }
+        }
+        _ => AXIS_ORDER_UNSUPPORTED,
+    }
+}
+
 struct GeoCrs {
     code: u32,
     datum_code: u32,
+    axis_order: u8,
     name: String,
 }
 
@@ -283,6 +344,7 @@ struct ProjCrs {
     base_geographic_crs_code: u32,
     datum_code: u32,
     method_id: u8,
+    axis_order: u8,
     linear_unit_to_meter: f64,
     params: [f64; 7],
     name: String,
@@ -2137,19 +2199,22 @@ fn main() {
         }
     }
 
+    let axis_orders = load_axis_orders(&conn);
     let geo_crs: Vec<GeoCrs> = {
         let mut stmt = conn
             .prepare(
-                "SELECT code, datum_code, name
+                "SELECT code, datum_code, name, coordinate_system_code
                  FROM geodetic_crs
                  WHERE auth_name='EPSG' AND type='geographic 2D' AND deprecated=0
                  ORDER BY code",
             )
             .unwrap();
         stmt.query_map([], |row| {
+            let coordinate_system: u32 = row.get(3)?;
             Ok(GeoCrs {
                 code: row.get(0)?,
                 datum_code: row.get(1)?,
+                axis_order: axis_orders[&coordinate_system],
                 name: row.get(2)?,
             })
         })
@@ -2173,7 +2238,8 @@ fn main() {
                         pc.conversion_auth_name,
                         pc.conversion_code,
                         a.uom_code,
-                        u.conv_factor
+                        u.conv_factor,
+                        pc.coordinate_system_code
                  FROM projected_crs pc
                  JOIN geodetic_crs gc
                    ON gc.auth_name = pc.geodetic_crs_auth_name
@@ -2202,6 +2268,7 @@ fn main() {
                     row.get(5)?,
                     row.get(6)?,
                     row.get(7)?,
+                    row.get(8)?,
                 ))
             })
             .unwrap()
@@ -2217,6 +2284,7 @@ fn main() {
             conv_code,
             axis_uom_code,
             axis_unit_factor,
+            coordinate_system_code,
         ) in rows
         {
             let linear_unit_to_meter = match (axis_uom_code, axis_unit_factor) {
@@ -2273,6 +2341,7 @@ fn main() {
                 base_geographic_crs_code,
                 datum_code,
                 method_id,
+                axis_order: axis_orders[&coordinate_system_code],
                 linear_unit_to_meter,
                 params,
                 name,
@@ -3189,6 +3258,7 @@ fn main() {
         let mut rec = [0u8; GEO_CRS_RECORD_BASE_SIZE];
         rec[0..4].copy_from_slice(&crs.code.to_le_bytes());
         rec[4..8].copy_from_slice(&crs.datum_code.to_le_bytes());
+        rec[GEO_CRS_AXIS_ORDER_OFFSET] = crs.axis_order;
         buf.extend_from_slice(&rec);
         write_string_u16(&mut buf, &crs.name);
     }
@@ -3199,6 +3269,7 @@ fn main() {
         rec[4..8].copy_from_slice(&crs.base_geographic_crs_code.to_le_bytes());
         rec[8..12].copy_from_slice(&crs.datum_code.to_le_bytes());
         rec[12] = crs.method_id;
+        rec[PROJ_CRS_AXIS_ORDER_OFFSET] = crs.axis_order;
         rec[16..24].copy_from_slice(&canonical_f64(crs.linear_unit_to_meter).to_le_bytes());
         for (index, value) in crs.params.iter().enumerate() {
             let offset = 24 + index * 8;

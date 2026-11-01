@@ -76,8 +76,8 @@ pub use coord::{
     Bounds, Coord, Coord3D, Transformable, Transformable3D, MAX_BOUNDS_DENSIFY_POINTS,
 };
 pub use crs::{
-    CompoundCrsDef, CrsDef, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
-    ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
+    AxisOrder, CompoundCrsDef, CrsDef, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
+    LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
 };
 pub use datum::{Datum, DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams};
 pub use ellipsoid::Ellipsoid;
@@ -96,11 +96,11 @@ pub use operation::{
     VerticalTransformAction, VerticalTransformDiagnostics,
 };
 pub use registry::{
-    lookup_authority_code, lookup_datum_code_for_crs, lookup_datum_code_for_name,
-    lookup_datum_epsg, lookup_ellipsoid_code_for_datum, lookup_epsg, lookup_operation,
-    lookup_vertical_epsg, lookup_vertical_grid_operation, operation_candidates_between,
-    operation_candidates_between_with_selection_options, operations_between,
-    vertical_grid_operations_between,
+    lookup_authority_axis_order, lookup_authority_code, lookup_datum_code_for_crs,
+    lookup_datum_code_for_name, lookup_datum_epsg, lookup_ellipsoid_code_for_datum, lookup_epsg,
+    lookup_operation, lookup_vertical_epsg, lookup_vertical_grid_operation,
+    operation_candidates_between, operation_candidates_between_with_selection_options,
+    operations_between, vertical_grid_operations_between,
 };
 pub use transform::Transform;
 #[cfg(feature = "geo-types")]

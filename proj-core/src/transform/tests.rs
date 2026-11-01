@@ -2470,3 +2470,204 @@ fn null_helmert_etrs89_to_wgs84_is_a_noop() {
         (5.387203, 52.155172)
     );
 }
+
+fn latitude_first(code: u32) -> CrsDef {
+    registry::lookup_epsg(code)
+        .unwrap()
+        .with_axis_order(AxisOrder::NorthEast)
+}
+
+fn east_north(code: u32) -> CrsDef {
+    registry::lookup_epsg(code).unwrap()
+}
+
+#[test]
+fn every_coordinate_path_honors_the_source_and_target_axis_order() {
+    let reference = Transform::from_crs_defs(&east_north(4326), &east_north(3857)).unwrap();
+    let (x, y) = reference.convert((5.0, 52.0)).unwrap();
+    let input = Coord::new(52.0, 5.0);
+    let swapped_output = Coord::new(y, x);
+
+    let forward = Transform::from_crs_defs(&latitude_first(4326), &east_north(3857)).unwrap();
+    let both = Transform::from_crs_defs(&latitude_first(4326), &latitude_first(3857)).unwrap();
+
+    assert_eq!(forward.convert(input).unwrap(), Coord::new(x, y));
+    assert_eq!(both.convert(input).unwrap(), swapped_output);
+    assert_eq!(both.convert_batch(&[input]).unwrap(), [swapped_output]);
+    assert_eq!(
+        both.convert_with_diagnostics(input).unwrap().coord,
+        swapped_output
+    );
+
+    let mut in_place = [input];
+    both.convert_coords_in_place(&mut in_place).unwrap();
+    assert_eq!(in_place, [swapped_output]);
+
+    let mut output = [Coord::new(0.0, 0.0)];
+    both.convert_coords_into(&[input], &mut output).unwrap();
+    assert_eq!(output, [swapped_output]);
+
+    #[cfg(feature = "rayon")]
+    assert_eq!(
+        both.convert_batch_parallel(&[input]).unwrap(),
+        [swapped_output]
+    );
+
+    let input_3d = Coord3D::new(52.0, 5.0, 100.0);
+    let output_3d = Coord3D::new(y, x, 100.0);
+    assert_eq!(both.convert_3d(input_3d).unwrap(), output_3d);
+    assert_eq!(both.convert_batch_3d(&[input_3d]).unwrap(), [output_3d]);
+    assert_eq!(
+        both.convert_3d_with_diagnostics(input_3d).unwrap().coord,
+        output_3d
+    );
+
+    let mut in_place_3d = [input_3d];
+    both.convert_coords_3d_in_place(&mut in_place_3d).unwrap();
+    assert_eq!(in_place_3d, [output_3d]);
+
+    let mut output_3d_slice = [Coord3D::new(0.0, 0.0, 0.0)];
+    both.convert_coords_3d_into(&[input_3d], &mut output_3d_slice)
+        .unwrap();
+    assert_eq!(output_3d_slice, [output_3d]);
+
+    let inverse = both.inverse().unwrap();
+    let back = inverse.convert(swapped_output).unwrap();
+    assert!((back.x - 52.0).abs() < 1e-9 && (back.y - 5.0).abs() < 1e-9);
+    assert_eq!(
+        inverse.source_crs().axis_order(),
+        Some(AxisOrder::NorthEast)
+    );
+}
+
+#[test]
+fn the_same_crs_in_another_axis_order_is_a_swap() {
+    let swap = Transform::from_crs_defs(&east_north(4326), &latitude_first(4326)).unwrap();
+    assert_eq!(swap.convert((5.0, 52.0)).unwrap(), (52.0, 5.0));
+}
+
+#[test]
+fn geocentric_endpoints_have_no_axis_order_to_apply() {
+    let crs = east_north(4978);
+    assert_eq!(crs.axis_order(), None);
+    assert_eq!(crs.with_axis_order(AxisOrder::NorthEast).axis_order(), None);
+
+    let reference = Transform::from_crs_defs(&east_north(4979), &east_north(4978)).unwrap();
+    let transform = Transform::from_crs_defs(&latitude_first(4979), &east_north(4978)).unwrap();
+    assert_eq!(
+        transform.convert_3d((52.0, 5.0, 10.0)).unwrap(),
+        reference.convert_3d((5.0, 52.0, 10.0)).unwrap()
+    );
+}
+
+#[test]
+fn bounds_follow_each_crs_axis_order() {
+    let lon_lat = Bounds::new(4.0, 51.0, 6.0, 53.0);
+    let lat_lon = Bounds::new(51.0, 4.0, 53.0, 6.0);
+    let reference = Transform::from_crs_defs(&east_north(4326), &east_north(3857))
+        .unwrap()
+        .transform_bounds(lon_lat, 8)
+        .unwrap();
+
+    let transform = Transform::from_crs_defs(&latitude_first(4326), &latitude_first(3857)).unwrap();
+    let result = transform.transform_bounds(lat_lon, 8).unwrap();
+    assert_eq!(
+        result,
+        Bounds::new(
+            reference.min_y,
+            reference.min_x,
+            reference.max_y,
+            reference.max_x
+        )
+    );
+}
+
+#[test]
+fn interior_poles_are_found_through_a_northing_first_extent() {
+    let extent = Bounds::new(-1_000_000.0, -1_000_000.0, 1_000_000.0, 1_000_000.0);
+    let transform = Transform::from_crs_defs(&latitude_first(3031), &latitude_first(4326)).unwrap();
+    let bounds = transform.transform_bounds(extent, 8).unwrap();
+    // Latitude first on the way out: min_x is the southern limit.
+    assert_eq!(bounds.min_x, -90.0);
+    assert_eq!((bounds.min_y, bounds.max_y), (-180.0, 180.0));
+}
+
+#[test]
+fn wrapped_bounds_follow_each_crs_axis_order() {
+    let wrapped = Bounds::new(170.0, -10.0, -170.0, 10.0);
+    let reference = Transform::from_crs_defs(&east_north(4326), &east_north(3857))
+        .unwrap()
+        .transform_geographic_wrapped_bounds(wrapped, 8)
+        .unwrap();
+
+    let transform = Transform::from_crs_defs(&latitude_first(4326), &east_north(3857)).unwrap();
+    let result = transform
+        .transform_geographic_wrapped_bounds(Bounds::new(-10.0, 170.0, 10.0, -170.0), 8)
+        .unwrap();
+    assert_eq!(result, reference);
+
+    let to_latitude_first =
+        Transform::from_crs_defs(&east_north(4326), &latitude_first(3857)).unwrap();
+    assert_eq!(
+        to_latitude_first
+            .transform_geographic_wrapped_bounds(wrapped, 8)
+            .unwrap(),
+        Bounds::new(
+            reference.min_y,
+            reference.min_x,
+            reference.max_y,
+            reference.max_x
+        )
+    );
+}
+
+#[test]
+fn inverse_exchanges_the_axis_orders() {
+    let forward = Transform::from_crs_defs(&latitude_first(4326), &east_north(3857)).unwrap();
+    let projected = forward.convert((52.0, 5.0)).unwrap();
+    let (latitude, longitude) = forward.inverse().unwrap().convert(projected).unwrap();
+    assert!((latitude - 52.0).abs() < 1e-9 && (longitude - 5.0).abs() < 1e-9);
+}
+
+#[test]
+fn source_crs_areas_of_interest_follow_the_axis_order() {
+    // EPSG:4267 to EPSG:4326 picks by area, so a swapped point would select an
+    // operation for the wrong place.
+    let select = |source: CrsDef, area: AreaOfInterest| {
+        Transform::from_crs_defs_with_selection_options(
+            &source,
+            &east_north(4326),
+            SelectionOptions::new().with_area_of_interest(area),
+        )
+        .unwrap()
+        .selected_operation()
+        .id
+    };
+
+    let florida = select(
+        east_north(4267),
+        AreaOfInterest::source_crs_point(Coord::new(-81.5, 28.5)),
+    );
+    let same_place = select(
+        latitude_first(4267),
+        AreaOfInterest::source_crs_point(Coord::new(28.5, -81.5)),
+    );
+    assert_eq!(florida, same_place);
+
+    let bounds = select(
+        east_north(4267),
+        AreaOfInterest::source_crs_bounds(Bounds::new(-82.0, 28.0, -81.0, 29.0)),
+    );
+    let same_bounds = select(
+        latitude_first(4267),
+        AreaOfInterest::source_crs_bounds(Bounds::new(28.0, -82.0, 29.0, -81.0)),
+    );
+    assert_eq!(bounds, same_bounds);
+}
+
+#[test]
+fn semantic_equivalence_sees_the_axis_order() {
+    assert!(!east_north(4326).semantically_equivalent(&latitude_first(4326)));
+    assert!(latitude_first(4326).semantically_equivalent(&latitude_first(4326)));
+    assert!(!east_north(3857).semantically_equivalent(&latitude_first(3857)));
+}

@@ -1,4 +1,4 @@
-use crate::crs::{CrsDef, VerticalCrsDef};
+use crate::crs::{AxisOrder, CrsDef, VerticalCrsDef};
 use crate::datum::Datum;
 use crate::epsg_db;
 use crate::error::{Error, Result};
@@ -17,6 +17,19 @@ use crate::selector;
 /// Returns `None` if the EPSG code is not in the database.
 pub fn lookup_epsg(code: u32) -> Option<CrsDef> {
     epsg_db::lookup(code)
+}
+
+/// Look up the order EPSG assigns a CRS's horizontal axes.
+///
+/// [`lookup_epsg`] definitions are always east/north. This reports the
+/// authority's own order, for identifiers defined to use it such as OGC URNs:
+/// `EPSG:4326` is [`AxisOrder::NorthEast`] here. A compound CRS reports its
+/// horizontal component.
+///
+/// Returns `None` for an unknown or geocentric code, and for axes [`AxisOrder`]
+/// cannot state, which in the embedded registry means `EPSG:8044` and `EPSG:8045`.
+pub fn lookup_authority_axis_order(code: u32) -> Option<AxisOrder> {
+    epsg_db::lookup_authority_axis_order(code)
 }
 
 /// Look up the EPSG geodetic datum code for a datum name or alias.
@@ -372,7 +385,7 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 1_102_477);
+        assert_eq!(value["output"]["byte_len"], 1_103_075);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
         assert_eq!(value["counts"]["geocentric_crs"], 217);

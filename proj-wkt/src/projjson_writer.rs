@@ -7,7 +7,7 @@
 //! asserted by tests and fuzzing.
 
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
     LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
 };
 use serde_json::{json, Map, Value};
@@ -131,20 +131,22 @@ fn geographic_crs_value(
     geographic: &GeographicCrsDef,
     ellipsoidal_height_unit: Option<LinearUnit>,
 ) -> Result<Value> {
-    let mut axes = vec![
-        json!({
-            "name": "Geodetic longitude",
-            "abbreviation": "Lon",
-            "direction": "east",
-            "unit": "degree",
-        }),
-        json!({
-            "name": "Geodetic latitude",
-            "abbreviation": "Lat",
-            "direction": "north",
-            "unit": "degree",
-        }),
-    ];
+    let longitude = json!({
+        "name": "Geodetic longitude",
+        "abbreviation": "Lon",
+        "direction": "east",
+        "unit": "degree",
+    });
+    let latitude = json!({
+        "name": "Geodetic latitude",
+        "abbreviation": "Lat",
+        "direction": "north",
+        "unit": "degree",
+    });
+    let mut axes = match geographic.axis_order() {
+        AxisOrder::EastNorth => vec![longitude, latitude],
+        AxisOrder::NorthEast => vec![latitude, longitude],
+    };
     if let Some(unit) = ellipsoidal_height_unit {
         axes.push(json!({
             "name": "Ellipsoidal height",
@@ -226,25 +228,25 @@ fn projected_crs_value(projected: &ProjectedCrsDef) -> Result<Value> {
             "parameters": parameters,
         }),
     );
+    let easting = json!({
+        "name": "Easting",
+        "abbreviation": "E",
+        "direction": "east",
+        "unit": linear_unit_value(projected.linear_unit()),
+    });
+    let northing = json!({
+        "name": "Northing",
+        "abbreviation": "N",
+        "direction": "north",
+        "unit": linear_unit_value(projected.linear_unit()),
+    });
+    let axes = match projected.axis_order() {
+        AxisOrder::EastNorth => [easting, northing],
+        AxisOrder::NorthEast => [northing, easting],
+    };
     object.insert(
         "coordinate_system".into(),
-        json!({
-            "subtype": "Cartesian",
-            "axis": [
-                {
-                    "name": "Easting",
-                    "abbreviation": "E",
-                    "direction": "east",
-                    "unit": linear_unit_value(projected.linear_unit()),
-                },
-                {
-                    "name": "Northing",
-                    "abbreviation": "N",
-                    "direction": "north",
-                    "unit": linear_unit_value(projected.linear_unit()),
-                },
-            ],
-        }),
+        json!({ "subtype": "Cartesian", "axis": axes }),
     );
     insert_id(&mut object, projected.epsg());
     Ok(Value::Object(object))
