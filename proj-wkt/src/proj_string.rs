@@ -12,6 +12,7 @@ use proj_core::GridDefinition;
 use proj_core::GridFormat;
 use proj_core::GridId;
 use proj_core::GridInterpolation;
+use proj_core::HelmertParams;
 
 use crate::semantics::normalize_key;
 use crate::ParsedCrs;
@@ -46,10 +47,12 @@ pub(crate) fn parse_proj_string_with_operations(s: &str) -> Result<ParsedCrs> {
     let params = parse_params(s)?;
     let grid_shift_to_wgs84 = parse_nadgrids(&params)?.filter(DatumGridShift::uses_grid_shift);
     let crs = parse_proj_params(&params)?;
+    let helmert_to_wgs84 = parse_helmert_to_wgs84(&params)?;
 
     Ok(ParsedCrs {
         crs,
         grid_shift_to_wgs84,
+        helmert_to_wgs84,
     })
 }
 
@@ -303,6 +306,16 @@ fn parsed_grid_id(resource_name: &str) -> u32 {
 }
 
 fn parse_towgs84(params: &HashMap<String, String>) -> Result<Option<DatumToWgs84>> {
+    Ok(parse_helmert_to_wgs84(params)?.map(|helmert| {
+        if helmert == HelmertParams::identity() {
+            DatumToWgs84::Identity
+        } else {
+            DatumToWgs84::Helmert(helmert)
+        }
+    }))
+}
+
+fn parse_helmert_to_wgs84(params: &HashMap<String, String>) -> Result<Option<HelmertParams>> {
     let Some(s) = params.get("towgs84") else {
         return Ok(None);
     };
@@ -330,7 +343,7 @@ fn parse_towgs84(params: &HashMap<String, String>) -> Result<Option<DatumToWgs84
         )));
     }
 
-    let helmert = proj_core::HelmertParams::new(
+    Ok(Some(HelmertParams::new(
         vals[0],
         vals[1],
         vals[2],
@@ -338,12 +351,7 @@ fn parse_towgs84(params: &HashMap<String, String>) -> Result<Option<DatumToWgs84
         *vals.get(4).unwrap_or(&0.0),
         *vals.get(5).unwrap_or(&0.0),
         *vals.get(6).unwrap_or(&0.0),
-    )?;
-    Ok(Some(if vals.iter().all(|value| *value == 0.0) {
-        DatumToWgs84::Identity
-    } else {
-        DatumToWgs84::Helmert(helmert)
-    }))
+    )?))
 }
 
 fn get_f64(params: &HashMap<String, String>, key: &str) -> Result<f64> {

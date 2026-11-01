@@ -99,6 +99,8 @@ Custom definitions are accepted only when they map to this library's CRS model: 
 
 Operation selection candidates come only from the embedded registry, deterministic generated-registry records, explicit caller/parser-provided coordinate operations, and internal identity/no-datum-operation behavior. CRS definitions without an EPSG code, such as `+proj=utm +zone=18 +datum=NAD83` or ESRI WKT, match registry operations through their recognized datum. Selection does not synthesize Helmert, grid, or WGS84-compatible identity operations from datum metadata. CRS pairs without a registry/generated-registry operation, explicit operation, or identity path fail during transform construction.
 
+Shifts a definition declares itself are explicit operations: `proj-wkt` applies `+towgs84`, `+nadgrids`, WKT1 `TOWGS84`, and WKT2/PROJJSON bound CRS shifts to WGS 84-compatible targets through `transform_from_crs_strings` and the `Proj` facade. `parse_crs` returns only the CRS definition, so `Transform::from_crs_defs` does not apply them.
+
 Geodetic to geocentric pairs such as `EPSG:4326` or `EPSG:4979` to `EPSG:4978`, and cross-datum ellipsoidal-height compounds such as `EPSG:4937` to `EPSG:4978`, use the selected horizontal operation plus geocentric framing. Gravity-related heights cannot target ECEF. Use `convert_3d` for ECEF coordinates.
 
 ## Grids

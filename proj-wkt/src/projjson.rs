@@ -2,9 +2,9 @@ use serde_json::Value;
 use std::collections::HashMap;
 
 use crate::semantics::{
-    angle_unit_name_to_degree, approx_eq, is_cartesian_3d_coordinate_system,
-    linear_unit_from_meters_per_unit, linear_unit_name, normalize_key,
-    projection_parameter_unit_kind, radians_to_degrees_factor, resolve_named_datum,
+    angle_unit_name_to_degree, approx_eq, helmert_from_bound_transformation,
+    is_cartesian_3d_coordinate_system, linear_unit_from_meters_per_unit, linear_unit_name,
+    normalize_key, projection_parameter_unit_kind, radians_to_degrees_factor, resolve_named_datum,
     resolve_structured_datum_or_custom, validate_supported_geocentric_semantics,
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
@@ -12,19 +12,113 @@ use crate::semantics::{
     AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
-use crate::{ParseError, Result};
+use crate::{ParseError, ParsedCrs, Result};
 use proj_core::{
     CompoundCrsDef, CrsDef, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
     ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
 };
 
-pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
+/// Parse PROJJSON along with the WGS 84 shift a `BoundCRS` declares.
+pub(crate) fn parse_projjson_with_operations(s: &str) -> Result<ParsedCrs> {
     let value: Value =
         serde_json::from_str(s).map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
-    let top_level_epsg = top_level_epsg_id(&value);
+    if value.get("type").and_then(Value::as_str) == Some("BoundCRS") {
+        return parse_bound_projjson(&value);
+    }
+    parse_projjson_value(&value).map(ParsedCrs::new)
+}
+
+/// Parse a `BoundCRS`, which is how PROJ writes a `+towgs84` definition.
+fn parse_bound_projjson(value: &Value) -> Result<ParsedCrs> {
+    let element = |name: &str| {
+        value
+            .get(name)
+            .ok_or_else(|| ParseError::Parse(format!("PROJJSON BoundCRS is missing {name}")))
+    };
+    if top_level_epsg_id(element("target_crs")?) != Some(4326) {
+        return Err(ParseError::UnsupportedSemantics(
+            "PROJJSON BoundCRS is only supported with an EPSG:4326 target".into(),
+        ));
+    }
+    let transformation = element("transformation")?;
+    let method = transformation
+        .get("method")
+        .and_then(|method| method.get("name"))
+        .and_then(Value::as_str)
+        .ok_or_else(|| ParseError::Parse("PROJJSON BoundCRS is missing a method".into()))?;
+    let helmert = helmert_from_bound_transformation("PROJJSON BoundCRS", method, |name| {
+        bound_parameter(transformation, name)
+    })?;
+
+    Ok(ParsedCrs {
+        crs: parse_projjson_value(element("source_crs")?)?,
+        grid_shift_to_wgs84: None,
+        helmert_to_wgs84: Some(helmert),
+    })
+}
+
+/// Read a bound transformation parameter in metres, arc-seconds, or ppm.
+fn bound_parameter(transformation: &Value, name: &str) -> Result<Option<f64>> {
+    let parameter = transformation
+        .get("parameters")
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten()
+        .find(|parameter| {
+            parameter
+                .get("name")
+                .and_then(Value::as_str)
+                .is_some_and(|candidate| normalize_key(candidate) == name)
+        });
+    let Some(parameter) = parameter else {
+        return Ok(None);
+    };
+    let value = parameter
+        .get("value")
+        .and_then(Value::as_f64)
+        .ok_or_else(|| {
+            ParseError::Parse(format!("PROJJSON BoundCRS parameter `{name}` has no value"))
+        })?;
+
+    const ARC_SECOND_IN_RADIANS: f64 = std::f64::consts::PI / (180.0 * 3600.0);
+    let unit = parameter.get("unit");
+    let factor = unit
+        .and_then(|unit| unit.get("conversion_factor"))
+        .and_then(Value::as_f64);
+    let unit_name = unit
+        .and_then(|unit| unit.as_str().or_else(|| unit.get("name")?.as_str()))
+        .map(normalize_key);
+    let unit_matches = match (name, unit_name.as_deref(), factor) {
+        (_, None, None) => true,
+        (
+            "xaxistranslation" | "yaxistranslation" | "zaxistranslation",
+            Some("metre" | "meter"),
+            _,
+        ) => true,
+        ("xaxisrotation" | "yaxisrotation" | "zaxisrotation", _, Some(factor)) => {
+            (factor - ARC_SECOND_IN_RADIANS).abs() < 1e-15
+        }
+        ("scaledifference", _, Some(factor)) => (factor - 1e-6).abs() < 1e-15,
+        _ => false,
+    };
+    if !unit_matches {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "PROJJSON BoundCRS parameter `{name}` uses an unsupported unit"
+        )));
+    }
+    Ok(Some(value))
+}
+
+#[cfg(test)]
+pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
+    Ok(parse_projjson_with_operations(s)?.crs)
+}
+
+fn parse_projjson_value(value: &Value) -> Result<CrsDef> {
+    let top_level_epsg = top_level_epsg_id(value);
 
     if let Some(epsg) = top_level_epsg {
-        if is_semantically_neutral_authority_wrapper(&value) {
+        if is_semantically_neutral_authority_wrapper(value) {
             let registry = proj_core::lookup_epsg(epsg).ok_or_else(|| {
                 ParseError::Parse(format!("unsupported EPSG code in PROJJSON: {epsg}"))
             })?;
@@ -43,17 +137,17 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
         .ok_or_else(|| ParseError::Parse("PROJJSON object is missing a CRS type".into()))?;
 
     let parsed = match crs_type {
-        "GeographicCRS" => parse_geographic_projjson(&value)?,
+        "GeographicCRS" => parse_geographic_projjson(value)?,
         "GeodeticCRS" => {
-            let coordinate_system = coordinate_system_from_json(&value);
+            let coordinate_system = coordinate_system_from_json(value);
             if is_cartesian_3d_coordinate_system(&coordinate_system) {
-                parse_geocentric_projjson(&value)?
+                parse_geocentric_projjson(value)?
             } else {
-                parse_geographic_projjson(&value)?
+                parse_geographic_projjson(value)?
             }
         }
-        "ProjectedCRS" => parse_projected_projjson(&value)?,
-        "CompoundCRS" => parse_compound_projjson(&value)?,
+        "ProjectedCRS" => parse_projected_projjson(value)?,
+        "CompoundCRS" => parse_compound_projjson(value)?,
         "VerticalCRS" => {
             return Err(ParseError::UnsupportedSemantics(
                 "standalone vertical CRS definitions are not supported by the horizontal transform API; use a compound CRS with an identical vertical component on both sides".into(),
