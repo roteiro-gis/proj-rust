@@ -1554,7 +1554,7 @@ mod tests {
     fn assert_near(actual: (f64, f64), expected: (f64, f64), tolerance: f64, label: &str) {
         assert!(
             (actual.0 - expected.0).abs() < tolerance && (actual.1 - expected.1).abs() < tolerance,
-            "{label}: {actual:?} != {expected:?}"
+            "{label}"
         );
     }
 
