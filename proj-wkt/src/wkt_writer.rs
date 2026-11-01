@@ -1,5 +1,5 @@
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
     LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
 };
 
@@ -50,6 +50,7 @@ fn format_geographic_crs(geographic: &GeographicCrsDef) -> Result<String> {
         authority_code(geographic.epsg()),
         geographic.datum(),
         authority_code(geographic.epsg()),
+        geographic.axis_order(),
     )
 }
 
@@ -73,12 +74,18 @@ fn format_geographic_crs_parts(
     crs_epsg: Option<u32>,
     datum: &Datum,
     datum_source_crs_epsg: Option<u32>,
+    axis_order: AxisOrder,
 ) -> Result<String> {
     let datum_epsg = datum_source_crs_epsg.and_then(proj_core::lookup_datum_code_for_crs);
     let mut fields = vec![quote(name)];
     fields.push(format_datum(datum, datum_epsg)?);
     fields.push(format_prime_meridian());
     fields.push(format_angle_unit());
+    // WKT1 defaults to east/north, which also keeps that output axis-free.
+    if axis_order == AxisOrder::NorthEast {
+        fields.push(r#"AXIS["Latitude",NORTH]"#.to_string());
+        fields.push(r#"AXIS["Longitude",EAST]"#.to_string());
+    }
     if let Some(epsg) = crs_epsg {
         fields.push(format_authority(epsg));
     }
@@ -95,6 +102,10 @@ fn format_projected_crs(projected: &ProjectedCrsDef) -> Result<String> {
         projected.linear_unit(),
     )?);
     fields.push(format_linear_unit(&linear_unit));
+    if projected.axis_order() == AxisOrder::NorthEast {
+        fields.push(r#"AXIS["Northing",NORTH]"#.to_string());
+        fields.push(r#"AXIS["Easting",EAST]"#.to_string());
+    }
     push_authority(&mut fields, projected.epsg());
     Ok(format!("PROJCS[{}]", fields.join(",")))
 }
@@ -112,6 +123,7 @@ fn format_base_geographic_crs(projected: &ProjectedCrsDef) -> Result<String> {
         base_epsg,
         projected.datum(),
         datum_source_crs_epsg,
+        AxisOrder::EastNorth,
     )
 }
 

@@ -1,5 +1,5 @@
 use crate::{ParseError, Result};
-use proj_core::{Datum, HelmertParams, LinearUnit, VerticalCrsDef};
+use proj_core::{AxisOrder, Datum, HelmertParams, LinearUnit, VerticalCrsDef};
 
 const SEMANTICS_EPSILON: f64 = 1e-12;
 
@@ -15,12 +15,6 @@ pub(crate) enum AxisDirection {
     GeocentricY,
     GeocentricZ,
     Other,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum AxisOrderPolicy {
-    Strict,
-    NormalizePermutation,
 }
 
 impl AxisDirection {
@@ -83,8 +77,7 @@ pub(crate) fn validate_supported_geographic_semantics(
     angle_unit_to_degree: Option<f64>,
     prime_meridian_degrees: Option<f64>,
     coordinate_system: &CoordinateSystemSpec,
-    axis_order_policy: AxisOrderPolicy,
-) -> Result<()> {
+) -> Result<AxisOrder> {
     if let Some(angle_unit_to_degree) = angle_unit_to_degree {
         if !approx_eq(angle_unit_to_degree, 1.0) {
             return Err(ParseError::UnsupportedSemantics(format!(
@@ -107,7 +100,6 @@ pub(crate) fn validate_supported_geographic_semantics(
         Some("ellipsoidal"),
         &[AxisDirection::East, AxisDirection::North],
         "longitude/east, latitude/north",
-        axis_order_policy,
     )
 }
 
@@ -116,8 +108,7 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
     angle_unit_to_degree: Option<f64>,
     prime_meridian_degrees: Option<f64>,
     coordinate_system: &CoordinateSystemSpec,
-    axis_order_policy: AxisOrderPolicy,
-) -> Result<GeographicCoordinateSystemKind> {
+) -> Result<(GeographicCoordinateSystemKind, AxisOrder)> {
     if let Some(angle_unit_to_degree) = angle_unit_to_degree {
         if !approx_eq(angle_unit_to_degree, 1.0) {
             return Err(ParseError::UnsupportedSemantics(format!(
@@ -144,40 +135,39 @@ pub(crate) fn validate_supported_geographic_or_ellipsoidal_height_semantics(
                 "{context} declares a 3D coordinate system without explicit axis directions"
             )));
         }
-        validate_coordinate_system(
+        let axis_order = validate_coordinate_system(
             context,
             coordinate_system,
             Some("ellipsoidal"),
             &[AxisDirection::East, AxisDirection::North, AxisDirection::Up],
             "longitude/east, latitude/north, ellipsoidal height/up",
-            axis_order_policy,
         )?;
-        return Ok(GeographicCoordinateSystemKind::ThreeDimensionalEllipsoidalHeight);
+        return Ok((
+            GeographicCoordinateSystemKind::ThreeDimensionalEllipsoidalHeight,
+            axis_order,
+        ));
     }
 
-    validate_coordinate_system(
+    let axis_order = validate_coordinate_system(
         context,
         coordinate_system,
         Some("ellipsoidal"),
         &[AxisDirection::East, AxisDirection::North],
         "longitude/east, latitude/north",
-        axis_order_policy,
     )?;
-    Ok(GeographicCoordinateSystemKind::TwoDimensional)
+    Ok((GeographicCoordinateSystemKind::TwoDimensional, axis_order))
 }
 
 pub(crate) fn validate_supported_projected_semantics(
     context: &str,
     coordinate_system: &CoordinateSystemSpec,
-    axis_order_policy: AxisOrderPolicy,
-) -> Result<()> {
+) -> Result<AxisOrder> {
     validate_coordinate_system(
         context,
         coordinate_system,
         Some("cartesian"),
         &[AxisDirection::East, AxisDirection::North],
         "easting/east, northing/north",
-        axis_order_policy,
     )
 }
 
@@ -253,8 +243,8 @@ pub(crate) fn validate_supported_geocentric_semantics(
         Some("cartesian"),
         expected_axes,
         "geocentricX, geocentricY, geocentricZ",
-        AxisOrderPolicy::Strict,
     )
+    .map(|_| ())
 }
 
 fn wkt1_geocentric_axis_names_match(coordinate_system: &CoordinateSystemSpec) -> bool {
@@ -662,8 +652,7 @@ fn validate_coordinate_system(
     expected_subtype: Option<&str>,
     expected_axes: &[AxisDirection],
     expected_axes_description: &str,
-    axis_order_policy: AxisOrderPolicy,
-) -> Result<()> {
+) -> Result<AxisOrder> {
     if let Some(expected_subtype) = expected_subtype {
         if let Some(subtype) = &coordinate_system.subtype {
             if normalize_key(subtype) != normalize_key(expected_subtype) {
@@ -682,8 +671,9 @@ fn validate_coordinate_system(
         }
     }
 
+    // A definition without axes uses the east/north default of its format.
     if coordinate_system.axes.is_empty() {
-        return Ok(());
+        return Ok(AxisOrder::EastNorth);
     }
 
     if coordinate_system.axes.len() != expected_axes.len() {
@@ -693,28 +683,22 @@ fn validate_coordinate_system(
         )));
     }
 
-    if coordinate_system.axes != expected_axes
-        && !(axis_order_policy == AxisOrderPolicy::NormalizePermutation
-            && axes_are_permutations(&coordinate_system.axes, expected_axes))
+    let axes = &coordinate_system.axes;
+    if axes == expected_axes {
+        return Ok(AxisOrder::EastNorth);
+    }
+    // North before east is the one reordering `AxisOrder` represents.
+    if axes[..2] == [AxisDirection::North, AxisDirection::East]
+        && expected_axes[..2] == [AxisDirection::East, AxisDirection::North]
+        && axes[2..] == expected_axes[2..]
     {
-        return Err(ParseError::UnsupportedSemantics(format!(
-            "{context} uses unsupported axis order/directions `{}`; expected {expected_axes_description}",
-            format_axes(&coordinate_system.axes)
-        )));
+        return Ok(AxisOrder::NorthEast);
     }
 
-    Ok(())
-}
-
-fn axes_are_permutations(actual: &[AxisDirection], expected: &[AxisDirection]) -> bool {
-    actual.len() == expected.len()
-        && expected.iter().all(|expected_axis| {
-            actual.iter().filter(|axis| *axis == expected_axis).count()
-                == expected
-                    .iter()
-                    .filter(|axis| *axis == expected_axis)
-                    .count()
-        })
+    Err(ParseError::UnsupportedSemantics(format!(
+        "{context} uses unsupported axis order/directions `{}`; expected {expected_axes_description}",
+        format_axes(axes)
+    )))
 }
 
 fn format_axes(axes: &[AxisDirection]) -> String {

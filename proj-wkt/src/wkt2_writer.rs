@@ -6,7 +6,7 @@
 //! the roundtrip is asserted by tests and fuzzing.
 
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
     LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
 };
 
@@ -89,29 +89,22 @@ fn geographic_wkt2(
 
     let mut fields = vec![quote(nonempty(name, "unnamed geographic CRS"))];
     fields.push(format_wkt2_datum(geographic.datum(), datum_epsg)?);
+    let (first, second) = match geographic.axis_order() {
+        AxisOrder::EastNorth => (r#""longitude",east"#, r#""latitude",north"#),
+        AxisOrder::NorthEast => (r#""latitude",north"#, r#""longitude",east"#),
+    };
+    let dimension = if ellipsoidal_height_unit.is_some() {
+        3
+    } else {
+        2
+    };
+    fields.push(format!("CS[ellipsoidal,{dimension}]"));
+    fields.push(format!("AXIS[{first},ORDER[1],{}]", angle_unit_wkt2()));
+    fields.push(format!("AXIS[{second},ORDER[2],{}]", angle_unit_wkt2()));
     if let Some(height_unit) = ellipsoidal_height_unit {
-        fields.push("CS[ellipsoidal,3]".to_string());
-        fields.push(format!(
-            "AXIS[\"longitude\",east,ORDER[1],{}]",
-            angle_unit_wkt2()
-        ));
-        fields.push(format!(
-            "AXIS[\"latitude\",north,ORDER[2],{}]",
-            angle_unit_wkt2()
-        ));
         fields.push(format!(
             "AXIS[\"ellipsoidal height\",up,ORDER[3],{}]",
             length_unit_wkt2(height_unit)?
-        ));
-    } else {
-        fields.push("CS[ellipsoidal,2]".to_string());
-        fields.push(format!(
-            "AXIS[\"longitude\",east,ORDER[1],{}]",
-            angle_unit_wkt2()
-        ));
-        fields.push(format!(
-            "AXIS[\"latitude\",north,ORDER[2],{}]",
-            angle_unit_wkt2()
         ));
     }
     match id_override {
@@ -166,8 +159,12 @@ fn projected_wkt2(projected: &ProjectedCrsDef) -> Result<String> {
     fields.push(base);
     fields.push(conversion);
     fields.push("CS[Cartesian,2]".to_string());
-    fields.push(format!("AXIS[\"easting\",east,ORDER[1],{length_unit}]"));
-    fields.push(format!("AXIS[\"northing\",north,ORDER[2],{length_unit}]"));
+    let (first, second) = match projected.axis_order() {
+        AxisOrder::EastNorth => (r#""easting",east"#, r#""northing",north"#),
+        AxisOrder::NorthEast => (r#""northing",north"#, r#""easting",east"#),
+    };
+    fields.push(format!("AXIS[{first},ORDER[1],{length_unit}]"));
+    fields.push(format!("AXIS[{second},ORDER[2],{length_unit}]"));
     push_id(&mut fields, projected.epsg());
     Ok(format!("PROJCRS[{}]", fields.join(",")))
 }

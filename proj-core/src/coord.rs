@@ -1,8 +1,12 @@
 /// A 2D coordinate.
 ///
+/// `x` is the CRS's first axis and `y` its second, in the order given by
+/// [`crate::CrsDef::axis_order`]. That is longitude/latitude or easting/northing
+/// unless a parsed definition declares latitude or northing first.
+///
 /// At the public API boundary, units match the CRS:
-/// - **Geographic CRS**: degrees (x = longitude, y = latitude)
-/// - **Projected CRS**: the CRS's native linear unit (x = easting, y = northing)
+/// - **Geographic CRS**: degrees
+/// - **Projected CRS**: the CRS's native linear unit
 #[derive(Debug, Clone, Copy, PartialEq)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct Coord {

@@ -18,22 +18,23 @@
 //!   `GEOGCS[...]`, `PROJCS[...]`, `GEOCCS[...]`, and `COMPD_CS[...]` definitions
 //!
 //! Custom CRS definitions are only accepted when their semantics fit the
-//! `proj_core::CrsDef` model: longitude/latitude geographic coordinates in
-//! degrees with a Greenwich prime meridian, geocentric ECEF coordinates in
-//! metres with geocentric X/Y/Z axes, projected coordinates with
-//! easting/northing axis order, and compound vertical components that can be
-//! preserved or unit-converted only when source and target vertical CRS
+//! `proj_core::CrsDef` model: longitude and latitude in degrees with a Greenwich
+//! prime meridian, geocentric ECEF coordinates in metres with geocentric X/Y/Z
+//! axes, projected easting and northing, and compound vertical components that
+//! can be preserved or unit-converted only when source and target vertical CRS
 //! definitions use the same vertical reference frame.
+//! A definition keeps the axis order it declares, east/north or north/east:
+//! coordinates passed to a transform are in that order, as in C PROJ. Registry
+//! lookups such as `"EPSG:4326"` are east/north whatever the authority's order.
+//! Use [`proj_core::CrsDef::with_axis_order`] to read a definition in another
+//! order deliberately.
 //! Datum shifts a definition declares itself, through PROJ `+nadgrids` or
 //! `+towgs84`, WKT1 `TOWGS84`, or a WKT2/PROJJSON bound CRS, are applied by
 //! [`transform_from_crs_strings`], [`transform_from_crs_strings_with_selection_options`],
 //! and the [`Proj`] facade as explicit custom coordinate operations; plain
 //! [`parse_crs`] returns only the CRS definition.
-//! Unsupported axis-order, prime-meridian, geographic angular-unit, and vertical
-//! transformation semantics are rejected.
-//! EPSG-tagged WKT1 definitions with an authority-native axis permutation are
-//! validated and canonicalized to the library's longitude/latitude or
-//! easting/northing coordinate order.
+//! Other axis orders and directions, and unsupported prime-meridian, geographic
+//! angular-unit, and vertical transformation semantics, are rejected.
 //!
 //! # Example
 //!
@@ -841,6 +842,7 @@ impl Proj {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proj_core::AxisOrder;
 
     fn expect_proj_error(result: Result<Proj>) -> ParseError {
         match result {
@@ -949,16 +951,138 @@ mod tests {
         assert!(parse_crs(wkt1).unwrap().is_projected());
     }
 
+    const PROJJSON_NE_AXES: &str = r#"{"subtype":"Cartesian","axis":[{"name":"Northing","abbreviation":"N","direction":"north","unit":"metre"},{"name":"Easting","abbreviation":"E","direction":"east","unit":"metre"}]}"#;
+    const WKT2_LAT_FIRST: &str = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],CS[ellipsoidal,2],AXIS["latitude",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433]],AXIS["longitude",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4326]]"#;
+    const WKT2_LON_FIRST: &str = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],CS[ellipsoidal,2],AXIS["longitude",east,ORDER[1],ANGLEUNIT["degree",0.0174532925199433]],AXIS["latitude",north,ORDER[2],ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4326]]"#;
+    const WKT1_LAT_FIRST: &str = r#"GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563,AUTHORITY["EPSG","7030"]],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AXIS["Latitude",NORTH],AXIS["Longitude",EAST],AUTHORITY["EPSG","4326"]]"#;
+    const WKT2_LAT_LON_HEIGHT: &str = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,3],AXIS["latitude",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433]],AXIS["longitude",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433]],AXIS["ellipsoidal height",up,ORDER[3],LENGTHUNIT["metre",1]],ID["EPSG",4979]]"#;
+
     #[test]
-    fn projected_crs_axis_order_stays_strict() {
-        let swapped = projjson_utm18n("").replace(
-            PROJJSON_EN_AXES,
-            r#"{"subtype":"Cartesian","axis":[{"name":"Northing","abbreviation":"N","direction":"north","unit":"metre"},{"name":"Easting","abbreviation":"E","direction":"east","unit":"metre"}]}"#,
+    fn declared_axis_order_matches_c_proj() {
+        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`, which
+        // honors the declared order, without `proj_normalize_for_visualization`.
+        const MERCATOR: (f64, f64) = (556_597.453966, 6_800_125.454397);
+        for (definition, input) in [
+            (WKT2_LAT_FIRST, (52.0, 5.0)),
+            (WKT1_LAT_FIRST, (52.0, 5.0)),
+            (WKT2_LON_FIRST, (5.0, 52.0)),
+        ] {
+            let forward = transform_from_crs_strings(definition, "EPSG:3857").unwrap();
+            let (x, y) = forward.convert(input).unwrap();
+            assert!(
+                (x - MERCATOR.0).abs() < 1e-5 && (y - MERCATOR.1).abs() < 1e-5,
+                "{definition}"
+            );
+            let (a, b) = forward.inverse().unwrap().convert((x, y)).unwrap();
+            assert!(
+                (a - input.0).abs() < 1e-9 && (b - input.1).abs() < 1e-9,
+                "{definition}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_same_crs_in_another_axis_order_swaps() {
+        // C PROJ swaps here too: only the coordinate order differs.
+        let swap = transform_from_crs_strings(WKT2_LAT_FIRST, WKT2_LON_FIRST).unwrap();
+        assert_eq!(swap.convert((52.0, 5.0)).unwrap(), (5.0, 52.0));
+        let keep = transform_from_crs_strings(WKT2_LAT_FIRST, WKT1_LAT_FIRST).unwrap();
+        assert_eq!(keep.convert((52.0, 5.0)).unwrap(), (52.0, 5.0));
+    }
+
+    #[test]
+    fn with_axis_order_is_the_explicit_way_to_normalize() {
+        let declared = parse_crs(WKT2_LAT_FIRST).unwrap();
+        let normalized = declared.clone().with_axis_order(AxisOrder::EastNorth);
+        let registry = parse_crs("EPSG:4326").unwrap();
+        assert!(normalized.semantically_equivalent(&registry));
+        assert!(!declared.semantically_equivalent(&registry));
+
+        let transform = Transform::from_crs_defs(&normalized, &parse_crs("EPSG:3857").unwrap());
+        let (x, _) = transform.unwrap().convert((5.0, 52.0)).unwrap();
+        assert!((x - 556_597.453966).abs() < 1e-5);
+    }
+
+    #[test]
+    fn height_keeps_its_place_in_a_latitude_first_crs() {
+        let crs = parse_crs(WKT2_LAT_LON_HEIGHT).unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        let target = parse_crs("EPSG:4978").unwrap();
+        let transform = Transform::from_crs_defs(&crs, &target).unwrap();
+        let (x, y, z) = transform.convert_3d((52.0, 5.0, 100.0)).unwrap();
+        let expected = Transform::new("EPSG:4979", "EPSG:4978")
+            .unwrap()
+            .convert_3d((5.0, 52.0, 100.0))
+            .unwrap();
+        assert_eq!((x, y, z), expected);
+    }
+
+    #[test]
+    fn writers_keep_a_declared_axis_order() {
+        let projected = projjson_utm18n("").replace(PROJJSON_EN_AXES, PROJJSON_NE_AXES);
+        for definition in [
+            WKT2_LAT_FIRST,
+            WKT1_LAT_FIRST,
+            WKT2_LAT_LON_HEIGHT,
+            projected.as_str(),
+        ] {
+            let original = parse_crs(definition).unwrap();
+            assert_eq!(original.axis_order(), Some(AxisOrder::NorthEast));
+            for written in [
+                to_wkt(&original).unwrap(),
+                to_wkt2(&original).unwrap(),
+                to_projjson(&original).unwrap(),
+            ] {
+                let reparsed = parse_crs(&written).unwrap_or_else(|err| panic!("{written}: {err}"));
+                assert!(
+                    original.semantically_equivalent(&reparsed),
+                    "{definition} -> {written}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn axis_orders_the_model_cannot_state_stay_rejected() {
+        for (from, to) in [
+            (r#"AXIS["latitude",north,"#, r#"AXIS["latitude",south,"#),
+            (r#"AXIS["longitude",east,"#, r#"AXIS["longitude",west,"#),
+        ] {
+            let definition = WKT2_LAT_FIRST.replace(from, to);
+            let err = parse_crs(&definition).unwrap_err().to_string();
+            assert!(err.contains("unsupported axis order"), "{err}");
+        }
+
+        let height_first = WKT2_LAT_LON_HEIGHT
+            .replace(
+                r#""ellipsoidal height",up,ORDER[3]"#,
+                r#""latitude",north,ORDER[3]"#,
+            )
+            .replacen(
+                r#""latitude",north,ORDER[1]"#,
+                r#""ellipsoidal height",up,ORDER[1]"#,
+                1,
+            );
+        let err = parse_crs(&height_first).unwrap_err().to_string();
+        assert!(err.contains("unsupported"), "{err}");
+    }
+
+    #[test]
+    fn untagged_compounds_resolve_tagged_components() {
+        let vertical = r#"VERTCRS["EGM96 height",VDATUM["EGM96 geoid"],CS[vertical,1],AXIS["gravity-related height (H)",up,LENGTHUNIT["metre",1]],ID["EPSG",5773]]"#;
+        let wkt = format!(r#"COMPOUNDCRS["WGS 84 + EGM96 height",{WKT2_LAT_FIRST},{vertical}]"#);
+        let compound = parse_crs(&wkt).unwrap();
+        assert_eq!(compound.base_geographic_crs_epsg(), Some(4326));
+        assert_eq!(compound.axis_order(), Some(AxisOrder::NorthEast));
+
+        let vertical = r#"{"type":"VerticalCRS","name":"EGM96 height","datum":{"type":"VerticalReferenceFrame","name":"EGM96 geoid"},"coordinate_system":{"subtype":"vertical","axis":[{"name":"Gravity-related height","abbreviation":"H","direction":"up","unit":"metre"}]},"id":{"authority":"EPSG","code":5773}}"#;
+        let projjson = format!(
+            r#"{{"type":"CompoundCRS","name":"UTM + EGM96","components":[{},{vertical}]}}"#,
+            projjson_utm18n(r#","id":{"authority":"EPSG","code":32618}"#)
         );
-        assert!(matches!(
-            parse_crs(&swapped),
-            Err(ParseError::UnsupportedSemantics(_))
-        ));
+        let compound = parse_crs(&projjson).unwrap();
+        assert_eq!(compound.base_geographic_crs_epsg(), Some(4326));
+        assert_eq!(compound.vertical_crs().unwrap().epsg(), 5773);
     }
 
     #[test]

@@ -6,13 +6,13 @@ use crate::semantics::{
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
-    AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
+    AxisDirection, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, ParsedCrs, Result};
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeocentricCrsDef, GeographicCrsDef, HelmertParams,
-    HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeocentricCrsDef, GeographicCrsDef,
+    HelmertParams, HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
     VerticalCrsKind,
 };
 use std::collections::HashMap;
@@ -26,17 +26,7 @@ use std::collections::HashMap;
 pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     let s = s.trim();
     let top_level_epsg = extract_top_level_epsg(s);
-    let is_wkt1 = parse_wkt_element(s, 0).is_some_and(|(root_name, _, _)| {
-        root_name.eq_ignore_ascii_case("GEOGCS")
-            || root_name.eq_ignore_ascii_case("PROJCS")
-            || root_name.eq_ignore_ascii_case("COMPD_CS")
-    });
-    let axis_order_policy = if top_level_epsg.is_some() && is_wkt1 {
-        AxisOrderPolicy::NormalizePermutation
-    } else {
-        AxisOrderPolicy::Strict
-    };
-    let parsed = parse_wkt_structure(s, axis_order_policy)?;
+    let parsed = parse_wkt_structure(s)?;
 
     if let Some(epsg) = top_level_epsg {
         return canonicalize_authoritative_crs(parsed, epsg, "WKT");
@@ -326,7 +316,7 @@ fn is_wkt_keyword(name: &str, keywords: &[&str]) -> bool {
 }
 
 /// Attempt to parse WKT structure to extract projection parameters.
-fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
+fn parse_wkt_structure(s: &str) -> Result<CrsDef> {
     let Some((root_name, _, _)) = parse_wkt_element(s, 0) else {
         return Err(ParseError::Parse(format!(
             "unrecognized WKT root element: {:.40}",
@@ -345,19 +335,19 @@ fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         if is_cartesian_3d_coordinate_system(&extract_coordinate_system(root_inner)) {
             return parse_wkt_geocentric(s);
         }
-        return parse_wkt_geographic(s, axis_order_policy);
+        return parse_wkt_geographic(s);
     }
 
     if is_wkt_keyword(root_name, GEOGRAPHIC_CRS_KEYWORDS) {
-        return parse_wkt_geographic(s, axis_order_policy);
+        return parse_wkt_geographic(s);
     }
 
     if is_wkt_keyword(root_name, PROJECTED_CRS_KEYWORDS) {
-        return parse_wkt_projected(s, axis_order_policy);
+        return parse_wkt_projected(s);
     }
 
     if root_name.eq_ignore_ascii_case("COMPD_CS") || root_name.eq_ignore_ascii_case("COMPOUNDCRS") {
-        return parse_wkt_compound(s, axis_order_policy);
+        return parse_wkt_compound(s);
     }
 
     if root_name.eq_ignore_ascii_case("VERT_CS")
@@ -375,7 +365,7 @@ fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
     )))
 }
 
-fn parse_wkt_geographic(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
+fn parse_wkt_geographic(s: &str) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     let coordinate_system = extract_coordinate_system(root_inner);
@@ -386,16 +376,16 @@ fn parse_wkt_geographic(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<C
     )?;
     let prime_meridian_degrees =
         extract_prime_meridian_degrees(root_inner, angle_unit_to_degree.unwrap_or(1.0));
-    let coordinate_system_kind = validate_supported_geographic_or_ellipsoidal_height_semantics(
-        "WKT geographic CRS",
-        angle_unit_to_degree,
-        prime_meridian_degrees,
-        &coordinate_system,
-        axis_order_policy,
-    )?;
+    let (coordinate_system_kind, axis_order) =
+        validate_supported_geographic_or_ellipsoidal_height_semantics(
+            "WKT geographic CRS",
+            angle_unit_to_degree,
+            prime_meridian_degrees,
+            &coordinate_system,
+        )?;
 
     let datum = infer_datum_from_geographic_inner(root_inner)?;
-    let horizontal = GeographicCrsDef::new(0, datum.clone(), "");
+    let horizontal = GeographicCrsDef::new(0, datum.clone(), "").with_axis_order(axis_order);
 
     match coordinate_system_kind {
         GeographicCoordinateSystemKind::TwoDimensional => Ok(CrsDef::Geographic(horizontal)),
@@ -464,7 +454,7 @@ fn extract_geocentric_linear_unit(
     Ok(top_level_linear_unit.or(axis_linear_unit))
 }
 
-fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
+fn parse_wkt_projected(s: &str) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     // WKT1 uses PROJECTION["name"], WKT2 uses METHOD["name"].
@@ -477,11 +467,8 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
     let coordinate_system = extract_coordinate_system(root_inner);
     let projected_linear_unit = extract_projected_linear_unit(root_inner, &coordinate_system)?
         .unwrap_or_else(LinearUnit::metre);
-    validate_supported_projected_semantics(
-        "WKT projected CRS",
-        &coordinate_system,
-        axis_order_policy,
-    )?;
+    let axis_order =
+        validate_supported_projected_semantics("WKT projected CRS", &coordinate_system)?;
 
     let base_geographic_inner =
         find_top_level_element_inner(root_inner, BASE_GEOGRAPHIC_CRS_KEYWORDS).ok_or_else(
@@ -494,14 +481,12 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         &base_coordinate_system,
     )?
     .unwrap_or(1.0);
-    // Base CRS axis order has no bearing on the projected axes, which were
-    // validated above.
+    // Base CRS axis order has no bearing on the projected axes read above.
     validate_supported_geographic_semantics(
         "WKT projected base geographic CRS",
         Some(base_angle_unit_to_degree),
         extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
         &base_coordinate_system,
-        AxisOrderPolicy::NormalizePermutation,
     )?;
     let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree)?;
 
@@ -865,16 +850,13 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         }
     };
 
-    Ok(CrsDef::Projected(ProjectedCrsDef::new(
-        0,
-        datum,
-        method,
-        projected_linear_unit,
-        "",
-    )))
+    Ok(CrsDef::Projected(
+        ProjectedCrsDef::new(0, datum, method, projected_linear_unit, "")
+            .with_axis_order(axis_order),
+    ))
 }
 
-fn parse_wkt_compound(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
+fn parse_wkt_compound(s: &str) -> Result<CrsDef> {
     let root_inner = root_inner(s)
         .ok_or_else(|| ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s)))?;
     let mut horizontal = None;
@@ -886,10 +868,8 @@ fn parse_wkt_compound(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Crs
                 || is_wkt_keyword(name, GEODETIC_CRS_KEYWORDS)
                 || is_wkt_keyword(name, PROJECTED_CRS_KEYWORDS))
         {
-            horizontal = Some(parse_wkt_structure(
-                &format!("{name}[{element_inner}]"),
-                axis_order_policy,
-            ));
+            // A tagged component resolves like a standalone definition.
+            horizontal = Some(parse_wkt(&format!("{name}[{element_inner}]")));
             return;
         }
 
@@ -1025,8 +1005,12 @@ pub(crate) fn canonicalize_authoritative_crs(
 ) -> Result<CrsDef> {
     let registry = proj_core::lookup_epsg(epsg)
         .ok_or_else(|| ParseError::Parse(format!("unsupported EPSG code in {format}: {epsg}")))?;
+    // The registry is always east/north, so the tag identifies the CRS and the
+    // definition says how its coordinates are ordered.
+    let declared_axes = parsed.axis_order().unwrap_or_default();
+    let parsed = parsed.with_axis_order(AxisOrder::EastNorth);
     if wkt_semantically_equivalent(&parsed, &registry) {
-        Ok(registry)
+        Ok(registry.with_axis_order(declared_axes))
     } else {
         Err(ParseError::UnsupportedSemantics(format!(
             "{format} definition tagged as EPSG:{epsg} does not match the embedded EPSG semantics"
@@ -1720,9 +1704,11 @@ mod tests {
         assert_eq!(crs.as_projected().unwrap().epsg(), 3006);
         assert_eq!(crs.vertical_crs().unwrap().epsg(), 5613);
 
+        // The definition states northing first, as EPSG does for SWEREF99 TM.
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
         let target = proj_core::lookup_epsg(4326).unwrap();
         let transform = proj_core::Transform::from_horizontal_components(&crs, &target).unwrap();
-        let (lon, lat) = transform.convert((500_000.0, 0.0)).unwrap();
+        let (lon, lat) = transform.convert((0.0, 500_000.0)).unwrap();
         assert!((lon - 15.0).abs() < 1e-8);
         assert!(lat.abs() < 1e-8);
     }
@@ -1753,14 +1739,13 @@ mod tests {
     }
 
     #[test]
-    fn reject_geographic_wkt_with_reversed_axes() {
-        let err = parse_wkt(
+    fn geographic_wkt_keeps_its_declared_axis_order() {
+        let crs = parse_wkt(
             r#"GEOGCRS["Custom",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["latitude",north],AXIS["longitude",east],ANGLEUNIT["degree",0.0174532925199433]]"#,
         )
-        .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert_eq!(crs.epsg(), 0);
     }
 
     #[test]
@@ -1956,25 +1941,23 @@ mod tests {
     }
 
     #[test]
-    fn reject_projected_wkt_with_reversed_projected_axes() {
-        let err = parse_wkt(
+    fn projected_wkt_keeps_its_declared_axis_order() {
+        let crs = parse_wkt(
             r#"PROJCRS["Custom",BASEGEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]],CONVERSION["UTM zone 18N",METHOD["Transverse Mercator"],PARAMETER["Latitude of natural origin",0,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Longitude of natural origin",-75,ANGLEUNIT["degree",0.0174532925199433]],PARAMETER["Scale factor at natural origin",0.9996,SCALEUNIT["unity",1]],PARAMETER["False easting",500000,LENGTHUNIT["metre",1]],PARAMETER["False northing",0,LENGTHUNIT["metre",1]]],CS[Cartesian,2],AXIS["northing",north],AXIS["easting",east],LENGTHUNIT["metre",1]]"#,
         )
-        .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert!(crs.is_projected());
     }
 
     #[test]
-    fn reject_untagged_wkt1_with_reversed_projected_axes() {
-        let err = parse_wkt(
+    fn wkt1_keeps_its_declared_projected_axis_order() {
+        let crs = parse_wkt(
             r#"PROJCS["Custom",GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563]],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-75],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1],AXIS["Northing",NORTH],AXIS["Easting",EAST]]"#,
         )
-        .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert!(crs.is_projected());
     }
 
     #[test]
@@ -2038,14 +2021,13 @@ mod tests {
     }
 
     #[test]
-    fn reject_wkt_with_top_level_epsg_and_reversed_axes() {
-        let err = parse_wkt(
+    fn tagged_wkt_keeps_its_declared_axis_order() {
+        let crs = parse_wkt(
             r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["latitude",north],AXIS["longitude",east],ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",4326]]"#,
         )
-        .unwrap_err();
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert_eq!(crs.epsg(), 4326);
     }
 
     /// An unrecognized datum name with valid ellipsoid numbers parses as a
@@ -2089,7 +2071,7 @@ mod tests {
         }
         wkt.push_str(",UNIT[\"metre\",1]]");
         let start = std::time::Instant::now();
-        let _ = parse_wkt_structure(&wkt, AxisOrderPolicy::Strict);
+        let _ = parse_wkt_structure(&wkt);
         assert!(
             start.elapsed() < deadline,
             "dense PARAMETER parse took {:?}",
@@ -2099,7 +2081,7 @@ mod tests {
         let mut dangling = String::from("PROJCS[\"x\",");
         dangling.push_str(&"PARAMETER[".repeat(60_000));
         let start = std::time::Instant::now();
-        let _ = parse_wkt_structure(&dangling, AxisOrderPolicy::Strict);
+        let _ = parse_wkt_structure(&dangling);
         assert!(
             start.elapsed() < deadline,
             "dangling-marker parse took {:?}",

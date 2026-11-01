@@ -9,7 +9,7 @@ use crate::semantics::{
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
     validate_supported_vertical_coordinate_system, validate_vertical_unit_matches_authority,
-    AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
+    AxisDirection, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
 use crate::{ParseError, ParsedCrs, Result};
@@ -169,15 +169,15 @@ fn parse_projjson_value(value: &Value) -> Result<CrsDef> {
 
 fn parse_geographic_projjson(value: &Value) -> Result<CrsDef> {
     let coordinate_system = coordinate_system_from_json(value);
-    let coordinate_system_kind = validate_supported_geographic_or_ellipsoidal_height_semantics(
-        "PROJJSON geographic CRS",
-        coordinate_system_angle_unit_to_degree(value)?,
-        prime_meridian_degrees_from_json(value),
-        &coordinate_system,
-        AxisOrderPolicy::Strict,
-    )?;
+    let (coordinate_system_kind, axis_order) =
+        validate_supported_geographic_or_ellipsoidal_height_semantics(
+            "PROJJSON geographic CRS",
+            coordinate_system_angle_unit_to_degree(value)?,
+            prime_meridian_degrees_from_json(value),
+            &coordinate_system,
+        )?;
     let datum = infer_datum_from_json_crs(value)?;
-    let horizontal = GeographicCrsDef::new(0, datum.clone(), "");
+    let horizontal = GeographicCrsDef::new(0, datum.clone(), "").with_axis_order(axis_order);
 
     match coordinate_system_kind {
         GeographicCoordinateSystemKind::TwoDimensional => Ok(CrsDef::Geographic(horizontal)),
@@ -221,22 +221,20 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         .ok_or_else(|| ParseError::Parse("PROJJSON projected CRS is missing base_crs".into()))?;
     let datum = infer_datum_from_json_crs(base_crs)?;
     let linear_unit = projected_linear_unit(value)?.unwrap_or_else(LinearUnit::metre);
-    validate_supported_projected_semantics(
+    let axis_order = validate_supported_projected_semantics(
         "PROJJSON projected CRS",
         &coordinate_system_from_json(value),
-        AxisOrderPolicy::Strict,
     )?;
 
     let base_angle_unit_to_degree =
         coordinate_system_angle_unit_to_degree(base_crs)?.unwrap_or(1.0);
-    // Base CRS axis order has no bearing on the projected axes, which were
-    // validated above. PROJ emits it in latitude-first EPSG order.
+    // Base CRS axis order has no bearing on the projected axes read above. PROJ
+    // emits it in latitude-first EPSG order.
     validate_supported_geographic_semantics(
         "PROJJSON projected base geographic CRS",
         Some(base_angle_unit_to_degree),
         prime_meridian_degrees_from_json(base_crs),
         &coordinate_system_from_json(base_crs),
-        AxisOrderPolicy::NormalizePermutation,
     )?;
     let method_name = conversion
         .get("method")
@@ -600,13 +598,9 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
         }
     };
 
-    Ok(CrsDef::Projected(ProjectedCrsDef::new(
-        0,
-        datum,
-        method,
-        linear_unit,
-        "",
-    )))
+    Ok(CrsDef::Projected(
+        ProjectedCrsDef::new(0, datum, method, linear_unit, "").with_axis_order(axis_order),
+    ))
 }
 
 fn parse_compound_projjson(value: &Value) -> Result<CrsDef> {
@@ -619,11 +613,9 @@ fn parse_compound_projjson(value: &Value) -> Result<CrsDef> {
 
     for component in components {
         match component.get("type").and_then(Value::as_str) {
-            Some("GeographicCRS" | "GeodeticCRS") if horizontal.is_none() => {
-                horizontal = Some(parse_geographic_projjson(component));
-            }
-            Some("ProjectedCRS") if horizontal.is_none() => {
-                horizontal = Some(parse_projected_projjson(component));
+            // A tagged component resolves like a standalone definition.
+            Some("GeographicCRS" | "GeodeticCRS" | "ProjectedCRS") if horizontal.is_none() => {
+                horizontal = Some(parse_projjson_value(component));
             }
             Some("VerticalCRS") if vertical.is_none() => {
                 vertical = Some(parse_vertical_projjson(component));
@@ -1164,6 +1156,7 @@ fn first_param(params: &HashMap<String, f64>, names: &[&str]) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use proj_core::AxisOrder;
 
     const US_FOOT_TO_METER: f64 = 0.3048006096012192;
 
@@ -1378,8 +1371,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_projjson_with_top_level_epsg_and_reversed_axes() {
-        let err = parse_projjson(
+    fn tagged_projjson_keeps_its_declared_axis_order() {
+        let crs = parse_projjson(
             r#"{
                 "type": "GeographicCRS",
                 "name": "WGS 84",
@@ -1402,11 +1395,9 @@ mod tests {
                 "id": { "authority": "EPSG", "code": 4326 }
             }"#,
         )
-        .unwrap_err();
-
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert_eq!(crs.epsg(), 4326);
     }
 
     #[test]
@@ -1460,8 +1451,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_projjson_geographic_with_reversed_axes() {
-        let err = parse_projjson(
+    fn geographic_projjson_keeps_its_declared_axis_order() {
+        let crs = parse_projjson(
             r#"{
                 "type": "GeographicCRS",
                 "name": "Custom reversed axes",
@@ -1478,11 +1469,9 @@ mod tests {
                 }
             }"#,
         )
-        .unwrap_err();
-
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert_eq!(crs.epsg(), 0);
     }
 
     #[test]
@@ -1854,8 +1843,8 @@ mod tests {
     }
 
     #[test]
-    fn rejects_projected_projjson_with_reversed_projected_axes() {
-        let err = parse_projjson(
+    fn projected_projjson_keeps_its_declared_axis_order() {
+        let crs = parse_projjson(
             r#"{
                 "type": "ProjectedCRS",
                 "name": "Custom TM",
@@ -1893,11 +1882,9 @@ mod tests {
                 }
             }"#,
         )
-        .unwrap_err();
-
-        assert!(err
-            .to_string()
-            .contains("unsupported axis order/directions"));
+        .unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert!(crs.is_projected());
     }
 
     #[test]
