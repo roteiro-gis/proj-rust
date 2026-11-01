@@ -135,12 +135,14 @@ fn parse_projected_projjson(value: &Value) -> Result<CrsDef> {
 
     let base_angle_unit_to_degree =
         coordinate_system_angle_unit_to_degree(base_crs)?.unwrap_or(1.0);
+    // Base CRS axis order has no bearing on the projected axes, which were
+    // validated above. PROJ emits it in latitude-first EPSG order.
     validate_supported_geographic_semantics(
         "PROJJSON projected base geographic CRS",
         Some(base_angle_unit_to_degree),
         prime_meridian_degrees_from_json(base_crs),
         &coordinate_system_from_json(base_crs),
-        AxisOrderPolicy::Strict,
+        AxisOrderPolicy::NormalizePermutation,
     )?;
     let method_name = conversion
         .get("method")

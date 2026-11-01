@@ -360,12 +360,14 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         &base_coordinate_system,
     )?
     .unwrap_or(1.0);
+    // Base CRS axis order has no bearing on the projected axes, which were
+    // validated above.
     validate_supported_geographic_semantics(
         "WKT projected base geographic CRS",
         Some(base_angle_unit_to_degree),
         extract_prime_meridian_degrees(base_geographic_inner, base_angle_unit_to_degree),
         &base_coordinate_system,
-        axis_order_policy,
+        AxisOrderPolicy::NormalizePermutation,
     )?;
     let params = parse_wkt_parameters(s, projected_linear_unit, base_angle_unit_to_degree)?;
 
