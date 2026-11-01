@@ -1,6 +1,7 @@
 use proj_core::{
-    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
-    LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HelmertParams,
+    HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
+    VerticalCrsKind,
 };
 
 use crate::{ParseError, Result};
@@ -591,10 +592,41 @@ fn format_vertical_datum(
 fn format_datum(datum: &Datum, datum_epsg: Option<u32>) -> Result<String> {
     let info = datum_wkt(datum, datum_epsg)?;
     let mut fields = vec![quote(&info.name), format_spheroid(&info.ellipsoid)?];
+    if let Some(helmert) = declared_helmert(datum) {
+        let values = [
+            helmert.dx(),
+            helmert.dy(),
+            helmert.dz(),
+            helmert.rx(),
+            helmert.ry(),
+            helmert.rz(),
+            helmert.ds(),
+        ];
+        fields.push(format!("TOWGS84[{}]", values.map(format_f64).join(",")));
+    }
     if let Some(code) = info.datum_epsg {
         fields.push(format_authority(code));
     }
     Ok(format!("DATUM[{}]", fields.join(",")))
+}
+
+/// The Helmert shift a definition declared on `datum`, if any.
+pub(crate) fn declared_helmert(datum: &Datum) -> Option<&HelmertParams> {
+    datum.helmert_to_wgs84().filter(|_| datum.declares_shift())
+}
+
+/// Position Vector parameters of a declared shift as named by EPSG, with their
+/// parameter codes, in metres, arc-seconds, and parts per million.
+pub(crate) fn helmert_parameters(helmert: &HelmertParams) -> [(&'static str, u32, f64); 7] {
+    [
+        ("X-axis translation", 8605, helmert.dx()),
+        ("Y-axis translation", 8606, helmert.dy()),
+        ("Z-axis translation", 8607, helmert.dz()),
+        ("X-axis rotation", 8608, helmert.rx()),
+        ("Y-axis rotation", 8609, helmert.ry()),
+        ("Z-axis rotation", 8610, helmert.rz()),
+        ("Scale difference", 8611, helmert.ds()),
+    ]
 }
 
 fn format_spheroid(ellipsoid: &EllipsoidWkt) -> Result<String> {
@@ -651,6 +683,12 @@ fn authority_code(code: u32) -> Option<u32> {
 }
 
 pub(crate) fn datum_wkt(datum: &Datum, datum_epsg: Option<u32>) -> Result<DatumWkt> {
+    if datum.declares_shift() && datum.uses_grid_shift() {
+        return Err(ParseError::UnsupportedSemantics(
+            "a datum's declared grid shift cannot be serialized".into(),
+        ));
+    }
+
     if let Some(code) = datum_epsg {
         if let Some(known) = known_datum(code) {
             return Ok(known.with_datum(datum));

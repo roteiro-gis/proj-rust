@@ -31,8 +31,9 @@
 //! Datum shifts a definition declares itself, through PROJ `+nadgrids` or
 //! `+towgs84`, WKT1 `TOWGS84`, or a WKT2/PROJJSON bound CRS, are applied by
 //! [`transform_from_crs_strings`], [`transform_from_crs_strings_with_selection_options`],
-//! and the [`Proj`] facade as explicit custom coordinate operations; plain
-//! [`parse_crs`] returns only the CRS definition.
+//! and the [`Proj`] facade as explicit custom coordinate operations. The parsed
+//! definition's datum carries the shift, so [`proj_core::Transform::from_crs_defs`]
+//! rejects it rather than choosing a registry operation in its place.
 //! Other axis orders and directions, and unsupported prime-meridian, geographic
 //! angular-unit, and vertical transformation semantics, are rejected.
 //!
@@ -58,7 +59,7 @@ mod wkt_writer;
 
 use proj_core::{
     AreaOfInterest, Bounds, CompoundCrsDef, Coord, Coord3D, CoordinateOperation,
-    CoordinateOperationId, CrsDef, DatumGridShift, DatumToWgs84, HelmertParams, OperationMethod,
+    CoordinateOperationId, CrsDef, Datum, DatumToWgs84, HelmertParams, OperationMethod,
     SelectionOptions, Transform, Transformable, Transformable3D,
 };
 
@@ -78,27 +79,6 @@ pub enum ParseError {
 
 pub type Result<T> = std::result::Result<T, ParseError>;
 
-#[derive(Clone)]
-struct ParsedCrs {
-    crs: CrsDef,
-    grid_shift_to_wgs84: Option<DatumGridShift>,
-    helmert_to_wgs84: Option<HelmertParams>,
-}
-
-impl ParsedCrs {
-    fn new(crs: CrsDef) -> Self {
-        Self {
-            crs,
-            grid_shift_to_wgs84: None,
-            helmert_to_wgs84: None,
-        }
-    }
-
-    fn declares_datum_shift(&self) -> bool {
-        self.grid_shift_to_wgs84.is_some() || self.helmert_to_wgs84.is_some()
-    }
-}
-
 /// Parse a CRS definition string in any supported format.
 ///
 /// Automatically detects and handles:
@@ -117,84 +97,50 @@ impl ParsedCrs {
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}` or geocentric `GeodeticCRS`
 /// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `GEOCCS[...]` / `COMPD_CS[...]`
 /// - **WKT2**: `GEODCRS[...]` / `GEOGCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]` /
-///   `BOUNDCRS[...]`, which returns its source CRS, and the long-form `GEODETICCRS`,
-///   `GEOGRAPHICCRS`, and `PROJECTEDCRS` keywords
+///   `BOUNDCRS[...]`, which returns its source CRS with the declared shift in its
+///   datum, and the long-form `GEODETICCRS`, `GEOGRAPHICCRS`, and `PROJECTEDCRS`
+///   keywords
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
-    Ok(parse_crs_definition(s)?.crs)
-}
-
-/// Serialize a CRS definition as WKT1-style `GEOGCS`, `PROJCS`, `GEOCCS`, or
-/// `COMPD_CS`.
-///
-/// Projection false easting/northing parameters are emitted in the CRS native
-/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
-/// meters.
-pub fn to_wkt(crs: &CrsDef) -> Result<String> {
-    wkt_writer::to_wkt(crs)
-}
-
-/// Serialize a CRS definition as WKT2 (ISO 19162) `GEOGCRS`, geocentric
-/// `GEODCRS`, `PROJCRS`, or `COMPOUNDCRS`.
-///
-/// Projection false easting/northing parameters are emitted in the CRS native
-/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
-/// meters. The emitted text reparses through [`parse_crs`] to an equivalent
-/// definition.
-pub fn to_wkt2(crs: &CrsDef) -> Result<String> {
-    wkt2_writer::to_wkt2(crs)
-}
-
-/// Serialize a CRS definition as PROJJSON.
-///
-/// The emitted document reparses through [`parse_crs`] to an equivalent
-/// definition; EPSG identities present on the definition are preserved.
-pub fn to_projjson(crs: &CrsDef) -> Result<String> {
-    let value = projjson_writer::to_projjson_value(crs)?;
-    serde_json::to_string(&value)
-        .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
-}
-
-fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
     let s = s.trim();
 
     let upper = s.to_uppercase();
     if let Some(code) = ogc_crs_alias(&upper) {
-        return lookup_ogc_crs(code).map(ParsedCrs::new);
+        return lookup_ogc_crs(code);
     }
 
     if upper.starts_with("URN:") {
-        return parse_ogc_crs_urn(s).map(ParsedCrs::new);
+        return parse_ogc_crs_urn(s);
     }
 
     if upper.starts_with("HTTP://") || upper.starts_with("HTTPS://") {
-        return parse_ogc_crs_uri(s).map(ParsedCrs::new);
+        return parse_ogc_crs_uri(s);
     }
 
     // EPSG authority code, optionally a horizontal+vertical pair
     if let Some((authority, codes)) = s.split_once(':') {
         if authority.trim().eq_ignore_ascii_case("EPSG") {
             if let Some((horizontal, vertical)) = codes.split_once('+') {
-                return lookup_epsg_compound(horizontal, vertical).map(ParsedCrs::new);
+                return lookup_epsg_compound(horizontal, vertical);
             }
-            return Ok(ParsedCrs::new(proj_core::lookup_authority_code(s)?));
+            return Ok(proj_core::lookup_authority_code(s)?);
         }
     }
 
     // Bare numeric EPSG code (e.g., "4326")
     if let Ok(code) = s.parse::<u32>() {
         if let Some(crs) = proj_core::lookup_epsg(code) {
-            return Ok(ParsedCrs::new(crs));
+            return Ok(crs);
         }
     }
 
     // PROJ string
     if s.starts_with('+') {
-        return proj_string::parse_proj_string_with_operations(s);
+        return proj_string::parse_proj_string(s);
     }
 
     // PROJJSON
     if s.starts_with('{') {
-        return projjson::parse_projjson_with_operations(s);
+        return projjson::parse_projjson(s);
     }
 
     // WKT
@@ -214,13 +160,53 @@ fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
         || upper.starts_with("VERTCRS")
         || upper.starts_with("VERTICALCRS")
     {
-        return wkt::parse_wkt_with_operations(s);
+        return wkt::parse_wkt(s);
     }
 
     Err(ParseError::Parse(format!(
         "unrecognized CRS format: {:.80}",
         s
     )))
+}
+
+/// Serialize a CRS definition as WKT1-style `GEOGCS`, `PROJCS`, `GEOCCS`, or
+/// `COMPD_CS`.
+///
+/// A datum's declared Helmert shift is written as `TOWGS84`. A declared grid
+/// shift has no WKT form and is an error.
+///
+/// Projection false easting/northing parameters are emitted in the CRS native
+/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
+/// meters.
+pub fn to_wkt(crs: &CrsDef) -> Result<String> {
+    wkt_writer::to_wkt(crs)
+}
+
+/// Serialize a CRS definition as WKT2 (ISO 19162) `GEOGCRS`, geocentric
+/// `GEODCRS`, `PROJCRS`, or `COMPOUNDCRS`.
+///
+/// A datum's declared Helmert shift is written as a `BOUNDCRS` to EPSG:4326. A
+/// declared grid shift has no WKT form and is an error.
+///
+/// Projection false easting/northing parameters are emitted in the CRS native
+/// linear unit, while the `proj_core::ProjectionMethod` model stores them in
+/// meters. The emitted text reparses through [`parse_crs`] to an equivalent
+/// definition.
+pub fn to_wkt2(crs: &CrsDef) -> Result<String> {
+    wkt2_writer::to_wkt2(crs)
+}
+
+/// Serialize a CRS definition as PROJJSON.
+///
+/// A datum's declared Helmert shift is written as a `BoundCRS` to EPSG:4326. A
+/// declared grid shift has no PROJJSON form and is an error.
+///
+/// The emitted document reparses through [`parse_crs`] to an equivalent
+/// definition; EPSG identities present on the definition are preserved.
+pub fn to_projjson(crs: &CrsDef) -> Result<String> {
+    let value = projjson_writer::to_projjson_value(crs)?;
+    serde_json::to_string(&value)
+        .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
 }
 
 /// Short OGC CRS identifier, such as `CRS:84` or `OGC:CRS84`, without its prefix.
@@ -404,13 +390,11 @@ pub fn transform_from_crs_strings_with_selection_options(
     to: &str,
     options: SelectionOptions,
 ) -> std::result::Result<proj_core::Transform, ParseError> {
-    let from_crs = parse_crs_definition(from)?;
-    let to_crs = parse_crs_definition(to)?;
+    let from_crs = parse_crs(from)?;
+    let to_crs = parse_crs(to)?;
     let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(proj_core::Transform::from_crs_defs_with_selection_options(
-        &from_crs.crs,
-        &to_crs.crs,
-        options,
+        &from_crs, &to_crs, options,
     )?)
 }
 
@@ -437,22 +421,20 @@ pub fn transform_from_crs_strings_horizontal_with_selection_options(
     to: &str,
     options: SelectionOptions,
 ) -> std::result::Result<proj_core::Transform, ParseError> {
-    let from_crs = parse_crs_definition(from)?;
-    let to_crs = parse_crs_definition(to)?;
+    let from_crs = parse_crs(from)?;
+    let to_crs = parse_crs(to)?;
     let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(
         proj_core::Transform::from_horizontal_components_with_selection_options(
-            &from_crs.crs,
-            &to_crs.crs,
-            options,
+            &from_crs, &to_crs, options,
         )?,
     )
 }
 
 fn with_parsed_coordinate_operations(
     options: SelectionOptions,
-    source: &ParsedCrs,
-    target: &ParsedCrs,
+    source: &CrsDef,
+    target: &CrsDef,
 ) -> SelectionOptions {
     if let Some(operation) = parsed_datum_operation(source, target) {
         options.with_coordinate_operation(operation)
@@ -463,10 +445,23 @@ fn with_parsed_coordinate_operations(
 
 /// Build the explicit operation for a shift the definitions declare through
 /// `+nadgrids`, `+towgs84`, or WKT1 `TOWGS84`. Selection never derives one from
-/// datum metadata, so `parse_crs` with `Transform::from_crs_defs` omits it.
-fn parsed_datum_operation(source: &ParsedCrs, target: &ParsedCrs) -> Option<CoordinateOperation> {
-    if !source.declares_datum_shift() && !target.declares_datum_shift() {
+/// datum metadata, so `parse_crs` with `Transform::from_crs_defs` fails closed
+/// on such a definition instead of choosing a registry operation over it.
+fn parsed_datum_operation(source: &CrsDef, target: &CrsDef) -> Option<CoordinateOperation> {
+    if !declares_datum_shift(source) && !declares_datum_shift(target) {
         return None;
+    }
+
+    // A shift bridges to WGS 84, so as in C PROJ it plays no part towards the
+    // definition's own base CRS.
+    let source_base = source.base_geographic_crs_epsg();
+    if source_base.is_some() && source_base == target.base_geographic_crs_epsg() {
+        return Some(parsed_coordinate_operation(
+            source,
+            target,
+            "Parsed definition of the same base CRS",
+            OperationMethod::Identity,
+        ));
     }
 
     if parsed_grid_datums_match(source, target) {
@@ -477,7 +472,7 @@ fn parsed_datum_operation(source: &ParsedCrs, target: &ParsedCrs) -> Option<Coor
             OperationMethod::Identity,
         ));
     }
-    if source.crs.datum().same_datum(target.crs.datum()) {
+    if source.datum().same_datum(target.datum()) {
         return None;
     }
 
@@ -487,7 +482,7 @@ fn parsed_datum_operation(source: &ParsedCrs, target: &ParsedCrs) -> Option<Coor
     Some(parsed_coordinate_operation(
         source,
         target,
-        if source.grid_shift_to_wgs84.is_some() || target.grid_shift_to_wgs84.is_some() {
+        if source.datum().uses_grid_shift() || target.datum().uses_grid_shift() {
             "Parsed +nadgrids datum shift"
         } else {
             "Parsed +towgs84 datum shift"
@@ -500,16 +495,16 @@ fn parsed_datum_operation(source: &ParsedCrs, target: &ParsedCrs) -> Option<Coor
 }
 
 fn parsed_coordinate_operation(
-    source: &ParsedCrs,
-    target: &ParsedCrs,
+    source: &CrsDef,
+    target: &CrsDef,
     name: &str,
     method: OperationMethod,
 ) -> CoordinateOperation {
     CoordinateOperation {
         id: None,
         name: name.into(),
-        source_crs_epsg: source.crs.base_geographic_crs_epsg(),
-        target_crs_epsg: target.crs.base_geographic_crs_epsg(),
+        source_crs_epsg: source.base_geographic_crs_epsg(),
+        target_crs_epsg: target.base_geographic_crs_epsg(),
         source_datum_epsg: None,
         target_datum_epsg: None,
         accuracy: None,
@@ -523,13 +518,8 @@ fn parsed_coordinate_operation(
     }
 }
 
-fn parsed_grid_datums_match(source: &ParsedCrs, target: &ParsedCrs) -> bool {
-    source.grid_shift_to_wgs84.is_some()
-        && source.grid_shift_to_wgs84 == target.grid_shift_to_wgs84
-        && same_ellipsoid(
-            source.crs.datum().ellipsoid(),
-            target.crs.datum().ellipsoid(),
-        )
+fn parsed_grid_datums_match(source: &CrsDef, target: &CrsDef) -> bool {
+    source.datum().uses_grid_shift() && source.datum().same_datum(target.datum())
 }
 
 fn same_ellipsoid(left: proj_core::Ellipsoid, right: proj_core::Ellipsoid) -> bool {
@@ -537,24 +527,34 @@ fn same_ellipsoid(left: proj_core::Ellipsoid, right: proj_core::Ellipsoid) -> bo
         && (left.flattening() - right.flattening()).abs() < 1e-12
 }
 
-fn parsed_datum_to_wgs84(parsed: &ParsedCrs) -> Option<DatumToWgs84> {
-    if let Some(grid_shift) = &parsed.grid_shift_to_wgs84 {
-        return Some(DatumToWgs84::GridShift(Box::new(grid_shift.clone())));
-    }
-    if let Some(helmert) = parsed.helmert_to_wgs84 {
-        return Some(DatumToWgs84::Helmert(helmert));
-    }
+/// True when the definition itself states how its datum reaches WGS 84.
+fn declares_datum_shift(crs: &CrsDef) -> bool {
+    let datum = crs.datum();
+    datum.epsg() == 0 && !matches!(datum.to_wgs84(), DatumToWgs84::Unknown)
+}
 
-    if is_wgs84_datum_definition(parsed) {
-        Some(DatumToWgs84::Identity)
+fn parsed_datum_to_wgs84(crs: &CrsDef) -> Option<DatumToWgs84> {
+    if declares_datum_shift(crs) {
+        Some(crs.datum().to_wgs84().clone())
     } else {
-        None
+        is_wgs84_datum_definition(crs).then_some(DatumToWgs84::Identity)
     }
 }
 
-fn is_wgs84_datum_definition(parsed: &ParsedCrs) -> bool {
-    parsed.crs.base_geographic_crs_epsg() == Some(4326)
-        || parsed.crs.datum().same_datum(&proj_core::datum::WGS84)
+fn is_wgs84_datum_definition(crs: &CrsDef) -> bool {
+    crs.base_geographic_crs_epsg() == Some(4326) || crs.datum().same_datum(&proj_core::datum::WGS84)
+}
+
+/// Give `crs` the datum shift its definition declares.
+///
+/// A null shift on a WGS 84-compatible datum, as GDAL writes for `EPSG:4326`,
+/// states nothing the datum does not, so that CRS keeps its registry identity.
+fn with_declared_shift(crs: CrsDef, helmert: HelmertParams) -> Result<CrsDef> {
+    if helmert == HelmertParams::identity() && crs.datum().is_wgs84_compatible() {
+        return Ok(crs);
+    }
+    let datum = Datum::new(crs.datum().ellipsoid(), DatumToWgs84::Helmert(helmert))?;
+    Ok(crs.with_datum(datum))
 }
 
 fn compatibility_selection_options(
@@ -681,7 +681,7 @@ pub struct Proj {
 }
 
 enum ProjInner {
-    Definition(Box<ParsedCrs>),
+    Definition(Box<CrsDef>),
     Transform(Box<Transform>),
 }
 
@@ -689,7 +689,7 @@ impl Proj {
     /// Parse a single CRS definition in any supported format.
     pub fn new(definition: &str) -> Result<Self> {
         Ok(Self {
-            inner: ProjInner::Definition(Box::new(parse_crs_definition(definition)?)),
+            inner: ProjInner::Definition(Box::new(parse_crs(definition)?)),
         })
     }
 
@@ -761,9 +761,7 @@ impl Proj {
         let options = with_parsed_coordinate_operations(options, source, target);
         Ok(Self {
             inner: ProjInner::Transform(Box::new(Transform::from_crs_defs_with_selection_options(
-                &source.crs,
-                &target.crs,
-                options,
+                source, target, options,
             )?)),
         })
     }
@@ -793,9 +791,7 @@ impl Proj {
         Ok(Self {
             inner: ProjInner::Transform(Box::new(
                 Transform::from_horizontal_components_with_selection_options(
-                    &source.crs,
-                    &target.crs,
-                    options,
+                    source, target, options,
                 )?,
             )),
         })
@@ -857,7 +853,7 @@ impl Proj {
         }
     }
 
-    fn parsed_definition(&self) -> Result<&ParsedCrs> {
+    fn parsed_definition(&self) -> Result<&CrsDef> {
         match &self.inner {
             ProjInner::Definition(parsed) => Ok(parsed.as_ref()),
             ProjInner::Transform(_) => Err(ParseError::Parse(
@@ -1388,16 +1384,138 @@ mod tests {
         assert_eq!(transform.selected_operation().name, "Identity");
     }
 
+    /// GDAL's classic EPSG:27700, which tags a `TOWGS84` onto the authority
+    /// definition, with a shift far enough from any registry operation to tell.
+    const OSGB_TAGGED_TOWGS84: &str = r#"PROJCS["OSGB36 / British National Grid",GEOGCS["OSGB36",DATUM["Ordnance_Survey_of_Great_Britain_1936",SPHEROID["Airy 1830",6377563.396,299.3249646],TOWGS84[1000,0,0,0,0,0,0],AUTHORITY["EPSG","6277"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4277"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","27700"]]"#;
+    const NAD83_NAMED_TOWGS84: &str = r#"GEOGCS["NAD83",DATUM["North_American_Datum_1983",SPHEROID["GRS 1980",6378137,298.257222101],TOWGS84[1000,0,0,0,0,0,0]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]]"#;
+
     #[test]
-    fn epsg_tagged_wkt_keeps_the_registry_operation() {
-        // GDAL's classic EPSG:27700 tags a TOWGS84 onto the authority definition.
-        let wkt = r#"PROJCS["OSGB36 / British National Grid",GEOGCS["OSGB36",DATUM["Ordnance_Survey_of_Great_Britain_1936",SPHEROID["Airy 1830",6377563.396,299.3249646],TOWGS84[446.448,-125.157,542.06,0.15,0.247,0.842,-20.489],AUTHORITY["EPSG","6277"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4277"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","27700"]]"#;
-        let tagged = transform_from_crs_strings(wkt, "EPSG:4326").unwrap();
-        let registry = Transform::new("EPSG:27700", "EPSG:4326").unwrap();
-        assert_eq!(
-            tagged.selected_operation().id,
-            registry.selected_operation().id
+    fn declared_shift_beats_the_registry_like_c_proj() {
+        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`.
+        let tagged = transform_from_crs_strings(OSGB_TAGGED_TOWGS84, "EPSG:4326").unwrap();
+        let (lon, lat) = tagged.convert((530_000.0, 180_000.0)).unwrap();
+        assert!((lon - -0.126716).abs() < 1e-6 && (lat - 51.497131).abs() < 1e-6);
+        assert_eq!(tagged.source_crs().epsg(), 27700);
+
+        let named = transform_from_crs_strings(NAD83_NAMED_TOWGS84, "EPSG:4326").unwrap();
+        let (lon, lat) = named.convert((-75.0, 45.0)).unwrap();
+        assert!((lon - -74.987750).abs() < 1e-6 && (lat - 44.998353).abs() < 1e-6);
+    }
+
+    #[test]
+    fn declared_shift_plays_no_part_towards_its_own_base_crs() {
+        // C PROJ gives the unshifted results for these.
+        let point = (530_000.0, 180_000.0);
+        let to_base = transform_from_crs_strings(OSGB_TAGGED_TOWGS84, "EPSG:4277")
+            .unwrap()
+            .convert(point)
+            .unwrap();
+        let registry = Transform::new("EPSG:27700", "EPSG:4277")
+            .unwrap()
+            .convert(point)
+            .unwrap();
+        assert_close(to_base, registry, "own base CRS");
+
+        let to_itself = transform_from_crs_strings(OSGB_TAGGED_TOWGS84, "EPSG:27700").unwrap();
+        let (x, y) = to_itself.convert(point).unwrap();
+        assert!((x - point.0).abs() < 1e-6 && (y - point.1).abs() < 1e-6);
+    }
+
+    #[test]
+    fn parse_crs_keeps_a_declared_shift_in_the_datum() {
+        let target = parse_crs("EPSG:4326").unwrap();
+        for definition in [OSGB_TAGGED_TOWGS84, NAD83_NAMED_TOWGS84, BESSEL_BOUND_WKT2] {
+            let crs = parse_crs(definition).unwrap();
+            assert!(crs.datum().declares_shift(), "{definition}");
+            // Selection must not fall back to a registry operation over it.
+            assert!(
+                Transform::from_crs_defs(&crs, &target).is_err(),
+                "{definition}"
+            );
+        }
+        assert_eq!(parse_crs(OSGB_TAGGED_TOWGS84).unwrap().epsg(), 27700);
+    }
+
+    #[test]
+    fn null_shift_on_a_wgs84_compatible_datum_keeps_the_registry_identity() {
+        // GDAL writes this for EPSG:4326, and it says nothing new.
+        let wkt = r#"GEOGCS["WGS 84",DATUM["WGS_1984",SPHEROID["WGS 84",6378137,298.257223563],TOWGS84[0,0,0,0,0,0,0],AUTHORITY["EPSG","6326"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4326"]]"#;
+        let crs = parse_crs(wkt).unwrap();
+        assert!(!crs.datum().declares_shift());
+        let transform = Transform::from_crs_defs(&crs, &parse_crs("EPSG:3857").unwrap());
+        assert!(transform.is_ok());
+    }
+
+    #[test]
+    fn writers_keep_a_declared_shift() {
+        let point = (5.0, 52.0);
+        let definition = format!("+proj=longlat +ellps=bessel +towgs84={RD_TOWGS84} +no_defs");
+        let original = parse_crs(&definition).unwrap();
+        let expected = transform_from_crs_strings(&definition, "EPSG:4326")
+            .unwrap()
+            .convert(point)
+            .unwrap();
+
+        for written in [
+            to_wkt(&original).unwrap(),
+            to_wkt2(&original).unwrap(),
+            to_projjson(&original).unwrap(),
+        ] {
+            let reparsed = parse_crs(&written).unwrap_or_else(|err| panic!("{written}: {err}"));
+            assert!(original.semantically_equivalent(&reparsed), "{written}");
+            let transform = transform_from_crs_strings(&written, "EPSG:4326").unwrap();
+            assert_close(transform.convert(point).unwrap(), expected, &written);
+        }
+
+        let tagged = parse_crs(OSGB_TAGGED_TOWGS84).unwrap();
+        for written in [
+            to_wkt(&tagged).unwrap(),
+            to_wkt2(&tagged).unwrap(),
+            to_projjson(&tagged).unwrap(),
+        ] {
+            let reparsed = parse_crs(&written).unwrap_or_else(|err| panic!("{written}: {err}"));
+            assert_eq!(reparsed.epsg(), 27700, "{written}");
+            assert!(reparsed.datum().declares_shift(), "{written}");
+        }
+    }
+
+    #[test]
+    fn declared_axis_order_and_shift_work_together() {
+        let wkt = format!(
+            r#"{},AXIS["Latitude",NORTH],AXIS["Longitude",EAST]]"#,
+            BESSEL_TOWGS84_WKT1.strip_suffix(']').unwrap()
         );
+        let crs = parse_crs(&wkt).unwrap();
+        assert_eq!(crs.axis_order(), Some(AxisOrder::NorthEast));
+        assert!(crs.datum().declares_shift());
+
+        let expected = transform_from_crs_strings(BESSEL_TOWGS84_WKT1, "EPSG:4326")
+            .unwrap()
+            .convert((5.0, 52.0))
+            .unwrap();
+        let actual = transform_from_crs_strings(&wkt, "EPSG:4326")
+            .unwrap()
+            .convert((52.0, 5.0))
+            .unwrap();
+        assert_close(actual, expected, "latitude-first declared shift");
+
+        for written in [
+            to_wkt(&crs).unwrap(),
+            to_wkt2(&crs).unwrap(),
+            to_projjson(&crs).unwrap(),
+        ] {
+            let reparsed = parse_crs(&written).unwrap_or_else(|err| panic!("{written}: {err}"));
+            assert!(crs.semantically_equivalent(&reparsed), "{written}");
+        }
+    }
+
+    #[test]
+    fn writers_reject_a_declared_grid_shift() {
+        let crs = parse_crs("+proj=longlat +ellps=clrk66 +nadgrids=ntv2_0.gsb").unwrap();
+        for result in [to_wkt(&crs), to_wkt2(&crs), to_projjson(&crs)] {
+            let err = result.unwrap_err().to_string();
+            assert!(err.contains("grid shift cannot be serialized"), "{err}");
+        }
     }
 
     #[test]
@@ -1429,6 +1547,15 @@ mod tests {
         let other_unit = BESSEL_BOUND_PROJJSON.replace("4.84813681109536e-06", "1.0");
         let err = parse_crs(&other_unit).unwrap_err();
         assert!(err.to_string().contains("unsupported unit"), "{err}");
+
+        // WKT abridged parameters have implied units, so one naming a unit
+        // cannot be read as if it used them.
+        let wkt_unit = BESSEL_BOUND_WKT2.replace(
+            r#"565.4171,ID["EPSG",8605]"#,
+            r#"565.4171,LENGTHUNIT["kilometre",1000],ID["EPSG",8605]"#,
+        );
+        let err = parse_crs(&wkt_unit).unwrap_err();
+        assert!(err.to_string().contains("names a unit"), "{err}");
     }
 
     #[test]

@@ -15,8 +15,8 @@ use proj_core::GridId;
 use proj_core::GridInterpolation;
 use proj_core::HelmertParams;
 
+use crate::same_ellipsoid;
 use crate::semantics::normalize_key;
-use crate::{same_ellipsoid, ParsedCrs};
 use crate::{ParseError, Result};
 
 const COMMON_PROJ_PARAMS: &[&str] = &[
@@ -45,22 +45,8 @@ const CASS_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
 const KROVAK_CONE_AXIS_DEGREES: f64 = 30.288_139_752_777_78;
 
 /// Parse a PROJ format string like `+proj=utm +zone=18 +datum=WGS84 +units=m`.
-#[cfg(test)]
 pub(crate) fn parse_proj_string(s: &str) -> Result<CrsDef> {
-    Ok(parse_proj_string_with_operations(s)?.crs)
-}
-
-pub(crate) fn parse_proj_string_with_operations(s: &str) -> Result<ParsedCrs> {
-    let params = parse_params(s)?;
-    let grid_shift_to_wgs84 = parse_nadgrids(&params)?.filter(DatumGridShift::uses_grid_shift);
-    let crs = parse_proj_params(&params)?;
-    let helmert_to_wgs84 = parse_helmert_to_wgs84(&params)?;
-
-    Ok(ParsedCrs {
-        crs,
-        grid_shift_to_wgs84,
-        helmert_to_wgs84,
-    })
+    parse_proj_params(&parse_params(s)?)
 }
 
 fn parse_proj_params(params: &HashMap<String, String>) -> Result<CrsDef> {
@@ -301,7 +287,7 @@ fn ellipsoid_from_a_b(a: f64, b: f64) -> Result<Ellipsoid> {
 
 fn datum_grid_shift_to_crs_datum_transform(grid_shift: DatumGridShift) -> DatumToWgs84 {
     if grid_shift.uses_grid_shift() {
-        DatumToWgs84::Unknown
+        DatumToWgs84::GridShift(Box::new(grid_shift))
     } else {
         DatumToWgs84::Identity
     }
@@ -1400,18 +1386,12 @@ mod tests {
 
     #[test]
     fn parse_nadgrids_datum_shift() {
-        let parsed = parse_proj_string_with_operations(
-            "+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb",
-        )
-        .unwrap();
-        assert!(matches!(
-            parsed.crs.datum().to_wgs84(),
-            DatumToWgs84::Unknown
-        ));
-        let grids = parsed
-            .grid_shift_to_wgs84
-            .as_ref()
-            .expect("expected parsed grid shift");
+        let crs =
+            parse_proj_string("+proj=longlat +ellps=clrk66 +nadgrids=@missing.gsb,ntv2_0.gsb")
+                .unwrap();
+        let DatumToWgs84::GridShift(grids) = crs.datum().to_wgs84() else {
+            panic!("expected the datum to carry its grid shift");
+        };
         assert_eq!(grids.entries().len(), 2);
     }
 

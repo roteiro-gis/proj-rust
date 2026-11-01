@@ -12,24 +12,24 @@ use crate::semantics::{
     AxisDirection, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
-use crate::{ParseError, ParsedCrs, Result};
+use crate::{with_declared_shift, ParseError, Result};
 use proj_core::{
     CompoundCrsDef, CrsDef, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef, LinearUnit,
     ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
 };
 
-/// Parse PROJJSON along with the WGS 84 shift a `BoundCRS` declares.
-pub(crate) fn parse_projjson_with_operations(s: &str) -> Result<ParsedCrs> {
+/// Parse PROJJSON, keeping the WGS 84 shift a `BoundCRS` declares in its datum.
+pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
     let value: Value =
         serde_json::from_str(s).map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
     if value.get("type").and_then(Value::as_str) == Some("BoundCRS") {
         return parse_bound_projjson(&value);
     }
-    parse_projjson_value(&value).map(ParsedCrs::new)
+    parse_projjson_value(&value)
 }
 
 /// Parse a `BoundCRS`, which is how PROJ writes a `+towgs84` definition.
-fn parse_bound_projjson(value: &Value) -> Result<ParsedCrs> {
+fn parse_bound_projjson(value: &Value) -> Result<CrsDef> {
     let element = |name: &str| {
         value
             .get(name)
@@ -50,11 +50,7 @@ fn parse_bound_projjson(value: &Value) -> Result<ParsedCrs> {
         bound_parameter(transformation, name)
     })?;
 
-    Ok(ParsedCrs {
-        crs: parse_projjson_value(element("source_crs")?)?,
-        grid_shift_to_wgs84: None,
-        helmert_to_wgs84: Some(helmert),
-    })
+    with_declared_shift(parse_projjson_value(element("source_crs")?)?, helmert)
 }
 
 /// Read a bound transformation parameter in metres, arc-seconds, or ppm.
@@ -107,11 +103,6 @@ fn bound_parameter(transformation: &Value, name: &str) -> Result<Option<f64>> {
         )));
     }
     Ok(Some(value))
-}
-
-#[cfg(test)]
-pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
-    Ok(parse_projjson_with_operations(s)?.crs)
 }
 
 fn parse_projjson_value(value: &Value) -> Result<CrsDef> {

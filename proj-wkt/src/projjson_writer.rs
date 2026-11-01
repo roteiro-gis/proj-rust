@@ -7,25 +7,78 @@
 //! asserted by tests and fuzzing.
 
 use proj_core::{
-    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
-    LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HelmertParams,
+    HorizontalCrsDef, LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
 };
 use serde_json::{json, Map, Value};
 
 use crate::wkt_writer::{
-    datum_wkt, projection_parameters, projection_wkt_name, vertical_datum_name, ParameterKind,
+    datum_wkt, declared_helmert, helmert_parameters, projection_parameters, projection_wkt_name,
+    vertical_datum_name, ParameterKind,
 };
 use crate::{ParseError, Result};
 
 const PROJJSON_SCHEMA: &str = "https://proj.org/schemas/v0.7/projjson.schema.json";
 
+fn crs_value(crs: &CrsDef) -> Result<Value> {
+    match crs {
+        CrsDef::Geographic(geographic) => geographic_crs_value(geographic, None),
+        CrsDef::Geocentric(geocentric) => geocentric_crs_value(geocentric),
+        CrsDef::Projected(projected) => projected_crs_value(projected),
+        CrsDef::Compound(compound) => compound_crs_value(compound),
+    }
+}
+
+/// Write `source` bound to EPSG:4326 by its declared shift, in the form C PROJ
+/// writes for `+towgs84`.
+fn bound_crs_value(source: Value, helmert: &HelmertParams) -> Result<Value> {
+    const ARC_SECOND_IN_RADIANS: f64 = std::f64::consts::PI / (180.0 * 3600.0);
+    let wgs84 = proj_core::lookup_epsg(4326)
+        .ok_or_else(|| ParseError::Parse("EPSG:4326 not found in registry".into()))?;
+    let parameters = helmert_parameters(helmert)
+        .into_iter()
+        .map(|(name, code, value)| {
+            let unit = match code {
+                8608..=8610 => json!({
+                    "type": "AngularUnit",
+                    "name": "arc-second",
+                    "conversion_factor": ARC_SECOND_IN_RADIANS,
+                }),
+                8611 => json!({
+                    "type": "ScaleUnit",
+                    "name": "parts per million",
+                    "conversion_factor": 1e-6,
+                }),
+                _ => json!("metre"),
+            };
+            Ok(json!({
+                "name": name,
+                "value": number(value)?,
+                "unit": unit,
+                "id": { "authority": "EPSG", "code": code },
+            }))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    Ok(json!({
+        "type": "BoundCRS",
+        "source_crs": source,
+        "target_crs": crs_value(&wgs84)?,
+        "transformation": {
+            "name": "Transformation to WGS 84",
+            "method": {
+                "name": "Position Vector transformation (geog2D domain)",
+                "id": { "authority": "EPSG", "code": 9606 },
+            },
+            "parameters": parameters,
+        },
+    }))
+}
+
 pub(crate) fn to_projjson_value(crs: &CrsDef) -> Result<Value> {
-    let mut value = match crs {
-        CrsDef::Geographic(geographic) => geographic_crs_value(geographic, None)?,
-        CrsDef::Geocentric(geocentric) => geocentric_crs_value(geocentric)?,
-        CrsDef::Projected(projected) => projected_crs_value(projected)?,
-        CrsDef::Compound(compound) => compound_crs_value(compound)?,
-    };
+    let mut value = crs_value(crs)?;
+    if let Some(helmert) = declared_helmert(crs.datum()) {
+        value = bound_crs_value(value, helmert)?;
+    }
     let object = crs_object_mut(&mut value)?;
     let mut with_schema = Map::new();
     with_schema.insert("$schema".into(), Value::String(PROJJSON_SCHEMA.into()));
