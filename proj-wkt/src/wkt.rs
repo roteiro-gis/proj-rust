@@ -1,6 +1,7 @@
 use crate::semantics::{
-    approx_eq, is_cartesian_3d_coordinate_system, linear_unit_from_meters_per_unit, normalize_key,
-    projection_parameter_unit_kind, radians_to_degrees_factor, resolve_structured_datum_or_custom,
+    approx_eq, helmert_from_bound_transformation, is_cartesian_3d_coordinate_system,
+    linear_unit_from_meters_per_unit, normalize_key, projection_parameter_unit_kind,
+    radians_to_degrees_factor, resolve_structured_datum_or_custom,
     validate_supported_geocentric_semantics,
     validate_supported_geographic_or_ellipsoidal_height_semantics,
     validate_supported_geographic_semantics, validate_supported_projected_semantics,
@@ -8,9 +9,9 @@ use crate::semantics::{
     AxisDirection, AxisOrderPolicy, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
-use crate::{ParseError, Result};
+use crate::{ParseError, ParsedCrs, Result};
 use proj_core::{
-    CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeocentricCrsDef, GeographicCrsDef,
+    CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeocentricCrsDef, GeographicCrsDef, HelmertParams,
     HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
     VerticalCrsKind,
 };
@@ -42,6 +43,121 @@ pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     }
 
     Ok(parsed)
+}
+
+/// Parse a WKT CRS along with the WGS 84 shift it declares.
+///
+/// An EPSG-tagged definition resolves to the registry, whose operations are
+/// authoritative, so GDAL's habit of tagging `TOWGS84` onto EPSG definitions
+/// does not override them.
+pub(crate) fn parse_wkt_with_operations(s: &str) -> Result<ParsedCrs> {
+    let s = s.trim();
+    if let Some((root, inner, _)) = parse_wkt_element(s, 0) {
+        if root.eq_ignore_ascii_case("BOUNDCRS") {
+            return parse_wkt_bound_crs(inner);
+        }
+    }
+    let crs = parse_wkt(s)?;
+    let helmert_to_wgs84 = if extract_top_level_epsg(s).is_some() {
+        None
+    } else {
+        declared_towgs84(s)?
+    };
+    Ok(ParsedCrs {
+        crs,
+        grid_shift_to_wgs84: None,
+        helmert_to_wgs84,
+    })
+}
+
+/// Parse a WKT2 `BOUNDCRS`, which is how PROJ writes a `+towgs84` definition.
+fn parse_wkt_bound_crs(inner: &str) -> Result<ParsedCrs> {
+    let element = |name: &str| {
+        find_top_level_element_inner(inner, &[name])
+            .ok_or_else(|| ParseError::Parse(format!("WKT BOUNDCRS is missing {name}")))
+    };
+    let target = element("TARGETCRS")?;
+    if extract_top_level_epsg(target.trim()) != Some(4326) {
+        return Err(ParseError::UnsupportedSemantics(
+            "WKT BOUNDCRS is only supported with an EPSG:4326 target".into(),
+        ));
+    }
+    let transformation = element("ABRIDGEDTRANSFORMATION")?;
+    let method = extract_wkt_value_case_insensitive(transformation, "METHOD")
+        .ok_or_else(|| ParseError::Parse("WKT BOUNDCRS is missing a method".into()))?;
+    let helmert = helmert_from_bound_transformation("WKT BOUNDCRS", &method, |name| {
+        abridged_parameter(transformation, name)
+    })?;
+
+    Ok(ParsedCrs {
+        crs: parse_wkt(element("SOURCECRS")?)?,
+        grid_shift_to_wgs84: None,
+        helmert_to_wgs84: Some(helmert),
+    })
+}
+
+/// Read an abridged transformation parameter. PROJ writes these without units
+/// in metres, arc-seconds, and a unity scale multiplier.
+fn abridged_parameter(transformation: &str, name: &str) -> Result<Option<f64>> {
+    let mut found = None;
+    for_each_top_level_element(transformation, |element, inner| {
+        if found.is_none() && element.eq_ignore_ascii_case("PARAMETER") {
+            let fields = split_top_level_fields(inner);
+            if fields
+                .first()
+                .is_some_and(|field| normalize_key(trim_wkt_token(field)) == name)
+            {
+                found = fields.get(1).map(|field| field.to_string());
+            }
+        }
+    });
+    let Some(value) = found else {
+        return Ok(None);
+    };
+    let value = value
+        .parse::<f64>()
+        .map_err(|_| ParseError::Parse(format!("invalid WKT BOUNDCRS parameter: {value}")))?;
+    Ok(Some(if name == "scaledifference" {
+        (value - 1.0) * 1e6
+    } else {
+        value
+    }))
+}
+
+/// Read the WKT1 `TOWGS84` element from the horizontal datum, if any.
+fn declared_towgs84(s: &str) -> Result<Option<HelmertParams>> {
+    let Some(root) = root_inner(s) else {
+        return Ok(None);
+    };
+    let horizontal = find_top_level_element_inner(root, &["PROJCS", "GEOGCS"]).unwrap_or(root);
+    let geographic = find_top_level_element_inner(horizontal, &["GEOGCS"]).unwrap_or(horizontal);
+    let towgs84 = find_top_level_element_inner(geographic, &["DATUM"])
+        .and_then(|datum| find_top_level_element_inner(datum, &["TOWGS84"]));
+    let Some(towgs84) = towgs84 else {
+        return Ok(None);
+    };
+
+    let values = split_top_level_fields(towgs84)
+        .into_iter()
+        .map(|field| {
+            field
+                .parse::<f64>()
+                .map_err(|_| ParseError::Parse(format!("invalid TOWGS84 value: {field}")))
+        })
+        .collect::<Result<Vec<_>>>()?;
+    let (translation, rotation_and_scale) = match values.as_slice() {
+        [dx, dy, dz] => ([*dx, *dy, *dz], [0.0; 4]),
+        [dx, dy, dz, rx, ry, rz, ds] => ([*dx, *dy, *dz], [*rx, *ry, *rz, *ds]),
+        _ => {
+            return Err(ParseError::Parse(format!(
+                "TOWGS84 requires 3 or 7 values, got {}",
+                values.len()
+            )));
+        }
+    };
+    let [dx, dy, dz] = translation;
+    let [rx, ry, rz, ds] = rotation_and_scale;
+    Ok(Some(HelmertParams::new(dx, dy, dz, rx, ry, rz, ds)?))
 }
 
 /// Extract a top-level EPSG code from AUTHORITY[...] or ID[...].

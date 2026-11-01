@@ -1,5 +1,5 @@
 use crate::{ParseError, Result};
-use proj_core::{Datum, LinearUnit, VerticalCrsDef};
+use proj_core::{Datum, HelmertParams, LinearUnit, VerticalCrsDef};
 
 const SEMANTICS_EPSILON: f64 = 1e-12;
 
@@ -507,6 +507,57 @@ fn ellipsoid_matches(
         || (aliases.iter().any(|alias| *alias == actual.name)
             && (actual.semi_major_axis - datum.ellipsoid().semi_major_axis()).abs() < 1e-9
             && (actual.inverse_flattening - expected_rf).abs() < 1e-9)
+}
+
+/// Build a Helmert shift to WGS 84 from a bound CRS transformation.
+///
+/// `parameter` returns a normalized parameter name's value in metres,
+/// arc-seconds, or parts per million.
+pub(crate) fn helmert_from_bound_transformation(
+    context: &str,
+    method: &str,
+    parameter: impl Fn(&str) -> Result<Option<f64>>,
+) -> Result<HelmertParams> {
+    let normalized = normalize_key(method);
+    let (rotates, rotation_sign) = if normalized.starts_with("geocentrictranslations") {
+        (false, 1.0)
+    } else if normalized.starts_with("positionvector") {
+        (true, 1.0)
+    } else if normalized.starts_with("coordinateframe") {
+        (true, -1.0)
+    } else {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "{context} uses unsupported transformation method `{method}`"
+        )));
+    };
+
+    let required = |name: &str| {
+        parameter(name)?.ok_or_else(|| {
+            ParseError::Parse(format!(
+                "{context} is missing transformation parameter `{name}`"
+            ))
+        })
+    };
+    let rotation = |name: &str| -> Result<f64> {
+        Ok(if rotates {
+            rotation_sign * required(name)?
+        } else {
+            0.0
+        })
+    };
+    Ok(HelmertParams::new(
+        required("xaxistranslation")?,
+        required("yaxistranslation")?,
+        required("zaxistranslation")?,
+        rotation("xaxisrotation")?,
+        rotation("yaxisrotation")?,
+        rotation("zaxisrotation")?,
+        if rotates {
+            required("scaledifference")?
+        } else {
+            0.0
+        },
+    )?)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

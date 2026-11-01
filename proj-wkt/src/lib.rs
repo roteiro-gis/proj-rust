@@ -24,7 +24,8 @@
 //! easting/northing axis order, and compound vertical components that can be
 //! preserved or unit-converted only when source and target vertical CRS
 //! definitions use the same vertical reference frame.
-//! Parsed PROJ `+nadgrids` metadata is applied by
+//! Datum shifts a definition declares itself, through PROJ `+nadgrids` or
+//! `+towgs84`, WKT1 `TOWGS84`, or a WKT2/PROJJSON bound CRS, are applied by
 //! [`transform_from_crs_strings`], [`transform_from_crs_strings_with_selection_options`],
 //! and the [`Proj`] facade as explicit custom coordinate operations; plain
 //! [`parse_crs`] returns only the CRS definition.
@@ -56,8 +57,8 @@ mod wkt_writer;
 
 use proj_core::{
     AreaOfInterest, Bounds, CompoundCrsDef, Coord, Coord3D, CoordinateOperation,
-    CoordinateOperationId, CrsDef, DatumGridShift, DatumToWgs84, OperationMethod, SelectionOptions,
-    Transform, Transformable, Transformable3D,
+    CoordinateOperationId, CrsDef, DatumGridShift, DatumToWgs84, HelmertParams, OperationMethod,
+    SelectionOptions, Transform, Transformable, Transformable3D,
 };
 
 /// Parse error.
@@ -80,6 +81,7 @@ pub type Result<T> = std::result::Result<T, ParseError>;
 struct ParsedCrs {
     crs: CrsDef,
     grid_shift_to_wgs84: Option<DatumGridShift>,
+    helmert_to_wgs84: Option<HelmertParams>,
 }
 
 impl ParsedCrs {
@@ -87,7 +89,12 @@ impl ParsedCrs {
         Self {
             crs,
             grid_shift_to_wgs84: None,
+            helmert_to_wgs84: None,
         }
+    }
+
+    fn declares_datum_shift(&self) -> bool {
+        self.grid_shift_to_wgs84.is_some() || self.helmert_to_wgs84.is_some()
     }
 }
 
@@ -105,8 +112,9 @@ impl ParsedCrs {
 /// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`, `"+proj=cart +datum=WGS84"`
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}` or geocentric `GeodeticCRS`
 /// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `GEOCCS[...]` / `COMPD_CS[...]`
-/// - **WKT2**: `GEODCRS[...]` / `GEOGCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`,
-///   and the long-form `GEODETICCRS`, `GEOGRAPHICCRS`, and `PROJECTEDCRS` keywords
+/// - **WKT2**: `GEODCRS[...]` / `GEOGCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]` /
+///   `BOUNDCRS[...]`, which returns its source CRS, and the long-form `GEODETICCRS`,
+///   `GEOGRAPHICCRS`, and `PROJECTEDCRS` keywords
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     Ok(parse_crs_definition(s)?.crs)
 }
@@ -182,7 +190,7 @@ fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
 
     // PROJJSON
     if s.starts_with('{') {
-        return projjson::parse_projjson(s).map(ParsedCrs::new);
+        return projjson::parse_projjson_with_operations(s);
     }
 
     // WKT
@@ -197,11 +205,12 @@ fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
         || upper.starts_with("PROJECTEDCRS")
         || upper.starts_with("COMPD_CS")
         || upper.starts_with("COMPOUNDCRS")
+        || upper.starts_with("BOUNDCRS")
         || upper.starts_with("VERT_CS")
         || upper.starts_with("VERTCRS")
         || upper.starts_with("VERTICALCRS")
     {
-        return wkt::parse_wkt(s).map(ParsedCrs::new);
+        return wkt::parse_wkt_with_operations(s);
     }
 
     Err(ParseError::Parse(format!(
@@ -416,18 +425,18 @@ fn with_parsed_coordinate_operations(
     source: &ParsedCrs,
     target: &ParsedCrs,
 ) -> SelectionOptions {
-    if let Some(operation) = parsed_grid_datum_operation(source, target) {
+    if let Some(operation) = parsed_datum_operation(source, target) {
         options.with_coordinate_operation(operation)
     } else {
         options
     }
 }
 
-fn parsed_grid_datum_operation(
-    source: &ParsedCrs,
-    target: &ParsedCrs,
-) -> Option<CoordinateOperation> {
-    if source.grid_shift_to_wgs84.is_none() && target.grid_shift_to_wgs84.is_none() {
+/// Build the explicit operation for a shift the definitions declare through
+/// `+nadgrids`, `+towgs84`, or WKT1 `TOWGS84`. Selection never derives one from
+/// datum metadata, so `parse_crs` with `Transform::from_crs_defs` omits it.
+fn parsed_datum_operation(source: &ParsedCrs, target: &ParsedCrs) -> Option<CoordinateOperation> {
+    if !source.declares_datum_shift() && !target.declares_datum_shift() {
         return None;
     }
 
@@ -439,6 +448,9 @@ fn parsed_grid_datum_operation(
             OperationMethod::Identity,
         ));
     }
+    if source.crs.datum().same_datum(target.crs.datum()) {
+        return None;
+    }
 
     let source_to_wgs84 = parsed_datum_to_wgs84(source)?;
     let target_to_wgs84 = parsed_datum_to_wgs84(target)?;
@@ -446,7 +458,11 @@ fn parsed_grid_datum_operation(
     Some(parsed_coordinate_operation(
         source,
         target,
-        "Parsed +nadgrids datum shift",
+        if source.grid_shift_to_wgs84.is_some() || target.grid_shift_to_wgs84.is_some() {
+            "Parsed +nadgrids datum shift"
+        } else {
+            "Parsed +towgs84 datum shift"
+        },
         OperationMethod::DatumShift {
             source_to_wgs84,
             target_to_wgs84,
@@ -495,6 +511,9 @@ fn same_ellipsoid(left: proj_core::Ellipsoid, right: proj_core::Ellipsoid) -> bo
 fn parsed_datum_to_wgs84(parsed: &ParsedCrs) -> Option<DatumToWgs84> {
     if let Some(grid_shift) = &parsed.grid_shift_to_wgs84 {
         return Some(DatumToWgs84::GridShift(Box::new(grid_shift.clone())));
+    }
+    if let Some(helmert) = parsed.helmert_to_wgs84 {
+        return Some(DatumToWgs84::Helmert(helmert));
     }
 
     if is_wgs84_datum_definition(parsed) {
@@ -1036,6 +1055,181 @@ mod tests {
             let err = parse_crs(identifier).unwrap_err().to_string();
             assert!(err.contains(expected), "{identifier}: {err}");
         }
+    }
+
+    const RD_TOWGS84: &str = "565.4171,50.3319,465.5524,0.398957,-0.343988,1.8774,4.0725";
+    /// C PROJ 9.6 writes these for the `+ellps=bessel +towgs84=RD_TOWGS84` CRS.
+    const BESSEL_TOWGS84_WKT1: &str = r#"GEOGCS["unknown",DATUM["Unknown based on Bessel 1841 ellipsoid using towgs84=565.4171,50.3319,465.5524,0.398957,-0.343988,1.87740,4.0725",SPHEROID["Bessel 1841",6377397.155,299.1528128],TOWGS84[565.4171,50.3319,465.5524,0.398957,-0.343988,1.8774,4.0725]],PRIMEM["Greenwich",0,AUTHORITY["EPSG","8901"]],UNIT["degree",0.0174532925199433,AUTHORITY["EPSG","9122"]]]"#;
+    const BESSEL_BOUND_WKT2: &str = r#"BOUNDCRS[SOURCECRS[GEOGCRS["unknown",DATUM["Unknown based on Bessel 1841 ellipsoid using towgs84=565.4171,50.3319,465.5524,0.398957,-0.343988,1.87740,4.0725",ELLIPSOID["Bessel 1841",6377397.155,299.1528128,LENGTHUNIT["metre",1,ID["EPSG",9001]]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433],ID["EPSG",8901]],CS[ellipsoidal,2],AXIS["longitude",east,ORDER[1],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]],AXIS["latitude",north,ORDER[2],ANGLEUNIT["degree",0.0174532925199433,ID["EPSG",9122]]]]],TARGETCRS[GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563,LENGTHUNIT["metre",1]]],PRIMEM["Greenwich",0,ANGLEUNIT["degree",0.0174532925199433]],CS[ellipsoidal,2],AXIS["latitude",north,ORDER[1],ANGLEUNIT["degree",0.0174532925199433]],AXIS["longitude",east,ORDER[2],ANGLEUNIT["degree",0.0174532925199433]],ID["EPSG",4326]]],ABRIDGEDTRANSFORMATION["Transformation from unknown to WGS84",METHOD["Position Vector transformation (geog2D domain)",ID["EPSG",9606]],PARAMETER["X-axis translation",565.4171,ID["EPSG",8605]],PARAMETER["Y-axis translation",50.3319,ID["EPSG",8606]],PARAMETER["Z-axis translation",465.5524,ID["EPSG",8607]],PARAMETER["X-axis rotation",0.398957,ID["EPSG",8608]],PARAMETER["Y-axis rotation",-0.343988,ID["EPSG",8609]],PARAMETER["Z-axis rotation",1.8774,ID["EPSG",8610]],PARAMETER["Scale difference",1.0000040725,ID["EPSG",8611]]]]"#;
+    const BESSEL_BOUND_PROJJSON: &str = r#"{"$schema":"https://proj.org/schemas/v0.7/projjson.schema.json","type":"BoundCRS","source_crs":{"type":"GeographicCRS","name":"unknown","datum":{"type":"GeodeticReferenceFrame","name":"Unknown based on Bessel 1841 ellipsoid using towgs84=565.4171,50.3319,465.5524,0.398957,-0.343988,1.87740,4.0725","ellipsoid":{"name":"Bessel 1841","semi_major_axis":6377397.155,"inverse_flattening":299.1528128}},"coordinate_system":{"subtype":"ellipsoidal","axis":[{"name":"Longitude","abbreviation":"lon","direction":"east","unit":"degree"},{"name":"Latitude","abbreviation":"lat","direction":"north","unit":"degree"}]}},"target_crs":{"type":"GeographicCRS","name":"WGS 84","datum":{"type":"GeodeticReferenceFrame","name":"World Geodetic System 1984","ellipsoid":{"name":"WGS 84","semi_major_axis":6378137,"inverse_flattening":298.257223563}},"coordinate_system":{"subtype":"ellipsoidal","axis":[{"name":"Latitude","abbreviation":"lat","direction":"north","unit":"degree"},{"name":"Longitude","abbreviation":"lon","direction":"east","unit":"degree"}]},"id":{"authority":"EPSG","code":4326}},"transformation":{"name":"Transformation from unknown to WGS84","method":{"name":"Position Vector transformation (geog2D domain)","id":{"authority":"EPSG","code":9606}},"parameters":[{"name":"X-axis translation","value":565.4171,"unit":"metre","id":{"authority":"EPSG","code":8605}},{"name":"Y-axis translation","value":50.3319,"unit":"metre","id":{"authority":"EPSG","code":8606}},{"name":"Z-axis translation","value":465.5524,"unit":"metre","id":{"authority":"EPSG","code":8607}},{"name":"X-axis rotation","value":0.398957,"unit":{"type":"AngularUnit","name":"arc-second","conversion_factor":4.84813681109536e-06},"id":{"authority":"EPSG","code":8608}},{"name":"Y-axis rotation","value":-0.343988,"unit":{"type":"AngularUnit","name":"arc-second","conversion_factor":4.84813681109536e-06},"id":{"authority":"EPSG","code":8609}},{"name":"Z-axis rotation","value":1.8774,"unit":{"type":"AngularUnit","name":"arc-second","conversion_factor":4.84813681109536e-06},"id":{"authority":"EPSG","code":8610}},{"name":"Scale difference","value":4.0725,"unit":{"type":"ScaleUnit","name":"parts per million","conversion_factor":1e-06},"id":{"authority":"EPSG","code":8611}}]}}"#;
+
+    fn assert_close(actual: (f64, f64), expected: (f64, f64), label: &str) {
+        assert!(
+            (actual.0 - expected.0).abs() < 1e-9 && (actual.1 - expected.1).abs() < 1e-9,
+            "{label}"
+        );
+    }
+
+    #[test]
+    fn declared_towgs84_shift_matches_c_proj() {
+        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`.
+        let cases = [
+            (
+                "+proj=longlat +ellps=bessel +towgs84=565.4,50.3,465.6,0,0,0,0 +no_defs".to_string(),
+                (5.0, 52.0),
+                (5.000012095836775, 51.999136506957),
+            ),
+            (
+                format!("+proj=sterea +lat_0=52.15616055555555 +lon_0=5.38763888888889 +k=0.9999079 +x_0=155000 +y_0=463000 +ellps=bessel +towgs84={RD_TOWGS84} +units=m +no_defs"),
+                (155_000.0, 463_000.0),
+                (5.3879872038843555, 52.15538300084578),
+            ),
+        ];
+
+        for (definition, input, expected) in cases {
+            let forward = transform_from_crs_strings(&definition, "EPSG:4326").unwrap();
+            let output = forward.convert(input).unwrap();
+            assert_close(output, expected, &definition);
+
+            // Sub-millimetre in the projected case; a 2D Helmert roundtrip
+            // does not close exactly because height is held at zero each way.
+            let back = forward.inverse().unwrap().convert(output).unwrap();
+            assert!(
+                (back.0 - input.0).abs() < 1e-3 && (back.1 - input.1).abs() < 1e-3,
+                "{definition}"
+            );
+            let reversed = transform_from_crs_strings("EPSG:4326", &definition).unwrap();
+            let back = reversed.convert(output).unwrap();
+            assert!((back.0 - input.0).abs() < 1e-3, "{definition}");
+        }
+    }
+
+    #[test]
+    fn every_towgs84_spelling_declares_the_same_shift() {
+        let proj_string = format!("+proj=longlat +ellps=bessel +towgs84={RD_TOWGS84} +no_defs");
+        let expected = transform_from_crs_strings(&proj_string, "EPSG:4326")
+            .unwrap()
+            .convert((5.0, 52.0))
+            .unwrap();
+
+        for definition in [
+            BESSEL_TOWGS84_WKT1,
+            BESSEL_BOUND_WKT2,
+            BESSEL_BOUND_PROJJSON,
+        ] {
+            let transform = transform_from_crs_strings(definition, "EPSG:4326")
+                .unwrap_or_else(|err| panic!("{definition}: {err}"));
+            assert_eq!(
+                transform.selected_operation().name,
+                "Parsed +towgs84 datum shift"
+            );
+            assert_close(
+                transform.convert((5.0, 52.0)).unwrap(),
+                expected,
+                definition,
+            );
+        }
+    }
+
+    #[test]
+    fn parse_crs_returns_the_source_of_a_bound_crs() {
+        for definition in [BESSEL_BOUND_WKT2, BESSEL_BOUND_PROJJSON] {
+            let crs = parse_crs(definition).unwrap();
+            assert!(crs.is_geographic());
+            assert_eq!(crs.epsg(), 0);
+        }
+    }
+
+    #[test]
+    fn declared_shift_needs_the_transform_helpers() {
+        // Selection does not derive operations from datum metadata.
+        let source = parse_crs("+proj=longlat +ellps=bessel +towgs84=565,50,465").unwrap();
+        let target = parse_crs("EPSG:4326").unwrap();
+        assert!(Transform::from_crs_defs(&source, &target).is_err());
+    }
+
+    #[test]
+    fn null_towgs84_compiles_without_a_shift() {
+        let transform =
+            transform_from_crs_strings("+proj=longlat +ellps=GRS80 +towgs84=0,0,0", "EPSG:4326")
+                .unwrap();
+        assert_eq!(transform.convert((5.0, 52.0)).unwrap(), (5.0, 52.0));
+
+        let identity =
+            transform_from_crs_strings("+proj=longlat +ellps=WGS84 +towgs84=0,0,0", "EPSG:4326")
+                .unwrap();
+        assert_eq!(identity.selected_operation().name, "Identity");
+    }
+
+    #[test]
+    fn identical_declared_shifts_cancel() {
+        let definition = format!("+proj=longlat +ellps=bessel +towgs84={RD_TOWGS84}");
+        let transform = transform_from_crs_strings(&definition, &definition).unwrap();
+        assert_eq!(transform.selected_operation().name, "Identity");
+    }
+
+    #[test]
+    fn epsg_tagged_wkt_keeps_the_registry_operation() {
+        // GDAL's classic EPSG:27700 tags a TOWGS84 onto the authority definition.
+        let wkt = r#"PROJCS["OSGB36 / British National Grid",GEOGCS["OSGB36",DATUM["Ordnance_Survey_of_Great_Britain_1936",SPHEROID["Airy 1830",6377563.396,299.3249646],TOWGS84[446.448,-125.157,542.06,0.15,0.247,0.842,-20.489],AUTHORITY["EPSG","6277"]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433],AUTHORITY["EPSG","4277"]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",49],PARAMETER["central_meridian",-2],PARAMETER["scale_factor",0.9996012717],PARAMETER["false_easting",400000],PARAMETER["false_northing",-100000],UNIT["metre",1],AXIS["Easting",EAST],AXIS["Northing",NORTH],AUTHORITY["EPSG","27700"]]"#;
+        let tagged = transform_from_crs_strings(wkt, "EPSG:4326").unwrap();
+        let registry = Transform::new("EPSG:27700", "EPSG:4326").unwrap();
+        assert_eq!(
+            tagged.selected_operation().id,
+            registry.selected_operation().id
+        );
+    }
+
+    #[test]
+    fn unsupported_declared_shifts_are_rejected() {
+        let malformed = BESSEL_TOWGS84_WKT1.replace(
+            "TOWGS84[565.4171,50.3319,465.5524,0.398957,-0.343988,1.8774,4.0725]",
+            "TOWGS84[1,2]",
+        );
+        let err = transform_from_crs_strings(&malformed, "EPSG:4326")
+            .err()
+            .unwrap();
+        assert!(err.to_string().contains("TOWGS84 requires 3 or 7"), "{err}");
+
+        let other_hub = BESSEL_BOUND_WKT2.replace(r#"ID["EPSG",4326]"#, r#"ID["EPSG",4258]"#);
+        let err = parse_crs(&other_hub).unwrap_err();
+        assert!(err.to_string().contains("EPSG:4326 target"), "{err}");
+
+        let other_method = BESSEL_BOUND_WKT2.replace(
+            "Position Vector transformation (geog2D domain)",
+            "Ballpark geographic offset",
+        );
+        let err = parse_crs(&other_method).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("unsupported transformation method"),
+            "{err}"
+        );
+
+        let other_unit = BESSEL_BOUND_PROJJSON.replace("4.84813681109536e-06", "1.0");
+        let err = parse_crs(&other_unit).unwrap_err();
+        assert!(err.to_string().contains("unsupported unit"), "{err}");
+    }
+
+    #[test]
+    fn coordinate_frame_bound_crs_negates_rotations() {
+        let coordinate_frame = BESSEL_BOUND_WKT2
+            .replace(
+                "Position Vector transformation (geog2D domain)",
+                "Coordinate Frame rotation (geog2D domain)",
+            )
+            .replace("0.398957", "-0.398957")
+            .replace("-0.343988", "0.343988")
+            .replace("1.8774", "-1.8774");
+        let negated = transform_from_crs_strings(&coordinate_frame, "EPSG:4326")
+            .unwrap()
+            .convert((5.0, 52.0))
+            .unwrap();
+        let position_vector = transform_from_crs_strings(BESSEL_BOUND_WKT2, "EPSG:4326")
+            .unwrap()
+            .convert((5.0, 52.0))
+            .unwrap();
+        assert_close(negated, position_vector, "coordinate frame");
     }
 
     #[test]
