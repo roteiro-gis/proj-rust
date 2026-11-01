@@ -1254,7 +1254,7 @@ fn extract_geographic_angle_unit_to_degree(
 fn extract_prime_meridian_degrees(inner: &str, default_angle_unit_to_degree: f64) -> Option<f64> {
     let mut prime_meridian = None;
     for_each_top_level_element(inner, |name, element_inner| {
-        if !name.eq_ignore_ascii_case("PRIMEM") {
+        if !name.eq_ignore_ascii_case("PRIMEM") && !name.eq_ignore_ascii_case("PRIMEMERIDIAN") {
             return;
         }
 
@@ -1910,6 +1910,13 @@ mod tests {
             geographic.replace("GEOGCRS[", "GEOGRAPHICCRS[")
         );
         assert!(parse_wkt(&compound).unwrap().is_compound());
+    }
+
+    #[test]
+    fn long_form_prime_meridian_is_not_mistaken_for_greenwich() {
+        let wkt = r#"GEOGCRS["Paris",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],PRIMEMERIDIAN["Paris",2.33722917,ANGLEUNIT["degree",0.0174532925199433]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]]"#;
+        let err = parse_wkt(wkt).unwrap_err();
+        assert!(err.to_string().contains("non-Greenwich"), "{err}");
     }
 
     #[test]
