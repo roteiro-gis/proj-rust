@@ -101,7 +101,8 @@ impl ParsedCrs {
 /// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`, `"+proj=cart +datum=WGS84"`
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}` or geocentric `GeodeticCRS`
 /// - **WKT1**: `GEOGCS[...]` / `PROJCS[...]` / `GEOCCS[...]` / `COMPD_CS[...]`
-/// - **WKT2**: `GEODCRS[...]` / `GEOGCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`
+/// - **WKT2**: `GEODCRS[...]` / `GEOGCRS[...]` / `PROJCRS[...]` / `COMPOUNDCRS[...]`,
+///   and the long-form `GEODETICCRS`, `GEOGRAPHICCRS`, and `PROJECTEDCRS` keywords
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     Ok(parse_crs_definition(s)?.crs)
 }
@@ -187,8 +188,11 @@ fn parse_crs_definition(s: &str) -> Result<ParsedCrs> {
         || upper.starts_with("PROJCS")
         || upper.starts_with("GEOCCS")
         || upper.starts_with("GEODCRS")
+        || upper.starts_with("GEODETICCRS")
         || upper.starts_with("GEOGCRS")
+        || upper.starts_with("GEOGRAPHICCRS")
         || upper.starts_with("PROJCRS")
+        || upper.starts_with("PROJECTEDCRS")
         || upper.starts_with("COMPD_CS")
         || upper.starts_with("COMPOUNDCRS")
         || upper.starts_with("VERT_CS")

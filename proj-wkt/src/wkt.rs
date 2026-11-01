@@ -190,6 +190,25 @@ fn trim_wkt_token(token: &str) -> &str {
     token.trim().trim_matches('"')
 }
 
+const GEODETIC_CRS_KEYWORDS: &[&str] = &["GEODCRS", "GEODETICCRS"];
+const GEOGRAPHIC_CRS_KEYWORDS: &[&str] = &["GEOGCS", "GEOGCRS", "GEOGRAPHICCRS"];
+const PROJECTED_CRS_KEYWORDS: &[&str] = &["PROJCS", "PROJCRS", "PROJECTEDCRS"];
+const BASE_GEOGRAPHIC_CRS_KEYWORDS: &[&str] = &[
+    "BASEGEOGCRS",
+    "BASEGEODCRS",
+    "GEOGCRS",
+    "GEOGRAPHICCRS",
+    "GEODCRS",
+    "GEODETICCRS",
+    "GEOGCS",
+];
+
+fn is_wkt_keyword(name: &str, keywords: &[&str]) -> bool {
+    keywords
+        .iter()
+        .any(|keyword| name.eq_ignore_ascii_case(keyword))
+}
+
 /// Attempt to parse WKT structure to extract projection parameters.
 fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<CrsDef> {
     let Some((root_name, _, _)) = parse_wkt_element(s, 0) else {
@@ -203,7 +222,7 @@ fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         return parse_wkt_geocentric(s);
     }
 
-    if root_name.eq_ignore_ascii_case("GEODCRS") {
+    if is_wkt_keyword(root_name, GEODETIC_CRS_KEYWORDS) {
         let root_inner = root_inner(s).ok_or_else(|| {
             ParseError::Parse(format!("unrecognized WKT root element: {:.40}", s))
         })?;
@@ -213,11 +232,11 @@ fn parse_wkt_structure(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
         return parse_wkt_geographic(s, axis_order_policy);
     }
 
-    if root_name.eq_ignore_ascii_case("GEOGCS") || root_name.eq_ignore_ascii_case("GEOGCRS") {
+    if is_wkt_keyword(root_name, GEOGRAPHIC_CRS_KEYWORDS) {
         return parse_wkt_geographic(s, axis_order_policy);
     }
 
-    if root_name.eq_ignore_ascii_case("PROJCS") || root_name.eq_ignore_ascii_case("PROJCRS") {
+    if is_wkt_keyword(root_name, PROJECTED_CRS_KEYWORDS) {
         return parse_wkt_projected(s, axis_order_policy);
     }
 
@@ -349,10 +368,9 @@ fn parse_wkt_projected(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Cr
     )?;
 
     let base_geographic_inner =
-        find_top_level_element_inner(root_inner, &["BASEGEOGCRS", "GEOGCRS", "GEODCRS", "GEOGCS"])
-            .ok_or_else(|| {
-                ParseError::Parse("WKT projected CRS is missing a base geographic CRS".into())
-            })?;
+        find_top_level_element_inner(root_inner, BASE_GEOGRAPHIC_CRS_KEYWORDS).ok_or_else(
+            || ParseError::Parse("WKT projected CRS is missing a base geographic CRS".into()),
+        )?;
     let base_coordinate_system = extract_coordinate_system(base_geographic_inner);
     let base_angle_unit_to_degree = extract_geographic_angle_unit_to_degree(
         base_geographic_inner,
@@ -746,11 +764,9 @@ fn parse_wkt_compound(s: &str, axis_order_policy: AxisOrderPolicy) -> Result<Crs
 
     for_each_top_level_element(root_inner, |name, element_inner| {
         if horizontal.is_none()
-            && (name.eq_ignore_ascii_case("GEOGCS")
-                || name.eq_ignore_ascii_case("GEODCRS")
-                || name.eq_ignore_ascii_case("GEOGCRS")
-                || name.eq_ignore_ascii_case("PROJCS")
-                || name.eq_ignore_ascii_case("PROJCRS"))
+            && (is_wkt_keyword(name, GEOGRAPHIC_CRS_KEYWORDS)
+                || is_wkt_keyword(name, GEODETIC_CRS_KEYWORDS)
+                || is_wkt_keyword(name, PROJECTED_CRS_KEYWORDS))
         {
             horizontal = Some(parse_wkt_structure(
                 &format!("{name}[{element_inner}]"),
@@ -856,7 +872,14 @@ fn vertical_datum_type(datum_inner: &str) -> Option<u32> {
 fn infer_datum_from_geographic_inner(inner: &str) -> Result<proj_core::Datum> {
     let datum_inner = find_top_level_element_inner(
         inner,
-        &["DATUM", "GEODETICDATUM", "DATUMENSEMBLE", "ENSEMBLE"],
+        &[
+            "DATUM",
+            "GEODETICDATUM",
+            "TRF",
+            "TERRESTRIALREFERENCEFRAME",
+            "DATUMENSEMBLE",
+            "ENSEMBLE",
+        ],
     )
     .ok_or_else(|| ParseError::Parse("WKT geographic CRS is missing a datum definition".into()))?;
 
@@ -1853,6 +1876,40 @@ mod tests {
         assert!(err
             .to_string()
             .contains("does not match the embedded EPSG semantics"));
+    }
+
+    #[test]
+    fn iso_long_form_keywords_parse_like_their_short_forms() {
+        let geographic = r#"GEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[ellipsoidal,2],AXIS["longitude",east],AXIS["latitude",north],ANGLEUNIT["degree",0.0174532925199433]]"#;
+        for (short, long) in [
+            ("GEOGCRS[", "GEOGRAPHICCRS["),
+            ("GEOGCRS[", "GEODETICCRS["),
+            ("DATUM[", "TRF["),
+            ("DATUM[", "TERRESTRIALREFERENCEFRAME["),
+        ] {
+            let parsed = parse_wkt(&geographic.replace(short, long))
+                .unwrap_or_else(|err| panic!("{long}: {err}"));
+            assert!(parsed.is_geographic(), "{long}");
+        }
+
+        let projected = r#"PROJCRS["UTM",BASEGEOGCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]]],CONVERSION["UTM zone 18N",METHOD["Transverse Mercator"],PARAMETER["Latitude of natural origin",0],PARAMETER["Longitude of natural origin",-75],PARAMETER["Scale factor at natural origin",0.9996],PARAMETER["False easting",500000],PARAMETER["False northing",0]],CS[Cartesian,2],AXIS["(E)",east],AXIS["(N)",north],LENGTHUNIT["metre",1]]"#;
+        for (short, long) in [
+            ("PROJCRS[", "PROJECTEDCRS["),
+            ("BASEGEOGCRS[", "BASEGEODCRS["),
+        ] {
+            let parsed = parse_wkt(&projected.replace(short, long))
+                .unwrap_or_else(|err| panic!("{long}: {err}"));
+            assert!(parsed.is_projected(), "{long}");
+        }
+
+        let geocentric = r#"GEODETICCRS["WGS 84",DATUM["World Geodetic System 1984",ELLIPSOID["WGS 84",6378137,298.257223563]],CS[Cartesian,3],AXIS["(X)",geocentricX],AXIS["(Y)",geocentricY],AXIS["(Z)",geocentricZ],LENGTHUNIT["metre",1]]"#;
+        assert!(parse_wkt(geocentric).unwrap().is_geocentric());
+
+        let compound = format!(
+            r#"COMPOUNDCRS["WGS 84 + EGM96",{},VERTCRS["EGM96 height",VDATUM["EGM96 geoid",ID["EPSG",5171]],CS[vertical,1],AXIS["up",up],LENGTHUNIT["metre",1]]]"#,
+            geographic.replace("GEOGCRS[", "GEOGRAPHICCRS[")
+        );
+        assert!(parse_wkt(&compound).unwrap().is_compound());
     }
 
     #[test]
