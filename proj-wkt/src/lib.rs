@@ -822,8 +822,8 @@ mod tests {
                 registry.selected_operation().id,
                 "{definition}"
             );
-            assert!((x - expected_x).abs() < 1e-9, "{definition}: {x}");
-            assert!((y - expected_y).abs() < 1e-9, "{definition}: {y}");
+            assert!((x - expected_x).abs() < 1e-9, "{definition}");
+            assert!((y - expected_y).abs() < 1e-9, "{definition}");
             assert!(parsed.inverse().is_ok(), "{definition}");
         }
     }
