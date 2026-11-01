@@ -2,10 +2,8 @@ use super::{Transform, TransformableGeometry};
 use crate::coord::Bounds;
 use crate::error::Result;
 
-#[cfg(feature = "geo-types")]
 pub(super) const DEFAULT_GEO_TYPES_RECT_DENSIFY_POINTS: usize = 21;
 
-#[cfg(feature = "geo-types")]
 fn transform_geo_coord(
     transform: &Transform,
     coord: geo_types::Coord<f64>,
@@ -13,7 +11,6 @@ fn transform_geo_coord(
     transform.convert(coord)
 }
 
-#[cfg(feature = "geo-types")]
 fn transform_geo_coords(
     transform: &Transform,
     coords: Vec<geo_types::Coord<f64>>,
@@ -24,7 +21,6 @@ fn transform_geo_coords(
         .collect()
 }
 
-#[cfg(feature = "geo-types")]
 pub(super) fn transform_geo_rect_with_densification(
     transform: &Transform,
     rect: geo_types::Rect<f64>,
@@ -47,7 +43,6 @@ pub(super) fn transform_geo_rect_with_densification(
     ))
 }
 
-#[cfg(feature = "geo-types")]
 fn transform_geo_rect(
     transform: &Transform,
     rect: geo_types::Rect<f64>,
@@ -55,14 +50,12 @@ fn transform_geo_rect(
     transform_geo_rect_with_densification(transform, rect, DEFAULT_GEO_TYPES_RECT_DENSIFY_POINTS)
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Coord<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         transform_geo_coord(transform, self)
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Point<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::Point::from(transform_geo_coord(
@@ -71,7 +64,6 @@ impl TransformableGeometry for geo_types::Point<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Line<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::Line::new(
@@ -81,7 +73,6 @@ impl TransformableGeometry for geo_types::Line<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::LineString<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::LineString::new(transform_geo_coords(
@@ -91,7 +82,6 @@ impl TransformableGeometry for geo_types::LineString<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Polygon<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         let (exterior, interiors) = self.into_inner();
@@ -104,7 +94,6 @@ impl TransformableGeometry for geo_types::Polygon<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::MultiPoint<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::MultiPoint(
@@ -116,7 +105,6 @@ impl TransformableGeometry for geo_types::MultiPoint<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::MultiLineString<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::MultiLineString(
@@ -128,7 +116,6 @@ impl TransformableGeometry for geo_types::MultiLineString<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::MultiPolygon<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::MultiPolygon(
@@ -140,7 +127,6 @@ impl TransformableGeometry for geo_types::MultiPolygon<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::GeometryCollection<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(geo_types::GeometryCollection(
@@ -152,14 +138,12 @@ impl TransformableGeometry for geo_types::GeometryCollection<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Rect<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         transform_geo_rect(transform, self)
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Triangle<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         let [v1, v2, v3] = self.to_array();
@@ -171,7 +155,6 @@ impl TransformableGeometry for geo_types::Triangle<f64> {
     }
 }
 
-#[cfg(feature = "geo-types")]
 impl TransformableGeometry for geo_types::Geometry<f64> {
     fn transform_geometry(self, transform: &Transform) -> Result<Self> {
         Ok(match self {
