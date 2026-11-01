@@ -1066,7 +1066,7 @@ mod tests {
     fn assert_close(actual: (f64, f64), expected: (f64, f64), label: &str) {
         assert!(
             (actual.0 - expected.0).abs() < 1e-9 && (actual.1 - expected.1).abs() < 1e-9,
-            "{label}: {actual:?} != {expected:?}"
+            "{label}"
         );
     }
 
@@ -1096,11 +1096,11 @@ mod tests {
             let back = forward.inverse().unwrap().convert(output).unwrap();
             assert!(
                 (back.0 - input.0).abs() < 1e-3 && (back.1 - input.1).abs() < 1e-3,
-                "{definition}: {back:?}"
+                "{definition}"
             );
             let reversed = transform_from_crs_strings("EPSG:4326", &definition).unwrap();
             let back = reversed.convert(output).unwrap();
-            assert!((back.0 - input.0).abs() < 1e-3, "{definition}: {back:?}");
+            assert!((back.0 - input.0).abs() < 1e-3, "{definition}");
         }
     }
 
