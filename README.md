@@ -103,6 +103,8 @@ Shifts a definition declares itself are explicit operations: `proj-wkt` applies 
 
 Geodetic to geocentric pairs such as `EPSG:4326` or `EPSG:4979` to `EPSG:4978`, and cross-datum ellipsoidal-height compounds such as `EPSG:4937` to `EPSG:4978`, use the selected horizontal operation plus geocentric framing. Gravity-related heights cannot target ECEF. Use `convert_3d` for ECEF coordinates.
 
+`SelectionOptions::with_wgs84_pivot()` opts in to chaining two registry operations through WGS84 when no direct operation can run, as C PROJ does, for example `EPSG:27700` to `EPSG:3035` without the OSTN15 grid. Chains require overlapping areas of use and rank after every direct operation.
+
 ## Grids
 
 Horizontal NTv2 grid shifts are supported through embedded registry operations, parsed PROJ `+nadgrids` definitions built with `proj-wkt` transform helpers or the `Proj` facade, `EmbeddedGridProvider`, `FilesystemGridProvider`, and custom `GridProvider` implementations.
