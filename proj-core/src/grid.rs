@@ -868,6 +868,9 @@ mod geotiff {
     const TIFFTAG_MODEL_PIXEL_SCALE: u16 = 33550;
     const TIFFTAG_MODEL_TIEPOINT: u16 = 33922;
     const TIFFTAG_GDAL_METADATA: u16 = 42112;
+    const TIFFTAG_GDAL_NODATA: u16 = 42113;
+    const GEOKEY_RASTER_TYPE: u16 = 1025;
+    const RASTER_PIXEL_IS_AREA: u16 = 1;
     const ARCSEC_TO_RAD: f64 = PI / 180.0 / 3600.0;
     const DEG_TO_RAD: f64 = PI / 180.0;
 
@@ -885,6 +888,7 @@ mod geotiff {
         width: usize,
         height: usize,
         cell_count: usize,
+        nodata: Option<f32>,
     }
 
     /// One decoded image (IFD): node-origin georeferencing plus per-band values
@@ -1044,9 +1048,13 @@ mod geotiff {
         let scale_lon_deg = scale[0];
         let scale_lat_deg = scale[1];
         // Tiepoint maps raster (i, j) -> model (x, y). PROJ grids use a Point
-        // raster, so the (0, 0) tiepoint is the node coordinate directly.
-        let west_node_deg = tiepoint[3] - tiepoint[0] * scale_lon_deg;
-        let north_node_deg = tiepoint[4] + tiepoint[1] * scale_lat_deg;
+        // raster, so the (0, 0) tiepoint is the node coordinate directly. An
+        // explicit Area raster ties the pixel corner, half a cell from the node.
+        let pixel_is_area =
+            file.geokeys().get_short(GEOKEY_RASTER_TYPE) == Some(RASTER_PIXEL_IS_AREA);
+        let half_cell = if pixel_is_area { 0.5 } else { 0.0 };
+        let west_node_deg = tiepoint[3] + (half_cell - tiepoint[0]) * scale_lon_deg;
+        let north_node_deg = tiepoint[4] + (tiepoint[1] - half_cell) * scale_lat_deg;
         if !(scale_lon_deg.is_finite()
             && scale_lat_deg.is_finite()
             && scale_lon_deg > 0.0
@@ -1077,6 +1085,13 @@ mod geotiff {
             )));
         }
 
+        // Compared as f32, the sample type: "-88.8888" parsed as f64 would
+        // not equal the stored sample.
+        let nodata = ifd
+            .tag(TIFFTAG_GDAL_NODATA)
+            .and_then(|tag| TagValue::as_str(&tag.value))
+            .and_then(|value| value.trim_matches(['\0', ' ']).parse::<f32>().ok());
+
         Ok(ImageMetadata {
             west_node_deg,
             north_node_deg,
@@ -1085,6 +1100,7 @@ mod geotiff {
             width,
             height,
             cell_count,
+            nodata,
         })
     }
 
@@ -1107,7 +1123,16 @@ mod geotiff {
             let array = tiff
                 .read_band_from_ifd::<f32>(ifd, band_index)
                 .map_err(|err| GridError::Parse(format!("{name}: band {band_index}: {err}")))?;
-            let values: Vec<f64> = array.iter().map(|&value| value as f64).collect();
+            let values: Vec<f64> = array
+                .iter()
+                .map(|&value| {
+                    if metadata.nodata == Some(value) {
+                        f64::NAN
+                    } else {
+                        value as f64
+                    }
+                })
+                .collect();
             if values.len() != metadata.cell_count {
                 return Err(GridError::Parse(format!(
                     "{name}: band {band_index} has {} samples, expected {}",
@@ -1713,6 +1738,14 @@ fn interpolate(
         + m10 * grid.lat_shift[idx(x1, y0)]
         + m01 * grid.lat_shift[idx(x0, y1)]
         + m11 * grid.lat_shift[idx(x1, y1)];
+
+    // Only GeoTIFF grids can hold null cells; NTv2 rejects them when parsing.
+    if !(lon.is_finite() && lat.is_finite()) {
+        return Err(GridError::OutsideCoverage(format!(
+            "{} interpolation touches a null cell",
+            grid.name
+        )));
+    }
 
     Ok((lon, lat))
 }
@@ -2448,6 +2481,80 @@ mod tests {
         bytes
     }
 
+    /// A decodable uncompressed Float32 GeoTIFF with its pixels in one strip.
+    #[cfg(feature = "geotiff")]
+    fn decodable_geotiff(
+        (width, height): (u32, u32),
+        bands: u16,
+        grid_type: &str,
+        tiepoint: [f64; 2],
+        samples: &[f32],
+        extra_tags: Vec<TestTiffTag>,
+    ) -> Vec<u8> {
+        const PIXEL_DATA_TAG: u16 = 65000;
+        const STRIP_OFFSETS_TAG: u16 = 273;
+        let pixels: Vec<u8> = samples
+            .iter()
+            .flat_map(|value| value.to_le_bytes())
+            .collect();
+
+        let mut tags = minimal_geotiff_tags(width, height, bands, grid_type);
+        tags.retain(|tag| !matches!(tag.tag, 33922 | 34735));
+        tags.push(test_tiff_doubles(
+            33922,
+            &[0.0, 0.0, 0.0, tiepoint[0], tiepoint[1], 0.0],
+        ));
+        tags.push(test_tiff_long(STRIP_OFFSETS_TAG, 0));
+        tags.push(test_tiff_long(278, height));
+        tags.push(test_tiff_long(279, pixels.len() as u32));
+        tags.push(TestTiffTag {
+            tag: PIXEL_DATA_TAG,
+            field_type: 1,
+            count: pixels.len() as u32,
+            value: pixels.clone(),
+        });
+        tags.extend(extra_tags);
+        if !tags.iter().any(|tag| tag.tag == 34735) {
+            tags.push(test_tiff_shorts(34735, &[1, 1, 1, 0]));
+        }
+
+        let mut bytes = classic_tiff(vec![tags]);
+        let pixel_offset = bytes
+            .windows(pixels.len())
+            .position(|window| window == pixels)
+            .expect("pixels are in the file") as u32;
+        let tag_count = u16::from_le_bytes([bytes[8], bytes[9]]) as usize;
+        for entry in (10..10 + tag_count * 12).step_by(12) {
+            if u16::from_le_bytes([bytes[entry], bytes[entry + 1]]) == STRIP_OFFSETS_TAG {
+                bytes[entry + 8..entry + 12].copy_from_slice(&pixel_offset.to_le_bytes());
+            }
+        }
+        bytes
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn geotiff_handle(format_bytes: &[u8]) -> GridHandle {
+        let definition = GridDefinition {
+            id: GridId(1),
+            name: "test.tif".into(),
+            format: GridFormat::GeoTiff,
+            interpolation: GridInterpolation::Bilinear,
+            area_of_use: None,
+            resource_names: SmallVec::from_vec(vec!["test.tif".into()]),
+        };
+        GridHandle::from_bytes(definition, format_bytes).expect("decode GeoTIFF fixture")
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn pixel_is_area_key() -> TestTiffTag {
+        test_tiff_shorts(34735, &[1, 1, 1, 1, 1025, 0, 1, 1])
+    }
+
+    #[cfg(feature = "geotiff")]
+    fn pixel_is_point_key() -> TestTiffTag {
+        test_tiff_shorts(34735, &[1, 1, 1, 1, 1025, 0, 1, 2])
+    }
+
     #[cfg(feature = "geotiff")]
     fn padded_tiff_value_len(len: usize) -> usize {
         len + (len % 2)
@@ -2519,6 +2626,128 @@ mod tests {
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(&root).unwrap();
         root
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_vertical_nodata_cells_are_outside_coverage() {
+        const NODATA: f32 = -88.8888;
+        // Rows run north to south; the eastern column is null.
+        let samples = [10.0, 20.0, NODATA, 10.0, 20.0, NODATA];
+        let grid = geotiff_handle(&decodable_geotiff(
+            (3, 2),
+            1,
+            "TYPE=VERTICAL_OFFSET",
+            [10.0, 51.0],
+            &samples,
+            vec![test_tiff_ascii(42113, "-88.8888")],
+        ));
+
+        let valid = grid
+            .sample_vertical_offset_meters(10.5_f64.to_radians(), 50.5_f64.to_radians())
+            .unwrap();
+        assert!((valid.offset_meters - 15.0).abs() < 1e-9);
+
+        let null = grid.sample_vertical_offset_meters(11.5_f64.to_radians(), 50.5_f64.to_radians());
+        assert!(matches!(null, Err(GridError::OutsideCoverage(_))));
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_samples_equal_to_an_undeclared_nodata_value_are_data() {
+        let samples = [10.0, 20.0, -88.8888, 10.0, 20.0, -88.8888];
+        let grid = geotiff_handle(&decodable_geotiff(
+            (3, 2),
+            1,
+            "TYPE=VERTICAL_OFFSET",
+            [10.0, 51.0],
+            &samples,
+            Vec::new(),
+        ));
+
+        let sample = grid
+            .sample_vertical_offset_meters(12.0_f64.to_radians(), 50.5_f64.to_radians())
+            .unwrap();
+        assert!((sample.offset_meters - -88.8888).abs() < 1e-3);
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_horizontal_nodata_is_a_coverage_miss_not_a_non_finite_shift() {
+        const NODATA: f32 = 9999.0;
+        // Interleaved latitude and longitude offsets; the eastern column is null.
+        let samples = [
+            1.0, 1.0, 1.0, 1.0, NODATA, NODATA, 1.0, 1.0, 1.0, 1.0, NODATA, NODATA,
+        ];
+        let grid = geotiff_handle(&decodable_geotiff(
+            (3, 2),
+            2,
+            "TYPE=HORIZONTAL_OFFSET",
+            [10.0, 51.0],
+            &samples,
+            vec![test_tiff_ascii(42113, "9999")],
+        ));
+
+        assert!(grid
+            .sample(10.5_f64.to_radians(), 50.5_f64.to_radians())
+            .is_ok());
+        let null = grid.sample(11.5_f64.to_radians(), 50.5_f64.to_radians());
+        assert!(matches!(null, Err(GridError::OutsideCoverage(_))));
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_nan_horizontal_samples_are_a_coverage_miss() {
+        let samples = [1.0, 1.0, f32::NAN, f32::NAN, 1.0, 1.0, f32::NAN, f32::NAN];
+        let grid = geotiff_handle(&decodable_geotiff(
+            (2, 2),
+            2,
+            "TYPE=HORIZONTAL_OFFSET",
+            [10.0, 51.0],
+            &samples,
+            Vec::new(),
+        ));
+
+        let null = grid.sample(10.5_f64.to_radians(), 50.5_f64.to_radians());
+        assert!(matches!(null, Err(GridError::OutsideCoverage(_))));
+    }
+
+    #[cfg(feature = "geotiff")]
+    #[test]
+    fn geotiff_pixel_is_area_grids_are_georeferenced_at_cell_centers() {
+        let samples = [10.0, 20.0, 30.0, 40.0];
+        let tiepoint = [10.0, 51.0];
+        let sample = |grid: &GridHandle, lon: f64, lat: f64| {
+            grid.sample_vertical_offset_meters(lon.to_radians(), lat.to_radians())
+        };
+
+        let area = geotiff_handle(&decodable_geotiff(
+            (2, 2),
+            1,
+            "TYPE=VERTICAL_OFFSET",
+            tiepoint,
+            &samples,
+            vec![pixel_is_area_key()],
+        ));
+        let first_node = sample(&area, 10.5, 50.5).unwrap().offset_meters;
+        assert!((first_node - 10.0).abs() < 1e-9);
+        assert!(matches!(
+            sample(&area, 10.0, 51.0),
+            Err(GridError::OutsideCoverage(_))
+        ));
+
+        for key in [Some(pixel_is_point_key()), None] {
+            let point = geotiff_handle(&decodable_geotiff(
+                (2, 2),
+                1,
+                "TYPE=VERTICAL_OFFSET",
+                tiepoint,
+                &samples,
+                key.into_iter().collect(),
+            ));
+            let first_node = sample(&point, 10.0, 51.0).unwrap().offset_meters;
+            assert!((first_node - 10.0).abs() < 1e-9);
+        }
     }
 
     #[test]
