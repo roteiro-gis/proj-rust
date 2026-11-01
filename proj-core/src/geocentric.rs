@@ -188,15 +188,15 @@ mod tests {
                 let lon = 1.2;
                 let (x, y, z) = geodetic_to_geocentric(e, lon, lat, h);
                 let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
-                assert!((lon2 - lon).abs() < 1e-12, "{lat_deg} {h}: {lon2}");
+                assert!((lon2 - lon).abs() < 1e-12);
                 // About 1 um when refined, and 0.1 mm just below the limit.
                 let (lat_tolerance, h_tolerance) = if h > BOWRING_HEIGHT_LIMIT {
                     (2e-13, 1e-5)
                 } else {
                     (2e-11, 2e-4)
                 };
-                assert!((lat2 - lat).abs() < lat_tolerance, "{lat_deg} {h}: {lat2}");
-                assert!((h2 - h).abs() < h_tolerance, "{lat_deg} {h}: {h2}");
+                assert!((lat2 - lat).abs() < lat_tolerance);
+                assert!((h2 - h).abs() < h_tolerance);
             }
         }
     }
@@ -206,14 +206,14 @@ mod tests {
         let e = &ellipsoid::WGS84;
         let (_, lat, h) = geocentric_to_geodetic(e, 0.0, 0.0, 0.0);
         assert_eq!(lat, std::f64::consts::FRAC_PI_2);
-        assert!((h + e.b()).abs() < 1e-6, "{h}");
+        assert!((h + e.b()).abs() < 1e-6);
 
         let (_, lat, _) = geocentric_to_geodetic(e, 0.0, 0.0, -1.0);
         assert_eq!(lat, -std::f64::consts::FRAC_PI_2);
 
         let (_, lat, h) = geocentric_to_geodetic(e, 1.0, 1.0, -e.b());
-        assert!(lat < -1.57, "{lat}");
-        assert!(h.abs() < 1e-3, "{h}");
+        assert!(lat < -1.57);
+        assert!(h.abs() < 1e-3);
     }
 
     #[test]
