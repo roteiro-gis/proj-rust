@@ -8,6 +8,7 @@ use proj_core::Datum;
 use proj_core::DatumGridShift;
 use proj_core::DatumGridShiftEntry;
 use proj_core::DatumToWgs84;
+use proj_core::Ellipsoid;
 use proj_core::GridDefinition;
 use proj_core::GridFormat;
 use proj_core::GridId;
@@ -19,8 +20,8 @@ use crate::ParsedCrs;
 use crate::{ParseError, Result};
 
 const COMMON_PROJ_PARAMS: &[&str] = &[
-    "proj", "datum", "ellps", "towgs84", "nadgrids", "pm", "axis", "lon_wrap", "over", "no_defs",
-    "type",
+    "proj", "datum", "ellps", "a", "b", "rf", "f", "r", "towgs84", "nadgrids", "pm", "axis",
+    "lon_wrap", "over", "no_defs", "wktext", "type",
 ];
 const LINEAR_UNIT_PARAMS: &[&str] = &["units", "to_meter"];
 const GEOGRAPHIC_UNIT_PARAMS: &[&str] = &["units", "to_meter"];
@@ -30,8 +31,13 @@ const MERC_PARAMS: &[&str] = &["lon_0", "lat_ts", "k_0", "k", "x_0", "y_0"];
 const STERE_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_ts", "k_0", "k", "x_0", "y_0"];
 const STEREA_PARAMS: &[&str] = &["lat_0", "lon_0", "k_0", "k", "x_0", "y_0"];
 const CONIC_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_1", "lat_2", "k_0", "k", "x_0", "y_0"];
-const EQC_PARAMS: &[&str] = &["lon_0", "lat_ts", "x_0", "y_0"];
+const EQC_PARAMS: &[&str] = &["lat_0", "lon_0", "lat_ts", "x_0", "y_0"];
 const LAEA_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
+const WEBMERC_PARAMS: &[&str] = &["lon_0", "x_0", "y_0"];
+const EQEARTH_PARAMS: &[&str] = &["lon_0", "x_0", "y_0"];
+const POLY_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
+const AEQD_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0", "guam"];
+const KROVAK_PARAMS: &[&str] = &["lat_0", "lon_0", "alpha", "k_0", "k", "x_0", "y_0"];
 const OMERC_PARAMS: &[&str] = &[
     "lat_0", "lonc", "lon_0", "alpha", "gamma", "k_0", "k", "x_0", "y_0", "no_uoff", "no_off",
 ];
@@ -80,6 +86,11 @@ fn parse_proj_params(params: &HashMap<String, String>) -> Result<CrsDef> {
         "laea" => parse_laea(params),
         "omerc" => parse_omerc(params),
         "cass" => parse_cass(params),
+        "webmerc" => parse_webmerc(params),
+        "eqearth" => parse_eqearth(params),
+        "poly" => parse_poly(params),
+        "aeqd" => parse_aeqd(params),
+        "krovak" => parse_krovak(params),
         other => Err(ParseError::Parse(format!(
             "unsupported PROJ projection: {other}"
         ))),
@@ -159,21 +170,7 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
         return Ok(datum);
     }
 
-    if let Some(e) = params.get("ellps") {
-        let ellps = match e.to_uppercase().as_str() {
-            "WGS84" => ellipsoid::WGS84,
-            "GRS80" => ellipsoid::GRS80,
-            "CLRK66" | "CLARKE1866" => ellipsoid::CLARKE1866,
-            "INTL" | "INTL1924" => ellipsoid::INTL1924,
-            "BESSEL" | "BESSEL1841" => ellipsoid::BESSEL1841,
-            "KRASS" | "KRASSOWSKY" => ellipsoid::KRASSOWSKY,
-            "AIRY" => ellipsoid::AIRY1830,
-            other => {
-                return Err(ParseError::Parse(format!(
-                    "unsupported PROJ ellipsoid: {other}"
-                )));
-            }
-        };
+    if let Some(ellps) = resolve_ellipsoid(params)? {
         let to_wgs84 = towgs84.unwrap_or_else(|| {
             if let Some(grid_shift) = nadgrids {
                 datum_grid_shift_to_crs_datum_transform(grid_shift)
@@ -200,6 +197,90 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
     }
 
     Ok(datum::WGS84)
+}
+
+/// Resolve `+ellps` or the custom `+a`/`+b`/`+rf`/`+f`/`+R` parameters.
+fn resolve_ellipsoid(params: &HashMap<String, String>) -> Result<Option<Ellipsoid>> {
+    let custom = custom_ellipsoid(params)?;
+    let Some(name) = params.get("ellps") else {
+        return Ok(custom);
+    };
+    if custom.is_some() {
+        return Err(ParseError::UnsupportedSemantics(
+            "PROJ ellipsoid definition cannot combine +ellps with custom ellipsoid parameters"
+                .into(),
+        ));
+    }
+    let named = |a: f64, rf: f64| Ellipsoid::from_a_rf(a, rf).map_err(ParseError::Core);
+    Ok(Some(match name.to_uppercase().as_str() {
+        "WGS84" => ellipsoid::WGS84,
+        "GRS80" => ellipsoid::GRS80,
+        "CLRK66" | "CLARKE1866" => ellipsoid::CLARKE1866,
+        "INTL" | "INTL1924" => ellipsoid::INTL1924,
+        "BESSEL" | "BESSEL1841" => ellipsoid::BESSEL1841,
+        "KRASS" | "KRASSOWSKY" => ellipsoid::KRASSOWSKY,
+        "AIRY" => ellipsoid::AIRY1830,
+        "GRS67" => named(6_378_160.0, 298.247_167_427)?,
+        "WGS72" => named(6_378_135.0, 298.26)?,
+        "CLRK80" => named(6_378_249.145, 293.4663)?,
+        "CLRK80IGN" => named(6_378_249.2, 293.466_021_293_626_9)?,
+        "AUST_SA" => named(6_378_160.0, 298.25)?,
+        "MOD_AIRY" => ellipsoid_from_a_b(6_377_340.189, 6_356_034.446)?,
+        "BESS_NAM" => named(6_377_483.865, 299.152_812_8)?,
+        "EVRST30" => named(6_377_276.345, 300.8017)?,
+        "SPHERE" => Ellipsoid::sphere(6_370_997.0)?,
+        other => {
+            return Err(ParseError::Parse(format!(
+                "unsupported PROJ ellipsoid: {other}"
+            )));
+        }
+    }))
+}
+
+fn custom_ellipsoid(params: &HashMap<String, String>) -> Result<Option<Ellipsoid>> {
+    let value = |key: &str| {
+        params
+            .get(key)
+            .map(|value| parse_f64_param(key, value))
+            .transpose()
+    };
+    let (a, b, rf, f) = (value("a")?, value("b")?, value("rf")?, value("f")?);
+    if let Some(radius) = value("r")? {
+        if a.is_some() || b.is_some() || rf.is_some() || f.is_some() {
+            return Err(ParseError::UnsupportedSemantics(
+                "PROJ ellipsoid definition cannot combine +R with other ellipsoid parameters"
+                    .into(),
+            ));
+        }
+        return Ok(Some(Ellipsoid::sphere(radius)?));
+    }
+    let Some(a) = a else {
+        if b.is_some() || rf.is_some() || f.is_some() {
+            return Err(ParseError::Parse(
+                "PROJ ellipsoid definition requires +a with +b, +rf, or +f".into(),
+            ));
+        }
+        return Ok(None);
+    };
+    Ok(Some(match (b, rf, f) {
+        (None, None, None) => Ellipsoid::sphere(a)?,
+        (Some(b), None, None) => ellipsoid_from_a_b(a, b)?,
+        (None, Some(rf), None) => Ellipsoid::from_a_rf(a, rf)?,
+        (None, None, Some(f)) => Ellipsoid::from_a_f(a, f)?,
+        _ => {
+            return Err(ParseError::UnsupportedSemantics(
+                "PROJ ellipsoid definition must use only one of +b, +rf, or +f".into(),
+            ));
+        }
+    }))
+}
+
+fn ellipsoid_from_a_b(a: f64, b: f64) -> Result<Ellipsoid> {
+    Ok(if a == b {
+        Ellipsoid::sphere(a)?
+    } else {
+        Ellipsoid::from_a_f(a, (a - b) / a)?
+    })
 }
 
 fn datum_grid_shift_to_crs_datum_transform(grid_shift: DatumGridShift) -> DatumToWgs84 {
@@ -517,6 +598,10 @@ fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
         "PROJ Mercator definition",
     )?;
     validate_supported_proj_common_semantics(params, "PROJ Mercator definition")?;
+    if is_legacy_web_mercator(params)? {
+        return proj_core::lookup_epsg(3857)
+            .ok_or_else(|| ParseError::Parse("EPSG:3857 not found in registry".into()));
+    }
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -532,6 +617,36 @@ fn parse_merc(params: &HashMap<String, String>) -> Result<CrsDef> {
         linear_unit,
         "",
     )))
+}
+
+/// The spherical `+proj=merc` form GDAL and QGIS wrote for EPSG:3857 before
+/// `+proj=webmerc`: the sphere has WGS 84's radius and `+nadgrids=@null` keeps
+/// the ellipsoidal WGS 84 coordinates from being shifted onto it.
+fn is_legacy_web_mercator(params: &HashMap<String, String>) -> Result<bool> {
+    let is = |key: &str, expected: f64| -> Result<bool> {
+        Ok(match params.get(key) {
+            Some(value) => parse_f64_param(key, value)? == expected,
+            None => expected == 0.0,
+        })
+    };
+    let towgs84_is_null = parse_helmert_is_null(params)?;
+    Ok(params.get("nadgrids").map(String::as_str) == Some("@null")
+        && is("a", 6_378_137.0)?
+        && is("b", 6_378_137.0)?
+        && is("lat_ts", 0.0)?
+        && is("lon_0", 0.0)?
+        && is("x_0", 0.0)?
+        && is("y_0", 0.0)?
+        && get_scale(params)? == 1.0
+        && resolve_linear_unit_to_meter(params)? == 1.0
+        && towgs84_is_null)
+}
+
+fn parse_helmert_is_null(params: &HashMap<String, String>) -> Result<bool> {
+    Ok(matches!(
+        parse_towgs84(params)?,
+        None | Some(DatumToWgs84::Identity)
+    ))
 }
 
 fn parse_stereo(params: &HashMap<String, String>) -> Result<CrsDef> {
@@ -758,6 +873,11 @@ fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
         "PROJ Equidistant Cylindrical definition",
     )?;
     validate_supported_proj_common_semantics(params, "PROJ Equidistant Cylindrical definition")?;
+    if get_f64(params, "lat_0")? != 0.0 {
+        return Err(ParseError::UnsupportedSemantics(
+            "PROJ Equidistant Cylindrical definition uses a nonzero +lat_0".into(),
+        ));
+    }
     let d = resolve_datum(params)?;
     let linear_unit = resolve_linear_unit(params)?;
     Ok(CrsDef::Projected(ProjectedCrsDef::new(
@@ -766,6 +886,148 @@ fn parse_eqc(params: &HashMap<String, String>) -> Result<CrsDef> {
         ProjectionMethod::EquidistantCylindrical {
             lon0: get_f64(params, "lon_0")?,
             lat_ts: get_f64(params, "lat_ts")?,
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
+        },
+        linear_unit,
+        "",
+    )))
+}
+
+fn parse_webmerc(params: &HashMap<String, String>) -> Result<CrsDef> {
+    const CONTEXT: &str = "PROJ Web Mercator definition";
+    validate_supported_proj_params(params, WEBMERC_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
+    validate_supported_proj_common_semantics(params, CONTEXT)?;
+    for key in WEBMERC_PARAMS {
+        if get_f64(params, key)? != 0.0 {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "{CONTEXT} uses a nonzero +{key}"
+            )));
+        }
+    }
+    let d = resolve_datum(params)?;
+    if d.ellipsoid().semi_major_axis() != ellipsoid::WGS84.semi_major_axis() {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "{CONTEXT} requires a WGS 84 or GRS80 semi-major axis"
+        )));
+    }
+    let linear_unit = resolve_linear_unit(params)?;
+    Ok(CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        d,
+        ProjectionMethod::WebMercator,
+        linear_unit,
+        "",
+    )))
+}
+
+fn parse_eqearth(params: &HashMap<String, String>) -> Result<CrsDef> {
+    const CONTEXT: &str = "PROJ Equal Earth definition";
+    validate_supported_proj_params(params, EQEARTH_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
+    validate_supported_proj_common_semantics(params, CONTEXT)?;
+    let d = resolve_datum(params)?;
+    let linear_unit = resolve_linear_unit(params)?;
+    Ok(CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        d,
+        ProjectionMethod::EqualEarth {
+            lon0: get_f64(params, "lon_0")?,
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
+        },
+        linear_unit,
+        "",
+    )))
+}
+
+fn parse_poly(params: &HashMap<String, String>) -> Result<CrsDef> {
+    const CONTEXT: &str = "PROJ American Polyconic definition";
+    validate_supported_proj_params(params, POLY_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
+    validate_supported_proj_common_semantics(params, CONTEXT)?;
+    let d = resolve_datum(params)?;
+    let linear_unit = resolve_linear_unit(params)?;
+    Ok(CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        d,
+        ProjectionMethod::AmericanPolyconic {
+            lon0: get_f64(params, "lon_0")?,
+            lat0: get_f64(params, "lat_0")?,
+            false_easting: get_meter_param(params, "x_0")?,
+            false_northing: get_meter_param(params, "y_0")?,
+        },
+        linear_unit,
+        "",
+    )))
+}
+
+fn parse_aeqd(params: &HashMap<String, String>) -> Result<CrsDef> {
+    const CONTEXT: &str = "PROJ Azimuthal Equidistant definition";
+    validate_supported_proj_params(params, AEQD_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
+    validate_supported_proj_common_semantics(params, CONTEXT)?;
+    validate_empty_flag(params, "guam", CONTEXT)?;
+    let d = resolve_datum(params)?;
+    let linear_unit = resolve_linear_unit(params)?;
+    let (lon0, lat0) = (get_f64(params, "lon_0")?, get_f64(params, "lat_0")?);
+    let false_easting = get_meter_param(params, "x_0")?;
+    let false_northing = get_meter_param(params, "y_0")?;
+    let method = if params.contains_key("guam") {
+        ProjectionMethod::GuamProjection {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        }
+    } else {
+        ProjectionMethod::AzimuthalEquidistant {
+            lon0,
+            lat0,
+            false_easting,
+            false_northing,
+        }
+    };
+    Ok(CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        d,
+        method,
+        linear_unit,
+        "",
+    )))
+}
+
+/// C PROJ's `krovak` is the north-orientated form on a fixed Bessel ellipsoid
+/// with a fixed cone: it reads `+alpha` but does not apply it.
+fn parse_krovak(params: &HashMap<String, String>) -> Result<CrsDef> {
+    const CONTEXT: &str = "PROJ Krovak definition";
+    validate_supported_proj_params(params, KROVAK_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
+    validate_supported_proj_common_semantics(params, CONTEXT)?;
+    let d = resolve_datum(params)?;
+    let bessel = ellipsoid::BESSEL1841;
+    if (d.ellipsoid().semi_major_axis() - bessel.semi_major_axis()).abs() > 1e-6
+        || (d.ellipsoid().flattening() - bessel.flattening()).abs() > 1e-12
+    {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "{CONTEXT} requires the Bessel 1841 ellipsoid"
+        )));
+    }
+    let linear_unit = resolve_linear_unit(params)?;
+    let or_default = |key: &str, default: f64| match params.get(key) {
+        Some(value) => parse_f64_param(key, value),
+        None => Ok(default),
+    };
+    let k0 = if params.contains_key("k_0") || params.contains_key("k") {
+        get_scale(params)?
+    } else {
+        0.9999
+    };
+    Ok(CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        d,
+        ProjectionMethod::KrovakNorthOrientated {
+            lon0: or_default("lon_0", 24.0 + 50.0 / 60.0)?,
+            lat0: or_default("lat_0", 49.5)?,
+            co_latitude_cone_axis: 30.288_139_752_777_78,
+            lat_pseudo_standard_parallel: 78.5,
+            k0,
             false_easting: get_meter_param(params, "x_0")?,
             false_northing: get_meter_param(params, "y_0")?,
         },
@@ -813,9 +1075,7 @@ fn unsupported_proj_parameter_error(context: &str, key: &str) -> ParseError {
         }
         "geoidgrids" => "vertical geoid grid shifts are not supported in PROJ strings",
         "vunits" | "vto_meter" => "vertical coordinate units are not supported in PROJ strings",
-        "a" | "b" | "es" | "f" | "rf" | "r" => {
-            "custom ellipsoid parameters are not supported; use a supported +ellps value"
-        }
+        "es" => "define a custom ellipsoid with +a and one of +b, +rf, or +f",
         _ => "parameter is not supported by this PROJ parser",
     };
     ParseError::UnsupportedSemantics(format!(
@@ -1286,6 +1546,201 @@ mod tests {
             cass,
             CrsDef::Projected(p) if matches!(p.method(), ProjectionMethod::CassiniSoldner { .. })
         ));
+    }
+
+    /// Convert a WGS 84 longitude/latitude into `definition`.
+    fn project(source: &str, definition: &str, input: (f64, f64)) -> (f64, f64) {
+        let source = parse_proj_string(source).unwrap();
+        let target =
+            parse_proj_string(definition).unwrap_or_else(|err| panic!("{definition}: {err}"));
+        proj_core::Transform::from_crs_defs(&source, &target)
+            .unwrap_or_else(|err| panic!("{definition}: {err}"))
+            .convert(input)
+            .unwrap_or_else(|err| panic!("{definition}: {err}"))
+    }
+
+    fn assert_near(actual: (f64, f64), expected: (f64, f64), tolerance: f64, label: &str) {
+        assert!(
+            (actual.0 - expected.0).abs() < tolerance && (actual.1 - expected.1).abs() < tolerance,
+            "{label}"
+        );
+    }
+
+    #[test]
+    fn implemented_projection_families_match_c_proj() {
+        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`.
+        const WGS84: &str = "+proj=longlat +datum=WGS84";
+        const BESSEL: &str = "+proj=longlat +ellps=bessel +towgs84=0,0,0";
+        const KROVAK: &str = "+proj=krovak +lat_0=49.5 +lon_0=24.83333333333333 +alpha=30.28813972222222 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +towgs84=0,0,0 +units=m +no_defs";
+        for (source, definition, input, expected) in [
+            (
+                WGS84,
+                "+proj=webmerc +datum=WGS84 +type=crs",
+                (10.0, 45.0),
+                (1113194.9079327357, 5621521.486192066),
+            ),
+            (
+                WGS84,
+                "+proj=eqearth +lon_0=10 +x_0=1000 +y_0=2000 +datum=WGS84 +type=crs",
+                (30.0, 45.0),
+                (1644608.3054439558, 5468867.760213718),
+            ),
+            (
+                WGS84,
+                "+proj=poly +lat_0=10 +lon_0=-54 +x_0=5000000 +y_0=10000000 +datum=WGS84 +type=crs",
+                (-50.0, -20.0),
+                (5418548.571027056, 6676781.7262324765),
+            ),
+            (
+                WGS84,
+                "+proj=aeqd +lat_0=40 +lon_0=-100 +x_0=100 +y_0=200 +datum=WGS84 +type=crs",
+                (-90.0, 45.0),
+                (787729.8931984723, 601446.6024790345),
+            ),
+            (
+                WGS84,
+                "+proj=aeqd +guam +lat_0=13.4724663 +lon_0=144.748750 +x_0=50000 +y_0=50000 +datum=WGS84 +type=crs",
+                (144.8, 13.5),
+                (55548.50307553842, 53046.761721513125),
+            ),
+            (
+                WGS84,
+                "+proj=eqc +lat_ts=30 +lat_0=0 +lon_0=10 +x_0=100 +y_0=200 +datum=WGS84 +type=crs",
+                (20.0, 40.0),
+                (964155.0696332284, 4452979.631730943),
+            ),
+            (
+                BESSEL,
+                KROVAK,
+                (15.0, 50.0),
+                (-703105.6899367272, -1058219.6008260138),
+            ),
+            (
+                BESSEL,
+                "+proj=krovak +ellps=bessel +towgs84=0,0,0 +type=crs",
+                (15.0, 50.0),
+                (-703105.6899367272, -1058219.6008260138),
+            ),
+        ] {
+            assert_near(project(source, definition, input), expected, 1e-4, definition);
+        }
+    }
+
+    #[test]
+    fn named_ellipsoids_match_c_proj() {
+        // `+proj=merc` of (10, 45) from C PROJ 9.6.
+        for (name, expected) in [
+            ("GRS67", (1113198.9221900152, 5591315.06259037)),
+            ("WGS72", (1113194.5588668853, 5591294.446489025)),
+            ("clrk80", (1113214.4809276322, 5590901.0607191995)),
+            ("clrk80ign", (1113214.490526943, 5590901.079772257)),
+            ("aust_SA", (1113198.9221900152, 5591315.34950132)),
+            ("mod_airy", (1113055.8381780747, 5590705.14936335)),
+            ("bess_nam", (1113080.9143706355, 5590813.785649478)),
+            ("evrst30", (1113044.6952979981, 5590796.939130907)),
+            ("sphere", (1111948.7428468117, 5615228.478780747)),
+        ] {
+            let source = format!("+proj=longlat +ellps={name} +towgs84=0,0,0");
+            let target = format!("+proj=merc +ellps={name} +towgs84=0,0,0");
+            assert_near(
+                project(&source, &target, (10.0, 45.0)),
+                expected,
+                1e-6,
+                name,
+            );
+        }
+    }
+
+    #[test]
+    fn custom_ellipsoid_parameters_define_the_figure() {
+        let ellipsoid = |definition: &str| {
+            parse_proj_string(definition)
+                .unwrap_or_else(|err| panic!("{definition}: {err}"))
+                .datum()
+                .ellipsoid()
+        };
+        let reference = ellipsoid::BESSEL1841;
+        let rf = reference.inverse_flattening();
+        let a = reference.semi_major_axis();
+        for definition in [
+            format!("+proj=longlat +a={a} +rf={rf}"),
+            format!("+proj=longlat +a={a} +f={}", 1.0 / rf),
+            format!("+proj=longlat +a={a} +b={}", reference.b()),
+        ] {
+            let parsed = ellipsoid(&definition);
+            assert_eq!(parsed.semi_major_axis(), a, "{definition}");
+            assert!((parsed.flattening() - reference.flattening()).abs() < 1e-14);
+        }
+
+        for sphere in ["+proj=longlat +R=6371000", "+proj=longlat +a=6371000"] {
+            let parsed = ellipsoid(sphere);
+            assert_eq!(parsed.semi_major_axis(), 6_371_000.0, "{sphere}");
+            assert_eq!(parsed.flattening(), 0.0, "{sphere}");
+        }
+    }
+
+    #[test]
+    fn custom_ellipsoids_stay_datum_unknown() {
+        // A figure alone does not identify a datum, so no transform is implied.
+        let crs = parse_proj_string("+proj=longlat +a=6378137 +rf=298.257222101").unwrap();
+        assert!(matches!(crs.datum().to_wgs84(), DatumToWgs84::Unknown));
+    }
+
+    #[test]
+    fn invalid_ellipsoid_combinations_are_rejected() {
+        for (definition, expected) in [
+            (
+                "+proj=longlat +ellps=GRS80 +a=6378137",
+                "cannot combine +ellps",
+            ),
+            ("+proj=longlat +R=6371000 +a=6371000", "cannot combine +R"),
+            ("+proj=longlat +b=6356752", "requires +a"),
+            ("+proj=longlat +a=6378137 +b=6356752 +rf=298", "only one of"),
+            ("+proj=longlat +a=6378137 +es=0.006", "+es"),
+            ("+proj=longlat +a=-1", "semi-major"),
+        ] {
+            let err = parse_proj_string(definition).unwrap_err().to_string();
+            assert!(err.contains(expected), "{definition}: {err}");
+        }
+    }
+
+    #[test]
+    fn legacy_web_mercator_resolves_to_epsg_3857() {
+        for definition in [
+            "+proj=merc +a=6378137 +b=6378137 +lat_ts=0 +lon_0=0 +x_0=0 +y_0=0 +k=1 +units=m +nadgrids=@null +wktext +no_defs",
+            "+proj=merc +a=6378137 +b=6378137 +lat_ts=0.0 +lon_0=0.0 +x_0=0.0 +y_0=0 +k=1.0 +units=m +nadgrids=@null +no_defs",
+            "+proj=merc +a=6378137 +b=6378137 +towgs84=0,0,0,0,0,0,0 +nadgrids=@null +wktext",
+        ] {
+            let crs = parse_proj_string(definition)
+                .unwrap_or_else(|err| panic!("{definition}: {err}"));
+            assert_eq!(crs.epsg(), 3857, "{definition}");
+        }
+    }
+
+    #[test]
+    fn spherical_mercator_without_null_grids_is_not_web_mercator() {
+        let crs = parse_proj_string("+proj=merc +a=6378137 +b=6378137").unwrap();
+        assert_eq!(crs.epsg(), 0);
+        assert!(matches!(
+            crs.as_projected().unwrap().method(),
+            ProjectionMethod::Mercator { .. }
+        ));
+    }
+
+    #[test]
+    fn projection_constraints_are_enforced() {
+        for (definition, expected) in [
+            ("+proj=webmerc +lon_0=10 +datum=WGS84", "nonzero +lon_0"),
+            ("+proj=webmerc +x_0=1 +datum=WGS84", "nonzero +x_0"),
+            ("+proj=webmerc +ellps=bessel", "semi-major axis"),
+            ("+proj=eqc +lat_0=10 +datum=WGS84", "nonzero +lat_0"),
+            ("+proj=krovak +datum=WGS84", "requires the Bessel"),
+            ("+proj=krovak +czech +ellps=bessel", "+czech"),
+            ("+proj=aeqd +guam=1 +datum=WGS84", "+guam value"),
+        ] {
+            let err = parse_proj_string(definition).unwrap_err().to_string();
+            assert!(err.contains(expected), "{definition}: {err}");
+        }
     }
 
     #[test]
