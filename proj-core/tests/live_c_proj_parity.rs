@@ -198,3 +198,28 @@ fn proj_core_matches_live_c_proj_for_supported_corpus_cases() {
         );
     }
 }
+
+/// These give their scale at the pole, which the corpus's standard-parallel
+/// polar CRSs cannot exercise.
+#[test]
+fn polar_stereographic_scale_at_the_pole_matches_c_proj() {
+    for (code, lon, lat) in [
+        (5041, 10.0, 85.0),
+        (5042, 10.0, -85.0),
+        (32661, -120.0, 88.0),
+        (32761, 150.0, -88.0),
+    ] {
+        let ours = Transform::from_epsg(4326, code)
+            .unwrap()
+            .convert((lon, lat))
+            .unwrap();
+        let (x, y, _) = CProjTransform::new_known_crs("EPSG:4326", &format!("EPSG:{code}"))
+            .unwrap()
+            .convert_3d((lon, lat, 0.0))
+            .unwrap();
+        assert!(
+            (ours.0 - x).abs() < 1e-3 && (ours.1 - y).abs() < 1e-3,
+            "EPSG:{code}"
+        );
+    }
+}

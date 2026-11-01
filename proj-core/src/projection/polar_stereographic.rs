@@ -130,9 +130,11 @@ impl PolarStereographic {
     }
 }
 
-/// Compute t at the pole: t(90°) = exp(-e * atanh(e)) = ((1-e)/(1+e))^(e/2)
+/// The EPSG polar term `sqrt((1+e)^(1+e) * (1-e)^(1-e))`. A scale derived from a
+/// parallel divides this back out, so an error here only shows when the scale
+/// is given at the pole.
 fn compute_t_polar(e: f64) -> f64 {
-    ((1.0 - e) / (1.0 + e)).powf(e / 2.0)
+    ((1.0 + e).powf(1.0 + e) * (1.0 - e).powf(1.0 - e)).sqrt()
 }
 
 /// Compute the conformal latitude parameter t for a given latitude.
@@ -333,6 +335,34 @@ mod tests {
         let (lon_back, lat_back) = proj.inverse(x, y).unwrap();
         assert!((lon_back - lon).abs() < 1e-8, "lon: {lon_back} vs {lon}");
         assert!((lat_back - lat).abs() < 1e-8, "lat: {lat_back} vs {lat}");
+    }
+
+    #[test]
+    fn scale_at_the_pole_matches_c_proj() {
+        // Reference values from C PROJ 9.6 for EPSG:5041 and EPSG:5042, whose
+        // scale is given at the pole rather than derived from a parallel.
+        for (lat, (expected_x, expected_y)) in [
+            (85.0_f64, (2_096_454.2, 1_452_981.3)),
+            (-85.0_f64, (2_096_454.2, 2_547_018.7)),
+        ] {
+            let proj = PolarStereographic::new(
+                ellipsoid::WGS84,
+                0.0,
+                90.0_f64.copysign(lat).to_radians(),
+                0.994,
+                2_000_000.0,
+                2_000_000.0,
+            )
+            .unwrap();
+            let (x, y) = proj
+                .forward(10.0_f64.to_radians(), lat.to_radians())
+                .unwrap();
+            assert!((x - expected_x).abs() < 0.1 && (y - expected_y).abs() < 0.1);
+
+            let (lon, back) = proj.inverse(x, y).unwrap();
+            assert!((lon.to_degrees() - 10.0).abs() < 1e-9);
+            assert!((back.to_degrees() - lat).abs() < 1e-9);
+        }
     }
 
     #[test]
