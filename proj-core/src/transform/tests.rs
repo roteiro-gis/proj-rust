@@ -1692,6 +1692,93 @@ fn transform_bounds_web_mercator() {
 }
 
 #[test]
+fn transform_bounds_covers_a_pole_inside_a_polar_extent() {
+    let extent = Bounds::new(-3_000_000.0, -3_000_000.0, 3_000_000.0, 3_000_000.0);
+
+    let south = Transform::new("EPSG:3031", "EPSG:4326")
+        .unwrap()
+        .transform_bounds(extent, 21)
+        .unwrap();
+    assert_eq!(south.min_y, -90.0);
+    assert!((south.max_y - -52.3).abs() < 0.1, "{south:?}");
+    assert_eq!((south.min_x, south.max_x), (-180.0, 180.0));
+
+    let north = Transform::new("EPSG:3413", "EPSG:4326")
+        .unwrap()
+        .transform_bounds(extent, 21)
+        .unwrap();
+    assert_eq!(north.max_y, 90.0);
+    assert_eq!((north.min_x, north.max_x), (-180.0, 180.0));
+}
+
+#[test]
+fn transform_bounds_reaches_a_pole_on_the_boundary_without_spanning_longitude() {
+    let quadrant = Bounds::new(0.0, 0.0, 1_000_000.0, 1_000_000.0);
+
+    let bounds = Transform::new("EPSG:3031", "EPSG:4326")
+        .unwrap()
+        .transform_bounds(quadrant, 21)
+        .unwrap();
+
+    assert_eq!(bounds.min_y, -90.0);
+    assert!(bounds.max_x - bounds.min_x < 180.0, "{bounds:?}");
+}
+
+#[test]
+fn transform_bounds_ignores_poles_outside_the_extent() {
+    let offset = Bounds::new(1_000_000.0, 1_000_000.0, 2_000_000.0, 2_000_000.0);
+
+    let bounds = Transform::new("EPSG:3031", "EPSG:4326")
+        .unwrap()
+        .transform_bounds(offset, 21)
+        .unwrap();
+
+    assert!(bounds.min_y > -80.0, "{bounds:?}");
+    assert!(bounds.max_x - bounds.min_x < 180.0, "{bounds:?}");
+}
+
+#[test]
+fn transform_bounds_converts_the_pole_into_native_units() {
+    // Pole at (1_000 km, 1_000 km) in a CRS whose native unit is the kilometre:
+    // comparing metres against kilometre bounds would miss it.
+    let source = CrsDef::Projected(ProjectedCrsDef::new(
+        0,
+        datum::WGS84,
+        ProjectionMethod::PolarStereographic {
+            lon0: 0.0,
+            lat_ts: -71.0,
+            k0: 1.0,
+            false_easting: 1_000_000.0,
+            false_northing: 1_000_000.0,
+        },
+        LinearUnit::kilometre(),
+        "Kilometre Antarctic",
+    ));
+    let target = registry::lookup_epsg(4326).unwrap();
+
+    let bounds = Transform::from_crs_defs(&source, &target)
+        .unwrap()
+        .transform_bounds(Bounds::new(900.0, 900.0, 1_100.0, 1_100.0), 8)
+        .unwrap();
+
+    assert_eq!(bounds.min_y, -90.0);
+    assert_eq!((bounds.min_x, bounds.max_x), (-180.0, 180.0));
+}
+
+#[test]
+fn transform_bounds_leaves_projected_targets_unchanged() {
+    let extent = Bounds::new(-3_000_000.0, -3_000_000.0, 3_000_000.0, 3_000_000.0);
+
+    let bounds = Transform::new("EPSG:3031", "EPSG:3857")
+        .unwrap()
+        .transform_bounds(extent, 21)
+        .unwrap();
+
+    assert!(bounds.is_valid());
+    assert!(bounds.min_y > -20_000_000.0, "{bounds:?}");
+}
+
+#[test]
 fn transform_bounds_rejects_invalid_input() {
     let t = Transform::new("EPSG:4326", "EPSG:3857").unwrap();
     let err = t

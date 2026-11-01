@@ -10,7 +10,7 @@ use crate::operation::{
     VerticalTransformAction, VerticalTransformDiagnostics,
 };
 use crate::registry;
-use crate::selector::SelectedOperationKind;
+use crate::selector::{include_interior_poles, SelectedOperationKind};
 
 #[cfg(feature = "geo-types")]
 mod geo_adapters;
@@ -501,6 +501,11 @@ impl Transform {
 
     /// Reproject a 2D bounding box by sampling its perimeter.
     ///
+    /// A geographic target also covers any pole inside a projected source
+    /// extent: the result reaches that pole and spans every longitude, although
+    /// no perimeter sample does. Extents crossing the antimeridian return the
+    /// full `min_x <= max_x` longitude span rather than wrapping.
+    ///
     /// `densify_points` is the number of intermediate samples added per edge
     /// and must be no larger than [`MAX_BOUNDS_DENSIFY_POINTS`].
     pub fn transform_bounds(&self, bounds: Bounds, densify_points: usize) -> Result<Bounds> {
@@ -566,7 +571,12 @@ impl Transform {
             }
         }
 
-        transformed.ok_or_else(|| Error::OutOfRange("failed to sample bounds".into()))
+        let mut transformed =
+            transformed.ok_or_else(|| Error::OutOfRange("failed to sample bounds".into()))?;
+        if self.target.is_geographic() {
+            include_interior_poles(&self.source, bounds, &mut transformed)?;
+        }
+        Ok(transformed)
     }
 
     fn convert_coord(&self, c: Coord) -> Result<Coord> {
