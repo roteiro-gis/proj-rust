@@ -1032,73 +1032,77 @@ pub(crate) fn vertical_grid_operations_between(
         .collect()
 }
 
-pub(crate) fn related_operations(
-    source_geo: Option<u32>,
-    target_geo: Option<u32>,
-) -> Vec<&'static CoordinateOperation> {
-    let (Some(source_geo), Some(target_geo)) = (source_geo, target_geo) else {
-        return Vec::new();
-    };
-    let source_datum = lookup_datum_code_for_crs(source_geo);
-    let target_datum = lookup_datum_code_for_crs(target_geo);
-    let mut ids = Vec::new();
+/// Registry identity of a CRS for operation lookup: its base geographic CRS
+/// when it has one, and its geodetic datum, which definitions without an EPSG
+/// code (PROJ strings, unlabelled WKT) can still name.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) struct OperationEndpoint {
+    pub(crate) crs: Option<u32>,
+    pub(crate) datum: Option<u32>,
+}
 
-    extend_index_hits(
-        &mut ids,
-        &db().operation_ids_by_crs_pair,
-        (source_geo, target_geo),
-    );
-    extend_index_hits(
-        &mut ids,
-        &db().operation_ids_by_crs_pair,
-        (target_geo, source_geo),
-    );
-
-    if let (Some(source_datum), Some(target_datum)) = (source_datum, target_datum) {
-        extend_index_hits(
-            &mut ids,
-            &db().operation_ids_by_datum_pair,
-            (source_datum, target_datum),
-        );
-        extend_index_hits(
-            &mut ids,
-            &db().operation_ids_by_datum_pair,
-            (target_datum, source_datum),
-        );
+impl OperationEndpoint {
+    pub(crate) fn of(crs: &CrsDef) -> Self {
+        let base = crs.base_geographic_crs_epsg();
+        let declared_datum = Some(crs.datum().epsg()).filter(|code| *code != 0);
+        Self {
+            crs: base,
+            datum: base.and_then(lookup_datum_code_for_crs).or(declared_datum),
+        }
     }
 
+    /// True when `operation` runs from this endpoint to `target`, by exact CRS
+    /// pair or by datum pair.
+    pub(crate) fn connects_to(self, target: Self, operation: &CoordinateOperation) -> bool {
+        let matches = |left: Option<u32>, right: Option<u32>, op_left, op_right| {
+            left.is_some() && right.is_some() && left == op_left && right == op_right
+        };
+        matches(
+            self.crs,
+            target.crs,
+            operation.source_crs_epsg,
+            operation.target_crs_epsg,
+        ) || matches(
+            self.datum,
+            target.datum,
+            operation.source_datum_epsg,
+            operation.target_datum_epsg,
+        )
+    }
+}
+
+fn operation_ids_between(source: OperationEndpoint, target: OperationEndpoint, ids: &mut Vec<u32>) {
+    if let (Some(source), Some(target)) = (source.crs, target.crs) {
+        extend_index_hits(ids, &db().operation_ids_by_crs_pair, (source, target));
+    }
+    if let (Some(source), Some(target)) = (source.datum, target.datum) {
+        extend_index_hits(ids, &db().operation_ids_by_datum_pair, (source, target));
+    }
+}
+
+fn operations_by_id(ids: Vec<u32>) -> Vec<&'static CoordinateOperation> {
     ids.into_iter()
         .filter_map(|id| db().operations.get(&id))
         .collect()
 }
 
-pub(crate) fn forward_operations(
-    source_geo: Option<u32>,
-    target_geo: Option<u32>,
+pub(crate) fn related_operations(
+    source: OperationEndpoint,
+    target: OperationEndpoint,
 ) -> Vec<&'static CoordinateOperation> {
-    let (Some(source_geo), Some(target_geo)) = (source_geo, target_geo) else {
-        return Vec::new();
-    };
-    let source_datum = lookup_datum_code_for_crs(source_geo);
-    let target_datum = lookup_datum_code_for_crs(target_geo);
     let mut ids = Vec::new();
+    operation_ids_between(source, target, &mut ids);
+    operation_ids_between(target, source, &mut ids);
+    operations_by_id(ids)
+}
 
-    extend_index_hits(
-        &mut ids,
-        &db().operation_ids_by_crs_pair,
-        (source_geo, target_geo),
-    );
-    if let (Some(source_datum), Some(target_datum)) = (source_datum, target_datum) {
-        extend_index_hits(
-            &mut ids,
-            &db().operation_ids_by_datum_pair,
-            (source_datum, target_datum),
-        );
-    }
-
-    ids.into_iter()
-        .filter_map(|id| db().operations.get(&id))
-        .collect()
+pub(crate) fn forward_operations(
+    source: OperationEndpoint,
+    target: OperationEndpoint,
+) -> Vec<&'static CoordinateOperation> {
+    let mut ids = Vec::new();
+    operation_ids_between(source, target, &mut ids);
+    operations_by_id(ids)
 }
 
 pub(crate) fn lookup_grid(code: u32) -> Option<GridDefinition> {

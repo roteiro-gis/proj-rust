@@ -797,6 +797,38 @@ mod tests {
     }
 
     #[test]
+    fn datum_only_definitions_transform_like_their_epsg_codes() {
+        // `+datum` and named WKT datums carry no EPSG CRS code, only a datum.
+        const ESRI_NAD83_UTM18N: &str = r#"PROJCS["NAD_1983_UTM_Zone_18N",GEOGCS["GCS_North_American_1983",DATUM["D_North_American_1983",SPHEROID["GRS_1980",6378137.0,298.257222101]],PRIMEM["Greenwich",0.0],UNIT["Degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["False_Easting",500000.0],PARAMETER["False_Northing",0.0],PARAMETER["Central_Meridian",-75.0],PARAMETER["Scale_Factor",0.9996],PARAMETER["Latitude_Of_Origin",0.0],UNIT["Meter",1.0]]"#;
+        let cases = [
+            (
+                "+proj=utm +zone=18 +datum=NAD83 +units=m +no_defs",
+                "EPSG:26918",
+                (583_960.0, 4_507_523.0),
+            ),
+            (ESRI_NAD83_UTM18N, "EPSG:26918", (583_960.0, 4_507_523.0)),
+            ("+proj=longlat +datum=NAD27", "EPSG:4267", (-74.0, 40.7)),
+            ("+proj=longlat +datum=OSGB36", "EPSG:4277", (-1.5, 52.0)),
+        ];
+
+        for (definition, code, coord) in cases {
+            let parsed = transform_from_crs_strings(definition, "EPSG:4326")
+                .unwrap_or_else(|err| panic!("{definition}: {err}"));
+            let registry = Transform::new(code, "EPSG:4326").unwrap();
+            let (x, y) = parsed.convert(coord).unwrap();
+            let (expected_x, expected_y) = registry.convert(coord).unwrap();
+            assert_eq!(
+                parsed.selected_operation().id,
+                registry.selected_operation().id,
+                "{definition}"
+            );
+            assert!((x - expected_x).abs() < 1e-9, "{definition}");
+            assert!((y - expected_y).abs() < 1e-9, "{definition}");
+            assert!(parsed.inverse().is_ok(), "{definition}");
+        }
+    }
+
+    #[test]
     fn transform_from_strings() {
         let t = transform_from_crs_strings("EPSG:4326", "EPSG:3857").unwrap();
         let (x, _y) = t.convert((-74.006, 40.7128)).unwrap();

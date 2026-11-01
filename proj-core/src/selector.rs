@@ -1,5 +1,6 @@
 use crate::coord::{Bounds, Coord};
 use crate::crs::CrsDef;
+use crate::epsg_db::OperationEndpoint;
 use crate::error::{Error, Result};
 use crate::grid::GridFormat;
 use crate::operation::{
@@ -234,17 +235,19 @@ pub(crate) fn rank_operation_candidates(
         });
     }
 
-    let source_geo = source.base_geographic_crs_epsg();
-    let target_geo = target.base_geographic_crs_epsg();
+    let source_endpoint = OperationEndpoint::of(source);
+    let target_endpoint = OperationEndpoint::of(target);
     for operation in registry::related_operations(source, target) {
         for direction in [
             OperationStepDirection::Forward,
             OperationStepDirection::Reverse,
         ] {
             let compatible = match direction {
-                OperationStepDirection::Forward => is_compatible(source_geo, target_geo, operation),
+                OperationStepDirection::Forward => {
+                    source_endpoint.connects_to(target_endpoint, operation)
+                }
                 OperationStepDirection::Reverse => {
-                    is_compatible_reversed(source_geo, target_geo, operation)
+                    target_endpoint.connects_to(source_endpoint, operation)
                 }
             };
             if !compatible {
@@ -303,11 +306,11 @@ fn compatible_direction(
     target: &CrsDef,
     operation: &CoordinateOperation,
 ) -> Option<OperationStepDirection> {
-    let source_geo = source.base_geographic_crs_epsg();
-    let target_geo = target.base_geographic_crs_epsg();
-    if is_compatible(source_geo, target_geo, operation) {
+    let source = OperationEndpoint::of(source);
+    let target = OperationEndpoint::of(target);
+    if source.connects_to(target, operation) {
         Some(OperationStepDirection::Forward)
-    } else if is_compatible_reversed(source_geo, target_geo, operation) {
+    } else if target.connects_to(source, operation) {
         Some(OperationStepDirection::Reverse)
     } else {
         None
@@ -401,46 +404,6 @@ fn match_kind_for_candidate(
         OperationMatchKind::DerivedGeographic
     } else {
         OperationMatchKind::DatumCompatible
-    }
-}
-
-fn is_compatible(
-    source_geo: Option<u32>,
-    target_geo: Option<u32>,
-    operation: &CoordinateOperation,
-) -> bool {
-    let source_datum = source_geo.and_then(crate::epsg_db::lookup_datum_code_for_crs);
-    let target_datum = target_geo.and_then(crate::epsg_db::lookup_datum_code_for_crs);
-    match (source_geo, target_geo) {
-        (Some(source_code), Some(target_code)) => {
-            (operation.source_crs_epsg == Some(source_code)
-                && operation.target_crs_epsg == Some(target_code))
-                || (source_datum.is_some()
-                    && target_datum.is_some()
-                    && operation.source_datum_epsg == source_datum
-                    && operation.target_datum_epsg == target_datum)
-        }
-        _ => false,
-    }
-}
-
-fn is_compatible_reversed(
-    source_geo: Option<u32>,
-    target_geo: Option<u32>,
-    operation: &CoordinateOperation,
-) -> bool {
-    let source_datum = source_geo.and_then(crate::epsg_db::lookup_datum_code_for_crs);
-    let target_datum = target_geo.and_then(crate::epsg_db::lookup_datum_code_for_crs);
-    match (source_geo, target_geo) {
-        (Some(source_code), Some(target_code)) => {
-            (operation.source_crs_epsg == Some(target_code)
-                && operation.target_crs_epsg == Some(source_code))
-                || (source_datum.is_some()
-                    && target_datum.is_some()
-                    && operation.source_datum_epsg == target_datum
-                    && operation.target_datum_epsg == source_datum)
-        }
-        _ => false,
     }
 }
 
@@ -928,6 +891,8 @@ fn validate_geographic_area_point(point: Coord) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::datum::{Datum, DatumToWgs84};
+    use crate::ellipsoid;
 
     fn assert_allowed_candidate_kinds(candidates: &OperationCandidateSet) {
         assert!(candidates.ranked.iter().all(|candidate| {
@@ -959,6 +924,47 @@ mod tests {
             .ranked
             .iter()
             .any(|candidate| matches!(candidate.operation, SelectedOperationKind::Registry(_))));
+    }
+
+    #[test]
+    fn definitions_without_epsg_codes_select_by_declared_datum() {
+        let code_less = CrsDef::Geographic(crate::GeographicCrsDef::new(
+            0,
+            crate::datum::NAD27,
+            "NAD27 without an EPSG code",
+        ));
+        let nad27 = registry::lookup_epsg(4267).expect("EPSG:4267");
+        let wgs84 = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let options = SelectionOptions::new();
+
+        let ids = |source: &CrsDef, target: &CrsDef| {
+            rank_operation_candidates(source, target, &options)
+                .unwrap()
+                .ranked
+                .iter()
+                .map(|candidate| candidate.metadata(source, target).id)
+                .collect::<Vec<_>>()
+        };
+
+        assert!(!ids(&code_less, &wgs84).is_empty());
+        assert_eq!(ids(&code_less, &wgs84), ids(&nad27, &wgs84));
+        assert_eq!(ids(&wgs84, &code_less), ids(&wgs84, &nad27));
+        assert_eq!(
+            registry::operations_between(&code_less, &wgs84),
+            registry::operations_between(&nad27, &wgs84),
+        );
+    }
+
+    #[test]
+    fn definitions_without_a_datum_code_stay_unmatched() {
+        let custom = Datum::new(ellipsoid::GRS80, DatumToWgs84::Unknown).unwrap();
+        let code_less = CrsDef::Geographic(crate::GeographicCrsDef::new(0, custom, "custom"));
+        let wgs84 = registry::lookup_epsg(4326).expect("EPSG:4326");
+
+        let candidates =
+            rank_operation_candidates(&code_less, &wgs84, &SelectionOptions::new()).unwrap();
+
+        assert!(candidates.ranked.is_empty());
     }
 
     #[test]
