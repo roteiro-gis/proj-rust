@@ -1,7 +1,7 @@
 use super::pipeline::{compile_pipeline, CompiledOperationFallback, CompiledOperationPipeline};
 use crate::crs::CrsDef;
 use crate::error::{Error, Result};
-use crate::grid::{GridError, GridRuntime};
+use crate::grid::GridRuntime;
 use crate::operation::{
     CoordinateOperationMetadata, OperationSelectionDiagnostics, OperationStepDirection,
     SelectionOptions, SelectionPolicy, SkippedOperation, SkippedOperationReason,
@@ -168,17 +168,6 @@ pub(super) fn selected_metadata(
     matched_area_of_use: Option<crate::operation::AreaOfUse>,
 ) -> CoordinateOperationMetadata {
     operation.metadata_for_direction(source, target, direction, matched_area_of_use)
-}
-
-pub(super) fn is_grid_coverage_miss(error: &Error) -> bool {
-    matches!(error, Error::Grid(GridError::OutsideCoverage(_)))
-}
-
-pub(super) fn grid_coverage_miss_detail(error: &Error) -> Option<String> {
-    match error {
-        Error::Grid(GridError::OutsideCoverage(detail)) => Some(detail.clone()),
-        _ => None,
-    }
 }
 
 fn selected_reasons_for(

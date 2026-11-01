@@ -11,8 +11,8 @@ use crate::selector;
 
 /// Look up a CRS definition by EPSG code.
 ///
-/// Searches the embedded EPSG database (~5,600 CRS definitions) covering all
-/// geographic 2D CRS and all projected CRS that use supported projection methods.
+/// Searches the embedded EPSG database, which covers geographic, geocentric, and
+/// compound CRS and every projected CRS that uses a supported projection method.
 ///
 /// Returns `None` if the EPSG code is not in the database.
 pub fn lookup_epsg(code: u32) -> Option<CrsDef> {

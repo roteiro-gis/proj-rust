@@ -146,19 +146,7 @@ impl VerticalTransform {
                 ..
             } => Ok(target_unit.from_meters(source_unit.to_meters(coord.z))),
             Self::GridShiftList { shifts, .. } => {
-                let mut last_coverage_error = None;
-                for shift in shifts {
-                    match apply_vertical_grid_shift(shift, coord) {
-                        Ok(z) => return Ok(z),
-                        Err(Error::Grid(crate::grid::GridError::OutsideCoverage(detail))) => {
-                            last_coverage_error = Some(detail);
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                Err(Error::Grid(crate::grid::GridError::OutsideCoverage(
-                    last_coverage_error.unwrap_or_else(|| "vertical grid coverage miss".into()),
-                )))
+                first_covering_shift(shifts, coord).map(|(z, _)| z)
             }
         }
     }
@@ -180,24 +168,11 @@ impl VerticalTransform {
                 diagnostics: diagnostics.clone(),
             }),
             Self::GridShiftList { shifts, .. } => {
-                let mut last_coverage_error = None;
-                for shift in shifts {
-                    match apply_vertical_grid_shift(shift, coord) {
-                        Ok(z) => {
-                            return Ok(VerticalApplyOutcome {
-                                z,
-                                diagnostics: shift.diagnostics.clone(),
-                            });
-                        }
-                        Err(Error::Grid(crate::grid::GridError::OutsideCoverage(detail))) => {
-                            last_coverage_error = Some(detail);
-                        }
-                        Err(error) => return Err(error),
-                    }
-                }
-                Err(Error::Grid(crate::grid::GridError::OutsideCoverage(
-                    last_coverage_error.unwrap_or_else(|| "vertical grid coverage miss".into()),
-                )))
+                let (z, shift) = first_covering_shift(shifts, coord)?;
+                Ok(VerticalApplyOutcome {
+                    z,
+                    diagnostics: shift.diagnostics.clone(),
+                })
             }
         }
     }
@@ -222,6 +197,26 @@ impl VerticalTransform {
             | Self::GridShiftList { diagnostics, .. } => diagnostics,
         }
     }
+}
+
+/// Apply the first geoid grid that covers the coordinate.
+fn first_covering_shift(
+    shifts: &[CompiledVerticalGridShift],
+    coord: Coord3D,
+) -> Result<(f64, &CompiledVerticalGridShift)> {
+    let mut last_miss = None;
+    for shift in shifts {
+        match apply_vertical_grid_shift(shift, coord) {
+            Ok(z) => return Ok((z, shift)),
+            Err(Error::Grid(crate::grid::GridError::OutsideCoverage(detail))) => {
+                last_miss = Some(detail);
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Err(Error::Grid(crate::grid::GridError::OutsideCoverage(
+        last_miss.unwrap_or_else(|| "vertical grid coverage miss".into()),
+    )))
 }
 
 fn apply_vertical_grid_shift(shift: &CompiledVerticalGridShift, coord: Coord3D) -> Result<f64> {

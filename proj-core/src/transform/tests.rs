@@ -817,6 +817,36 @@ fn grid_coverage_miss_has_no_approximate_fallback_candidate() {
 }
 
 #[test]
+fn coverage_miss_errors_report_the_grid_detail() {
+    let t = Transform::with_selection_options(
+        "EPSG:4267",
+        "EPSG:4269",
+        SelectionOptions::new().require_grids(),
+    )
+    .unwrap();
+    let outside = (10.0, 50.0);
+
+    let Error::Grid(GridError::OutsideCoverage(detail)) = t.convert(outside).unwrap_err() else {
+        panic!("expected a coverage miss");
+    };
+    assert_ne!(detail, "grid coverage miss");
+
+    let Error::Grid(GridError::OutsideCoverage(with_diagnostics)) =
+        t.convert_with_diagnostics(outside).unwrap_err()
+    else {
+        panic!("expected a coverage miss");
+    };
+    assert_eq!(detail, with_diagnostics);
+
+    let Error::Grid(GridError::OutsideCoverage(three_d)) =
+        t.convert_3d((outside.0, outside.1, 0.0)).unwrap_err()
+    else {
+        panic!("expected a coverage miss");
+    };
+    assert_eq!(detail, three_d);
+}
+
+#[test]
 fn grid_coverage_miss_does_not_use_non_grid_fallback_when_grids_are_required() {
     let t = Transform::with_selection_options(
         "EPSG:4267",

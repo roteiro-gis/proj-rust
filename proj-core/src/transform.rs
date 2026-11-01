@@ -25,9 +25,7 @@ use pipeline::{
     validate_pipeline_coord3d, validate_vertical_ordinate, CompiledOperationFallback,
     CompiledOperationPipeline, PipelineExecutionOutcome,
 };
-use selection::{
-    compile_selected_pipelines, grid_coverage_miss_detail, is_grid_coverage_miss, selected_metadata,
-};
+use selection::{compile_selected_pipelines, selected_metadata};
 use vertical::{compile_vertical_transform, vertical_diagnostics, VerticalTransform};
 
 #[cfg(feature = "rayon")]
@@ -579,171 +577,91 @@ impl Transform {
         Ok(transformed)
     }
 
+    /// Pipelines to try for one coordinate, in ranked order: a grid coverage
+    /// miss moves on to the next one.
+    fn ranked_pipelines(
+        &self,
+    ) -> impl Iterator<
+        Item = (
+            &CompiledOperationPipeline,
+            &std::sync::Arc<CoordinateOperationMetadata>,
+        ),
+    > {
+        std::iter::once((&self.pipeline, &self.selected_operation)).chain(
+            self.fallback_pipelines
+                .iter()
+                .map(|fallback| (&fallback.pipeline, &fallback.metadata)),
+        )
+    }
+
+    /// Run the first pipeline whose grids cover the coordinate.
+    fn first_covering<T>(
+        &self,
+        execute: impl Fn(&CompiledOperationPipeline) -> Result<T>,
+    ) -> Result<T> {
+        let mut last_miss = None;
+        for (pipeline, _) in self.ranked_pipelines() {
+            match execute(pipeline) {
+                Err(Error::Grid(GridError::OutsideCoverage(detail))) => last_miss = Some(detail),
+                outcome => return outcome,
+            }
+        }
+        Err(all_pipelines_missed(last_miss))
+    }
+
+    /// Like [`Self::first_covering`], reporting the operation used and the
+    /// coverage misses on the way to it.
+    fn first_covering_with_diagnostics<T>(
+        &self,
+        execute: impl Fn(&CompiledOperationPipeline) -> Result<(T, VerticalTransformDiagnostics)>,
+    ) -> Result<TransformOutcome<T>> {
+        let mut grid_coverage_misses = Vec::new();
+        for (pipeline, operation) in self.ranked_pipelines() {
+            match execute(pipeline) {
+                Ok((coord, vertical)) => {
+                    return Ok(TransformOutcome {
+                        coord,
+                        operation: operation.clone(),
+                        vertical,
+                        grid_coverage_misses,
+                    });
+                }
+                Err(Error::Grid(GridError::OutsideCoverage(detail))) => {
+                    grid_coverage_misses.push(GridCoverageMiss {
+                        operation: operation.clone(),
+                        detail,
+                    });
+                }
+                Err(error) => return Err(error),
+            }
+        }
+        Err(all_pipelines_missed(
+            grid_coverage_misses.pop().map(|miss| miss.detail),
+        ))
+    }
+
     fn convert_coord(&self, c: Coord) -> Result<Coord> {
-        match execute_pipeline_xy(&self.pipeline, Coord3D::new(c.x, c.y, 0.0)) {
-            Ok(coord) => return Ok(coord),
-            Err(error) => {
-                if !is_grid_coverage_miss(&error) {
-                    return Err(error);
-                }
-            }
-        }
-
-        for fallback in &self.fallback_pipelines {
-            match execute_pipeline_xy(&fallback.pipeline, Coord3D::new(c.x, c.y, 0.0)) {
-                Ok(coord) => return Ok(coord),
-                Err(error) => {
-                    if !is_grid_coverage_miss(&error) {
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
-        Err(Error::Grid(GridError::OutsideCoverage(
-            "grid coverage miss".into(),
-        )))
+        let c = Coord3D::new(c.x, c.y, 0.0);
+        self.first_covering(|pipeline| execute_pipeline_xy(pipeline, c))
     }
 
     fn convert_coord3d(&self, c: Coord3D) -> Result<Coord3D> {
-        match self.execute_pipeline_coord3d(&self.pipeline, c) {
-            Ok(coord) => return Ok(coord),
-            Err(error) => {
-                if !is_grid_coverage_miss(&error) {
-                    return Err(error);
-                }
-            }
-        }
-
-        for fallback in &self.fallback_pipelines {
-            match self.execute_pipeline_coord3d(&fallback.pipeline, c) {
-                Ok(coord) => return Ok(coord),
-                Err(error) => {
-                    if !is_grid_coverage_miss(&error) {
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
-        Err(Error::Grid(GridError::OutsideCoverage(
-            "grid coverage miss".into(),
-        )))
+        self.first_covering(|pipeline| self.execute_pipeline_coord3d(pipeline, c))
     }
 
     fn convert_coord_with_diagnostics(&self, c: Coord) -> Result<TransformOutcome<Coord>> {
-        let mut grid_coverage_misses = Vec::new();
         let c = Coord3D::new(c.x, c.y, 0.0);
-
-        match execute_pipeline_xy(&self.pipeline, c) {
-            Ok(coord) => {
-                return Ok(TransformOutcome {
-                    coord,
-                    operation: self.selected_operation.clone(),
-                    vertical: vertical_diagnostics(VerticalTransformAction::None, None, None, None),
-                    grid_coverage_misses,
-                });
-            }
-            Err(error) => {
-                if let Some(detail) = grid_coverage_miss_detail(&error) {
-                    grid_coverage_misses.push(GridCoverageMiss {
-                        operation: self.selected_operation.clone(),
-                        detail,
-                    });
-                } else {
-                    return Err(error);
-                }
-            }
-        }
-
-        for fallback in &self.fallback_pipelines {
-            match execute_pipeline_xy(&fallback.pipeline, c) {
-                Ok(coord) => {
-                    return Ok(TransformOutcome {
-                        coord,
-                        operation: fallback.metadata.clone(),
-                        vertical: vertical_diagnostics(
-                            VerticalTransformAction::None,
-                            None,
-                            None,
-                            None,
-                        ),
-                        grid_coverage_misses,
-                    });
-                }
-                Err(error) => {
-                    if let Some(detail) = grid_coverage_miss_detail(&error) {
-                        grid_coverage_misses.push(GridCoverageMiss {
-                            operation: fallback.metadata.clone(),
-                            detail,
-                        });
-                    } else {
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
-        Err(Error::Grid(GridError::OutsideCoverage(
-            grid_coverage_misses
-                .last()
-                .map(|miss| miss.detail.clone())
-                .unwrap_or_else(|| "grid coverage miss".into()),
-        )))
+        self.first_covering_with_diagnostics(|pipeline| {
+            let vertical = vertical_diagnostics(VerticalTransformAction::None, None, None, None);
+            Ok((execute_pipeline_xy(pipeline, c)?, vertical))
+        })
     }
 
     fn convert_coord3d_with_diagnostics(&self, c: Coord3D) -> Result<TransformOutcome<Coord3D>> {
-        let mut grid_coverage_misses = Vec::new();
-        match self.execute_pipeline(&self.pipeline, c) {
-            Ok(outcome) => {
-                return Ok(TransformOutcome {
-                    coord: outcome.coord,
-                    operation: self.selected_operation.clone(),
-                    vertical: outcome.vertical,
-                    grid_coverage_misses,
-                });
-            }
-            Err(error) => {
-                if let Some(detail) = grid_coverage_miss_detail(&error) {
-                    grid_coverage_misses.push(GridCoverageMiss {
-                        operation: self.selected_operation.clone(),
-                        detail,
-                    });
-                } else {
-                    return Err(error);
-                }
-            }
-        }
-
-        for fallback in &self.fallback_pipelines {
-            match self.execute_pipeline(&fallback.pipeline, c) {
-                Ok(outcome) => {
-                    return Ok(TransformOutcome {
-                        coord: outcome.coord,
-                        operation: fallback.metadata.clone(),
-                        vertical: outcome.vertical,
-                        grid_coverage_misses,
-                    });
-                }
-                Err(error) => {
-                    if let Some(detail) = grid_coverage_miss_detail(&error) {
-                        grid_coverage_misses.push(GridCoverageMiss {
-                            operation: fallback.metadata.clone(),
-                            detail,
-                        });
-                    } else {
-                        return Err(error);
-                    }
-                }
-            }
-        }
-
-        Err(Error::Grid(GridError::OutsideCoverage(
-            grid_coverage_misses
-                .last()
-                .map(|miss| miss.detail.clone())
-                .unwrap_or_else(|| "grid coverage miss".into()),
-        )))
+        self.first_covering_with_diagnostics(|pipeline| {
+            let outcome = self.execute_pipeline(pipeline, c)?;
+            Ok((outcome.coord, outcome.vertical))
+        })
     }
 
     /// True when this pipeline changes ellipsoidal height and no vertical CRS
@@ -919,6 +837,12 @@ impl Transform {
             })
             .collect()
     }
+}
+
+fn all_pipelines_missed(last_miss: Option<String>) -> Error {
+    Error::Grid(GridError::OutsideCoverage(
+        last_miss.unwrap_or_else(|| "grid coverage miss".into()),
+    ))
 }
 
 pub(crate) fn bounds_densify_segments(densify_points: usize) -> Result<usize> {
