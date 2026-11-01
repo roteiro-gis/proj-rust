@@ -55,6 +55,32 @@ impl CProjTransform {
         }
     }
 
+    /// Create a transform in each CRS's authority axis order, without the
+    /// longitude-first normalization of [`Self::new_known_crs`].
+    pub fn new_known_crs_authority_axes(from: &str, to: &str) -> Result<Self, String> {
+        let from = CString::new(from).map_err(|e| format!("invalid source CRS {from}: {e}"))?;
+        let to = CString::new(to).map_err(|e| format!("invalid target CRS {to}: {e}"))?;
+
+        unsafe {
+            let ctx = proj_context_create();
+            if ctx.is_null() {
+                return Err("failed to create PROJ context".into());
+            }
+
+            let area = proj_area_create();
+            let pj = proj_create_crs_to_crs(ctx, from.as_ptr(), to.as_ptr(), area);
+            proj_area_destroy(area);
+
+            if pj.is_null() {
+                let message = error_message(proj_context_errno(ctx));
+                proj_context_destroy(ctx);
+                return Err(format!("failed to create C PROJ transform: {message}"));
+            }
+
+            Ok(Self { ctx, pj })
+        }
+    }
+
     /// Create a transform from one explicit EPSG coordinate operation.
     ///
     /// Using the operation URN avoids late-binding selection differences and

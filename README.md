@@ -59,7 +59,7 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 
 `proj-wkt` accepts:
 
-- EPSG authority codes, bare EPSG numbers, compound `EPSG:horizontal+vertical` codes, and OGC URNs and `opengis.net` URIs for EPSG codes.
+- EPSG authority codes, bare EPSG numbers, compound `EPSG:horizontal+vertical` codes, and OGC URNs and `opengis.net` URIs for EPSG codes, which use the authority's axis order as OGC defines them.
 - OGC `CRS84`, `CRS83`, and `CRS27` in their short, URN, and URI forms, such as `urn:ogc:def:crs:OGC:1.3:CRS84`.
 - Common PROJ strings for the implemented projection families, including `+proj=cart` / `+proj=geocent` ECEF CRS definitions, custom `+a`/`+b`/`+rf`/`+f`/`+R` ellipsoids, the legacy spherical Web Mercator `+proj=merc +nadgrids=@null` form, and legacy `+init=epsg:XXXX`.
 - WKT1 and supported WKT2 geographic/projected/geocentric CRS definitions.
@@ -69,7 +69,7 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 
 Custom definitions are accepted only when they map to this library's CRS model: longitude and latitude in degrees with a Greenwich prime meridian; geocentric ECEF X/Y/Z axes in metres; and projected easting and northing in a single linear unit. Other axis directions, prime meridians, angular units, projections, and vertical transformation semantics return errors.
 
-Coordinates follow the CRS's axis order. Registry lookups such as `EPSG:4326` are longitude/easting first whatever the authority's order. A WKT or PROJJSON definition keeps the order it declares, tagged or not, as in C PROJ, so `pyproj.CRS(4326).to_wkt()` takes latitude first and `transform_bounds` takes its bounds in that order too. `CrsDef::axis_order` reports the order, and `CrsDef::with_axis_order` reads a definition in another order deliberately. The axis order of a projected CRS's base geographic CRS does not affect its coordinates and is ignored.
+Coordinates follow the CRS's axis order. Codes such as `EPSG:4326` are longitude/easting first whatever the authority's order, while the OGC URN and URI forms use the authority's order, as in C PROJ, and are rejected for a CRS whose axes the model cannot state. A WKT or PROJJSON definition keeps the order it declares, tagged or not, as in C PROJ, so `pyproj.CRS(4326).to_wkt()` takes latitude first and `transform_bounds` takes its bounds in that order too. `CrsDef::axis_order` reports the order, and `CrsDef::with_axis_order` reads a definition in another order deliberately. The axis order of a projected CRS's base geographic CRS does not affect its coordinates and is ignored.
 
 ## Supported CRS
 

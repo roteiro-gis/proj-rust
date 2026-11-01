@@ -16,7 +16,7 @@
 /// `"EPSG"` in big-endian byte order.
 pub const MAGIC: u32 = 0x4550_5347;
 /// Container format version; bump on any layout or semantic change.
-pub const VERSION: u16 = 11;
+pub const VERSION: u16 = 12;
 /// Fixed header: magic (4) + version (2) + reserved (2) + twelve `u32`
 /// section counts.
 pub const HEADER_SIZE: usize = 56;
@@ -25,12 +25,25 @@ pub const HEADER_SIZE: usize = 56;
 // length-prefixed strings.
 pub const ELLIPSOID_RECORD_SIZE: usize = 20;
 pub const DATUM_RECORD_SIZE: usize = 12;
-pub const GEO_CRS_RECORD_BASE_SIZE: usize = 8;
+/// Geographic CRS: code, datum code, authority axis order tag.
+pub const GEO_CRS_RECORD_BASE_SIZE: usize = 9;
 /// Geocentric CRS: code, datum code, base geographic CRS code.
 pub const GEOCENTRIC_CRS_RECORD_BASE_SIZE: usize = 12;
 pub const PROJ_CRS_RECORD_BASE_SIZE: usize = 80;
 pub const VERTICAL_CRS_RECORD_BASE_SIZE: usize = 16;
 pub const COMPOUND_CRS_RECORD_BASE_SIZE: usize = 28;
+
+// Authority axis order tags. The registry's CRS definitions are always east
+// then north; these record the order the authority itself assigns, for
+// identifiers defined to use it. Unsupported means axes `AxisOrder` cannot
+// state, such as south and west.
+pub const AXIS_ORDER_EAST_NORTH: u8 = 0;
+pub const AXIS_ORDER_NORTH_EAST: u8 = 1;
+pub const AXIS_ORDER_UNSUPPORTED: u8 = 2;
+/// Offset of the axis order tag in a geographic CRS record.
+pub const GEO_CRS_AXIS_ORDER_OFFSET: usize = 8;
+/// Offset of the axis order tag in a projected CRS record.
+pub const PROJ_CRS_AXIS_ORDER_OFFSET: usize = 13;
 
 // Datum→WGS84 relationship tags (definition metadata only; operation
 // selection never synthesizes transforms from these). Since version 9,

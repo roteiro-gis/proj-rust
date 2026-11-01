@@ -3,7 +3,7 @@
   "generator": "gen-reference gen-registry",
   "registry_format": {
     "magic": "0x45505347",
-    "version": 11
+    "version": 12
   },
   "source_database": {
     "kind": "PROJ proj.db",
@@ -28,8 +28,8 @@
   },
   "output": {
     "file_name": "epsg.bin",
-    "byte_len": 1102477,
-    "sha256": "sha256:59acff820d4af3de722e35adf3fd69bc272c9bffba1c7310726bcd1ee5e35cab"
+    "byte_len": 1103075,
+    "sha256": "sha256:934545056213208de768cc2c0516faa0d85c7fd476c3ff4d86962c25c20f8372"
   },
   "counts": {
     "ellipsoids": 44,

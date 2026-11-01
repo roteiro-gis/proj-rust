@@ -102,13 +102,16 @@ impl ParsedCrs {
 /// Parse a CRS definition string in any supported format.
 ///
 /// Automatically detects and handles:
-/// - **Authority codes**: `"EPSG:4326"`
-/// - **Bare EPSG codes**: `"4326"` (numeric-only strings)
-/// - **Compound EPSG codes**: `"EPSG:32618+5703"` (horizontal + vertical)
+/// - **Authority codes**: `"EPSG:4326"`, longitude/easting first
+/// - **Bare EPSG codes**: `"4326"` (numeric-only strings), likewise
+/// - **Compound EPSG codes**: `"EPSG:32618+5703"` (horizontal + vertical), likewise
 /// - **URN format**: `"urn:ogc:def:crs:EPSG::4326"`, `"urn:ogc:def:crs:OGC:1.3:CRS84"`,
-///   and `"urn:ogc:def:crs,crs:EPSG::32618,crs:EPSG::5703"`
-/// - **OGC URIs**: `"http://www.opengis.net/def/crs/EPSG/0/4326"`,
-///   `"http://www.opengis.net/def/crs/OGC/1.3/CRS84"`
+///   and `"urn:ogc:def:crs,crs:EPSG::32618,crs:EPSG::5703"`. As OGC defines them
+///   and as in C PROJ, EPSG URNs use the authority's axis order, so this
+///   `EPSG::4326` is latitude first
+/// - **OGC URIs**: `"http://www.opengis.net/def/crs/EPSG/0/4326"`, in the authority's
+///   axis order like URNs, `"http://www.opengis.net/def/crs/OGC/1.3/CRS84"`, and the
+///   legacy longitude-first `"http://www.opengis.net/gml/srs/epsg.xml#4326"`
 /// - **OGC CRS84, CRS83, CRS27**: `"CRS:84"`, `"OGC:CRS84"`, `"CRS84"`
 /// - **PROJ strings**: `"+proj=utm +zone=18 +datum=WGS84"`, `"+proj=cart +datum=WGS84"`
 /// - **PROJJSON**: `{"type": "ProjectedCRS", ...}` or geocentric `GeodeticCRS`
@@ -247,6 +250,23 @@ fn lookup_ogc_crs(code: &str) -> Result<CrsDef> {
         .ok_or_else(|| ParseError::Parse(format!("OGC CRS {code} not found in registry")))
 }
 
+/// Give a registry definition the axis order its authority assigns, which is
+/// what OGC URNs and `/def/crs/` URIs identify. `EPSG:4326` stays east/north.
+fn with_authority_axes(crs: CrsDef) -> Result<CrsDef> {
+    if crs.axis_order().is_none() {
+        return Ok(crs);
+    }
+    let code = crs
+        .horizontal_crs()
+        .map_or(crs.epsg(), |horizontal| horizontal.epsg());
+    let axis_order = proj_core::lookup_authority_axis_order(code).ok_or_else(|| {
+        ParseError::UnsupportedSemantics(format!(
+            "EPSG:{code} uses axes this library cannot state in its authority order"
+        ))
+    })?;
+    Ok(crs.with_axis_order(axis_order))
+}
+
 fn lookup_epsg_compound(horizontal: &str, vertical: &str) -> Result<CrsDef> {
     let code = |value: &str| {
         value
@@ -278,6 +298,10 @@ fn lookup_authority_crs(kind: &str, s: &str, authority: &str, code: &str) -> Res
             "unsupported CRS {kind} authority `{authority}`; only EPSG and OGC are supported"
         )));
     }
+    with_authority_axes(lookup_epsg_identifier(kind, s, code)?)
+}
+
+fn lookup_epsg_identifier(kind: &str, s: &str, code: &str) -> Result<CrsDef> {
     let epsg = code
         .parse::<u32>()
         .map_err(|_| ParseError::Parse(format!("invalid EPSG code in CRS {kind} `{s}`")))?;
@@ -329,7 +353,10 @@ fn parse_ogc_compound_crs_urn(s: &str, components: &str) -> Result<CrsDef> {
             "invalid compound CRS URN `{s}`; expected two components"
         )));
     };
-    lookup_epsg_compound(&component_code(horizontal)?, &component_code(vertical)?)
+    with_authority_axes(lookup_epsg_compound(
+        &component_code(horizontal)?,
+        &component_code(vertical)?,
+    )?)
 }
 
 /// Parse `http(s)://www.opengis.net/def/crs/AUTHORITY/VERSION/CODE` and the
@@ -345,8 +372,9 @@ fn parse_ogc_crs_uri(s: &str) -> Result<CrsDef> {
     if !host.eq_ignore_ascii_case("www.opengis.net") && !host.eq_ignore_ascii_case("opengis.net") {
         return Err(invalid());
     }
+    // This legacy form predates axis-order identifiers and means x/y order.
     if let Some(code) = path.strip_prefix("gml/srs/epsg.xml#") {
-        return lookup_authority_crs("URI", s, "EPSG", code);
+        return lookup_epsg_identifier("URI", s, code);
     }
     match path.trim_end_matches('/').split('/').collect::<Vec<_>>()[..] {
         ["def", "crs", authority, _version, code] => {
@@ -988,6 +1016,74 @@ mod tests {
         assert_eq!(swap.convert((52.0, 5.0)).unwrap(), (5.0, 52.0));
         let keep = transform_from_crs_strings(WKT2_LAT_FIRST, WKT1_LAT_FIRST).unwrap();
         assert_eq!(keep.convert((52.0, 5.0)).unwrap(), (52.0, 5.0));
+    }
+
+    #[test]
+    fn ogc_identifiers_use_the_authority_axis_order() {
+        for (identifier, order) in [
+            ("urn:ogc:def:crs:EPSG::4326", AxisOrder::NorthEast),
+            ("urn:ogc:def:crs:EPSG:9.9:4326", AxisOrder::NorthEast),
+            ("urn:ogc:def:crs:EPSG::4979", AxisOrder::NorthEast),
+            ("urn:ogc:def:crs:EPSG::3857", AxisOrder::EastNorth),
+            ("urn:ogc:def:crs:EPSG::2193", AxisOrder::NorthEast),
+            ("urn:ogc:def:crs:EPSG::32661", AxisOrder::NorthEast),
+            ("urn:ogc:def:crs:EPSG::3031", AxisOrder::EastNorth),
+            (
+                "http://www.opengis.net/def/crs/EPSG/0/4326",
+                AxisOrder::NorthEast,
+            ),
+            (
+                "https://www.opengis.net/def/crs/EPSG/0/3857",
+                AxisOrder::EastNorth,
+            ),
+            (
+                "urn:ogc:def:crs,crs:EPSG::4326,crs:EPSG::5773",
+                AxisOrder::NorthEast,
+            ),
+            (
+                "urn:ogc:def:crs,crs:EPSG::32618,crs:EPSG::5703",
+                AxisOrder::EastNorth,
+            ),
+            // Longitude first by definition or by history.
+            ("urn:ogc:def:crs:OGC:1.3:CRS84", AxisOrder::EastNorth),
+            (
+                "http://www.opengis.net/def/crs/OGC/1.3/CRS84",
+                AxisOrder::EastNorth,
+            ),
+            (
+                "http://www.opengis.net/gml/srs/epsg.xml#4326",
+                AxisOrder::EastNorth,
+            ),
+            ("EPSG:4326", AxisOrder::EastNorth),
+            ("EPSG:4326+5773", AxisOrder::EastNorth),
+            ("4326", AxisOrder::EastNorth),
+            ("CRS84", AxisOrder::EastNorth),
+        ] {
+            let crs = parse_crs(identifier).unwrap_or_else(|err| panic!("{identifier}: {err}"));
+            assert_eq!(crs.axis_order(), Some(order), "{identifier}");
+        }
+
+        let transform =
+            transform_from_crs_strings("urn:ogc:def:crs:EPSG::4326", "EPSG:3857").unwrap();
+        let (x, y) = transform.convert((52.0, 5.0)).unwrap();
+        assert!((x - 556_597.453966).abs() < 1e-5 && (y - 6_800_125.454397).abs() < 1e-5);
+    }
+
+    #[test]
+    fn ogc_identifiers_for_axes_the_model_cannot_state_are_rejected() {
+        // A lookup by code is fine, but the URN means the authority's order,
+        // which cannot be honored for this CRS.
+        for identifier in [
+            "urn:ogc:def:crs:EPSG::8044",
+            "http://www.opengis.net/def/crs/EPSG/0/8044",
+        ] {
+            let err = parse_crs(identifier).unwrap_err().to_string();
+            assert!(err.contains("cannot state"), "{identifier}: {err}");
+        }
+        assert!(parse_crs("EPSG:8044").is_ok());
+        // Geocentric identifiers have no axis order to apply.
+        let geocentric = parse_crs("urn:ogc:def:crs:EPSG::4978").unwrap();
+        assert_eq!(geocentric.epsg(), 4978);
     }
 
     #[test]

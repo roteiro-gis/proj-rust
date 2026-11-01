@@ -19,11 +19,12 @@ pub(crate) const PROVENANCE_JSON: &str = include_str!("../data/epsg.provenance.j
 // The container layout is defined once in `proj-epsg-format`, shared with
 // the `gen-registry` writer.
 use proj_epsg_format::{
+    AXIS_ORDER_EAST_NORTH, AXIS_ORDER_NORTH_EAST, AXIS_ORDER_UNSUPPORTED,
     COMPOUND_CRS_RECORD_BASE_SIZE, DATUM_RECORD_SIZE, DATUM_SHIFT_IDENTITY, DATUM_SHIFT_UNKNOWN,
     ELLIPSOID_RECORD_SIZE, FLAG_APPROXIMATE, FLAG_DEPRECATED, FLAG_PREFERRED, FLAG_SUPERSEDED,
-    GEOCENTRIC_CRS_RECORD_BASE_SIZE, GEO_CRS_RECORD_BASE_SIZE, GRID_FORMAT_GEOTIFF,
-    GRID_FORMAT_GTX, GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR, HEADER_SIZE,
-    HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS,
+    GEOCENTRIC_CRS_RECORD_BASE_SIZE, GEO_CRS_AXIS_ORDER_OFFSET, GEO_CRS_RECORD_BASE_SIZE,
+    GRID_FORMAT_GEOTIFF, GRID_FORMAT_GTX, GRID_FORMAT_NTV2, GRID_INTERPOLATION_BILINEAR,
+    HEADER_SIZE, HORIZONTAL_CRS_GEOGRAPHIC, HORIZONTAL_CRS_PROJECTED, MAGIC, METHOD_ALBERS,
     METHOD_AMERICAN_POLYCONIC, METHOD_AZIMUTHAL_EQUIDISTANT, METHOD_CASSINI_SOLDNER,
     METHOD_COLOMBIA_URBAN, METHOD_EQUAL_EARTH, METHOD_EQUIDISTANT_CYL, METHOD_GUAM,
     METHOD_HOTINE_OBLIQUE_MERCATOR_A, METHOD_HOTINE_OBLIQUE_MERCATOR_B,
@@ -31,14 +32,15 @@ use proj_epsg_format::{
     METHOD_LAEA, METHOD_LAEA_SPHERICAL, METHOD_LCC, METHOD_LCC_1SP_VARIANT_B, METHOD_LCC_MICHIGAN,
     METHOD_MERCATOR, METHOD_OBLIQUE_STEREO, METHOD_POLAR_STEREO, METHOD_POLAR_STEREO_VARIANT_C,
     METHOD_TRANSVERSE_MERCATOR, METHOD_WEB_MERCATOR, OP_CONCATENATED, OP_GEOCENTRIC_AFFINE,
-    OP_GRID_SHIFT, OP_HELMERT, OP_IDENTITY, PROJ_CRS_RECORD_BASE_SIZE, VERSION,
-    VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS, VERTICAL_CRS_RECORD_BASE_SIZE,
-    VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
+    OP_GRID_SHIFT, OP_HELMERT, OP_IDENTITY, PROJ_CRS_AXIS_ORDER_OFFSET, PROJ_CRS_RECORD_BASE_SIZE,
+    VERSION, VERTICAL_COMPONENT_ELLIPSOIDAL, VERTICAL_COMPONENT_REGISTRY_CRS,
+    VERTICAL_CRS_RECORD_BASE_SIZE, VERTICAL_OFFSET_GEOID_HEIGHT_METERS,
 };
 
 #[derive(Clone)]
 struct GeographicRecord {
     datum_code: u32,
+    authority_axes: Option<AxisOrder>,
     name: &'static str,
 }
 
@@ -55,6 +57,7 @@ struct ProjectedRecord {
     datum_code: u32,
     method: ProjectionMethod,
     linear_unit: LinearUnit,
+    authority_axes: Option<AxisOrder>,
     name: &'static str,
 }
 
@@ -175,7 +178,14 @@ fn parse_db() -> RegistryDb {
         let datum_code = read_u32(EPSG_DATA, offset + 4);
         let name_len = read_u16(EPSG_DATA, offset + GEO_CRS_RECORD_BASE_SIZE) as usize;
         let name = read_static_string(EPSG_DATA, offset + GEO_CRS_RECORD_BASE_SIZE + 2, name_len);
-        geographic_crs.insert(code, GeographicRecord { datum_code, name });
+        geographic_crs.insert(
+            code,
+            GeographicRecord {
+                datum_code,
+                authority_axes: decode_axis_order(EPSG_DATA[offset + GEO_CRS_AXIS_ORDER_OFFSET]),
+                name,
+            },
+        );
         offset += GEO_CRS_RECORD_BASE_SIZE + 2 + name_len;
     }
 
@@ -206,6 +216,7 @@ fn parse_db() -> RegistryDb {
                 datum_code,
                 method,
                 linear_unit,
+                authority_axes: decode_axis_order(EPSG_DATA[offset + PROJ_CRS_AXIS_ORDER_OFFSET]),
                 name,
             },
         );
@@ -862,6 +873,33 @@ pub(crate) fn lookup_ellipsoid_code_for_datum(code: u32) -> Option<u32> {
     db().datum_ellipsoid_codes.get(&code).copied()
 }
 
+fn decode_axis_order(tag: u8) -> Option<AxisOrder> {
+    match tag {
+        AXIS_ORDER_EAST_NORTH => Some(AxisOrder::EastNorth),
+        AXIS_ORDER_NORTH_EAST => Some(AxisOrder::NorthEast),
+        AXIS_ORDER_UNSUPPORTED => None,
+        other => panic!("invalid axis order tag {other} in embedded registry"),
+    }
+}
+
+/// Order the authority assigns a CRS's horizontal axes, when it is one
+/// [`AxisOrder`] can state.
+pub(crate) fn lookup_authority_axis_order(code: u32) -> Option<AxisOrder> {
+    let db = db();
+    let code = db
+        .compound_crs
+        .get(&code)
+        .map_or(code, |compound| compound.horizontal_crs_epsg);
+    db.geographic_crs
+        .get(&code)
+        .and_then(|record| record.authority_axes)
+        .or_else(|| {
+            db.projected_crs
+                .get(&code)
+                .and_then(|record| record.authority_axes)
+        })
+}
+
 pub(crate) fn lookup_geographic(code: u32) -> Option<CrsDef> {
     let record = db().geographic_crs.get(&code)?;
     let datum = db().datums.get(&record.datum_code)?;
@@ -1166,6 +1204,28 @@ mod tests {
     fn lookup_wgs84() {
         let crs = lookup(4326).expect("should find 4326");
         assert!(crs.is_geographic());
+    }
+
+    #[test]
+    fn authority_axis_order_covers_what_the_model_can_state() {
+        assert_eq!(
+            lookup_authority_axis_order(4326),
+            Some(AxisOrder::NorthEast)
+        );
+        assert_eq!(
+            lookup_authority_axis_order(3857),
+            Some(AxisOrder::EastNorth)
+        );
+        // A compound CRS takes its horizontal component's order.
+        assert_eq!(
+            lookup_authority_axis_order(5845),
+            Some(AxisOrder::NorthEast)
+        );
+        // Axes `AxisOrder` cannot state, and codes without horizontal axes.
+        assert!(lookup(8044).is_some());
+        assert_eq!(lookup_authority_axis_order(8044), None);
+        assert_eq!(lookup_authority_axis_order(4978), None);
+        assert_eq!(lookup_authority_axis_order(0), None);
     }
 
     #[test]
