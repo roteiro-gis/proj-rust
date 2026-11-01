@@ -41,6 +41,39 @@ impl AreaOfUse {
             && bounds.min_y >= self.south
             && bounds.max_y <= self.north
     }
+
+    /// Overlap with `other`. Areas that only touch along an edge do not overlap.
+    pub(crate) fn intersection(&self, other: &Self) -> Option<Self> {
+        let south = self.south.max(other.south);
+        let north = self.north.min(other.north);
+        if south >= north {
+            return None;
+        }
+
+        let (west, span) = longitude_overlap(self, other)?;
+        let east = west + span;
+        Some(Self {
+            west,
+            south,
+            east: if east > 180.0 { east - 360.0 } else { east },
+            north,
+            name: format!("{} and {}", self.name, other.name),
+        })
+    }
+}
+
+/// Western edge and span of the longitudes two areas share.
+fn longitude_overlap(a: &AreaOfUse, b: &AreaOfUse) -> Option<(f64, f64)> {
+    let (a_span, b_span) = (
+        longitude_span(a.west, a.east),
+        longitude_span(b.west, b.east),
+    );
+    let b_offset = longitude_delta(a.west, b.west);
+    if b_offset < a_span {
+        return Some((b.west, (a_span - b_offset).min(b_span)));
+    }
+    let a_offset = longitude_delta(b.west, a.west);
+    (a_offset < b_span).then(|| (a.west, (b_span - a_offset).min(a_span)))
 }
 
 fn longitude_range_contains_point(west: f64, east: f64, longitude: f64) -> bool {
@@ -417,6 +450,96 @@ impl CoordinateOperation {
         metadata
     }
 
+    /// Chain two registry operations meeting at a shared pivot CRS, or `None`
+    /// if either lacks a registry id or their areas of use do not overlap.
+    ///
+    /// Like C PROJ, this refuses disjoint areas: no location is inside both
+    /// operations, so the result would have no valid area of use.
+    pub(crate) fn chain_registry_operations(
+        first: (&Self, OperationStepDirection),
+        second: (&Self, OperationStepDirection),
+    ) -> Option<Self> {
+        let (first_leg, first_direction) = first;
+        let (second_leg, second_direction) = second;
+        let areas_of_use: SmallVec<[AreaOfUse; 1]> = first_leg
+            .areas_of_use
+            .iter()
+            .flat_map(|first_area| {
+                second_leg
+                    .areas_of_use
+                    .iter()
+                    .filter_map(|second_area| first_area.intersection(second_area))
+            })
+            .collect();
+        if areas_of_use.is_empty() {
+            return None;
+        }
+
+        let endpoints = |leg: &Self, direction| match direction {
+            OperationStepDirection::Forward => (
+                leg.source_crs_epsg,
+                leg.source_datum_epsg,
+                leg.target_crs_epsg,
+                leg.target_datum_epsg,
+            ),
+            OperationStepDirection::Reverse => (
+                leg.target_crs_epsg,
+                leg.target_datum_epsg,
+                leg.source_crs_epsg,
+                leg.source_datum_epsg,
+            ),
+        };
+        let (source_crs_epsg, source_datum_epsg, _, _) = endpoints(first_leg, first_direction);
+        let (_, _, target_crs_epsg, target_datum_epsg) = endpoints(second_leg, second_direction);
+        let step_name = |leg: &Self, direction| match direction {
+            OperationStepDirection::Forward => leg.name.clone(),
+            OperationStepDirection::Reverse => format!("Inverse of {}", leg.name),
+        };
+
+        Some(Self {
+            id: None,
+            name: format!(
+                "{} + {}",
+                step_name(first_leg, first_direction),
+                step_name(second_leg, second_direction)
+            ),
+            source_crs_epsg,
+            target_crs_epsg,
+            source_datum_epsg,
+            target_datum_epsg,
+            accuracy: first_leg
+                .accuracy
+                .zip(second_leg.accuracy)
+                .map(|(a, b)| OperationAccuracy {
+                    meters: a.meters + b.meters,
+                }),
+            areas_of_use,
+            deprecated: first_leg.deprecated || second_leg.deprecated,
+            preferred: false,
+            approximate: first_leg.approximate || second_leg.approximate,
+            superseded: first_leg.superseded || second_leg.superseded,
+            domain: if first_leg.domain == OperationDomain::HorizontalOnly
+                && second_leg.domain == OperationDomain::HorizontalOnly
+            {
+                OperationDomain::HorizontalOnly
+            } else {
+                OperationDomain::IncludesHeight
+            },
+            method: OperationMethod::Concatenated {
+                steps: SmallVec::from_vec(vec![
+                    OperationStep {
+                        operation_id: first_leg.id?,
+                        direction: first_direction,
+                    },
+                    OperationStep {
+                        operation_id: second_leg.id?,
+                        direction: second_direction,
+                    },
+                ]),
+            },
+        })
+    }
+
     pub fn uses_grids(&self) -> bool {
         let mut visited = HashSet::new();
         self.uses_grids_with_visited(&mut visited)
@@ -534,6 +657,9 @@ pub struct SelectionOptions {
     pub grid_provider: Option<Arc<dyn crate::grid::GridProvider>>,
     pub coordinate_operations: Vec<CoordinateOperation>,
     pub vertical_grid_operations: Vec<VerticalGridOperation>,
+    /// Also consider chains of two registry operations through WGS 84 when no
+    /// direct operation can run. See [`Self::with_wgs84_pivot`].
+    pub allow_wgs84_pivot: bool,
 }
 
 impl Default for SelectionOptions {
@@ -545,6 +671,7 @@ impl Default for SelectionOptions {
             grid_provider: None,
             coordinate_operations: Vec::new(),
             vertical_grid_operations: Vec::new(),
+            allow_wgs84_pivot: false,
         }
     }
 }
@@ -627,6 +754,18 @@ impl SelectionOptions {
         self
     }
 
+    /// Allow selection to chain two registry operations through WGS 84, as
+    /// C PROJ does, for CRS pairs with no direct operation that can run.
+    ///
+    /// Direct operations always rank first. A chain needs both operations'
+    /// areas of use to overlap, so distant pairs still fail. Its accuracy is the
+    /// sum of both steps, and without an area of interest the steps are the most
+    /// accurate ones, which may suit only part of the CRS's extent.
+    pub fn with_wgs84_pivot(mut self) -> Self {
+        self.allow_wgs84_pivot = true;
+        self
+    }
+
     /// Add explicit vertical grid operation candidates.
     pub fn with_vertical_grid_operations(
         mut self,
@@ -648,6 +787,7 @@ impl SelectionOptions {
                 .iter()
                 .map(VerticalGridOperation::inverse)
                 .collect(),
+            allow_wgs84_pivot: self.allow_wgs84_pivot,
         }
     }
 }
@@ -895,6 +1035,76 @@ mod tests {
             name: "World".into(),
         };
         assert!(world.contains_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0)));
+    }
+
+    fn area(west: f64, south: f64, east: f64, north: f64) -> AreaOfUse {
+        AreaOfUse {
+            west,
+            south,
+            east,
+            north,
+            name: "area".into(),
+        }
+    }
+
+    #[test]
+    fn area_intersection_is_the_shared_rectangle() {
+        let overlap = area(-10.0, 40.0, 10.0, 60.0)
+            .intersection(&area(0.0, 50.0, 20.0, 70.0))
+            .unwrap();
+        assert_eq!(
+            (overlap.west, overlap.south, overlap.east, overlap.north),
+            (0.0, 50.0, 10.0, 60.0)
+        );
+    }
+
+    #[test]
+    fn area_intersection_handles_containment_in_either_order() {
+        let (outer, inner) = (
+            area(-180.0, -90.0, 180.0, 90.0),
+            area(5.0, 45.0, 10.0, 50.0),
+        );
+        for overlap in [
+            outer.intersection(&inner).unwrap(),
+            inner.intersection(&outer).unwrap(),
+        ] {
+            assert_eq!(
+                (overlap.west, overlap.south, overlap.east, overlap.north),
+                (5.0, 45.0, 10.0, 50.0)
+            );
+        }
+    }
+
+    #[test]
+    fn area_intersection_handles_the_antimeridian() {
+        let wrapped = area(170.0, -20.0, -170.0, 0.0);
+
+        let eastern = wrapped
+            .intersection(&area(-175.0, -10.0, -160.0, 10.0))
+            .unwrap();
+        assert_eq!((eastern.west, eastern.east), (-175.0, -170.0));
+
+        let western = area(160.0, -10.0, 175.0, 10.0)
+            .intersection(&wrapped)
+            .unwrap();
+        assert_eq!((western.west, western.east), (170.0, 175.0));
+
+        let across = wrapped
+            .intersection(&area(175.0, -10.0, -175.0, 10.0))
+            .unwrap();
+        assert_eq!((across.west, across.east), (175.0, -175.0));
+    }
+
+    #[test]
+    fn disjoint_or_touching_areas_do_not_intersect() {
+        let europe = area(-10.0, 35.0, 30.0, 70.0);
+        assert!(europe
+            .intersection(&area(-130.0, 25.0, -60.0, 50.0))
+            .is_none());
+        assert!(europe
+            .intersection(&area(-10.0, -40.0, 30.0, -10.0))
+            .is_none());
+        assert!(europe.intersection(&area(30.0, 35.0, 40.0, 70.0)).is_none());
     }
 
     #[test]

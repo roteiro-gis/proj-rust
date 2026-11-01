@@ -1693,6 +1693,179 @@ fn unknown_custom_datums_do_not_collapse_to_identity() {
 }
 
 #[test]
+fn wgs84_pivot_is_off_by_default() {
+    assert!(Transform::new("EPSG:27700", "EPSG:3035").is_err());
+    assert!(Transform::new("EPSG:23032", "EPSG:31467").is_err());
+}
+
+#[test]
+fn wgs84_pivot_matches_c_proj() {
+    // Reference values from C PROJ 9.6, which chains the same two operations.
+    let t = Transform::with_selection_options(
+        "EPSG:27700",
+        "EPSG:3035",
+        SelectionOptions::new().with_wgs84_pivot(),
+    )
+    .unwrap();
+
+    assert_eq!(
+        t.selected_operation().name,
+        "OSGB36 to WGS 84 (6) + Inverse of ETRS89 to WGS 84 (1)"
+    );
+    assert_eq!(t.selected_operation().id, None);
+    assert_eq!(t.selected_operation().accuracy.unwrap().meters, 3.0);
+
+    let (x, y) = t.convert((400_000.0, 300_000.0)).unwrap();
+    assert!((x - 3_512_038.821648).abs() < 1e-3);
+    assert!((y - 3_343_492.640313).abs() < 1e-3);
+}
+
+#[test]
+fn wgs84_pivot_equals_applying_each_leg_in_turn() {
+    let options = SelectionOptions::new()
+        .with_wgs84_pivot()
+        .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(9.0, 49.5)));
+    let t = Transform::with_selection_options("EPSG:23032", "EPSG:31467", options).unwrap();
+    let CoordinateOperationNames { first, second } = pivot_leg_names(&t);
+    let input = (500_000.0, 5_500_000.0);
+
+    let first_leg = lookup_operation_named(&first, "EPSG:4230", "EPSG:4326");
+    let second_leg = lookup_operation_named(&second, "EPSG:4314", "EPSG:4326");
+    let to_wgs84 = Transform::from_operation(first_leg, "EPSG:23032", "EPSG:4326").unwrap();
+    let from_wgs84 = Transform::from_operation(second_leg, "EPSG:4326", "EPSG:31467").unwrap();
+    let (expected_x, expected_y) = from_wgs84
+        .convert(to_wgs84.convert(input).unwrap())
+        .unwrap();
+
+    let (x, y) = t.convert(input).unwrap();
+    assert!((x - expected_x).abs() < 1e-6);
+    assert!((y - expected_y).abs() < 1e-6);
+}
+
+struct CoordinateOperationNames {
+    first: String,
+    second: String,
+}
+
+fn pivot_leg_names(t: &Transform) -> CoordinateOperationNames {
+    let name = &t.selected_operation().name;
+    let (first, second) = name.split_once(" + ").expect("a chained operation");
+    CoordinateOperationNames {
+        first: first.trim_start_matches("Inverse of ").to_string(),
+        second: second.trim_start_matches("Inverse of ").to_string(),
+    }
+}
+
+fn lookup_operation_named(name: &str, source: &str, target: &str) -> CoordinateOperationId {
+    let source = registry::lookup_authority_code(source).unwrap();
+    let target = registry::lookup_authority_code(target).unwrap();
+    registry::operations_between(&source, &target)
+        .into_iter()
+        .find(|operation| operation.name == name)
+        .and_then(|operation| operation.id)
+        .unwrap_or_else(|| panic!("no registry operation named {name}"))
+}
+
+#[test]
+fn wgs84_pivot_prefers_steps_matching_the_area_of_interest() {
+    let options = |lon, lat| {
+        SelectionOptions::new()
+            .with_wgs84_pivot()
+            .with_area_of_interest(AreaOfInterest::geographic_point(Coord::new(lon, lat)))
+    };
+    let germany =
+        Transform::with_selection_options("EPSG:23032", "EPSG:31467", options(9.0, 49.5)).unwrap();
+    assert!(germany.selected_operation().area_of_use.is_some());
+    assert!(germany
+        .selection_diagnostics()
+        .selected_reasons
+        .contains(&SelectionReason::AreaOfUseMatch));
+}
+
+#[test]
+fn wgs84_pivot_refuses_disjoint_areas_of_use() {
+    // New York and Great Britain share no location, and C PROJ also refuses.
+    let err = expect_transform_error(Transform::with_selection_options(
+        "EPSG:2263",
+        "EPSG:27700",
+        SelectionOptions::new().with_wgs84_pivot(),
+    ));
+    assert!(matches!(err, Error::OperationSelection(_)), "{err}");
+}
+
+#[test]
+fn wgs84_pivot_never_replaces_a_direct_operation() {
+    let options = SelectionOptions::new().with_wgs84_pivot();
+    for (source, target) in [
+        ("EPSG:4326", "EPSG:27700"),
+        ("EPSG:4267", "EPSG:4326"),
+        ("EPSG:4230", "EPSG:4277"),
+    ] {
+        let pivoted = Transform::with_selection_options(source, target, options.clone()).unwrap();
+        let direct = Transform::new(source, target).unwrap();
+        assert_eq!(
+            pivoted.selected_operation().id,
+            direct.selected_operation().id
+        );
+    }
+}
+
+#[test]
+fn wgs84_pivot_is_a_fallback_for_missing_grids() {
+    let t = Transform::with_selection_options(
+        "EPSG:27700",
+        "EPSG:3035",
+        SelectionOptions::new().with_wgs84_pivot(),
+    )
+    .unwrap();
+
+    let diagnostics = t.selection_diagnostics();
+    assert!(diagnostics.missing_required_grid.is_some());
+    assert!(diagnostics
+        .skipped_operations
+        .iter()
+        .any(|skipped| skipped.reason == SkippedOperationReason::MissingGrid));
+}
+
+#[test]
+fn wgs84_pivot_inverse_round_trips() {
+    let t = Transform::with_selection_options(
+        "EPSG:27700",
+        "EPSG:3035",
+        SelectionOptions::new().with_wgs84_pivot(),
+    )
+    .unwrap();
+    let input = (400_000.0, 300_000.0);
+
+    let back = t
+        .inverse()
+        .unwrap()
+        .convert(t.convert(input).unwrap())
+        .unwrap();
+
+    assert!((back.0 - input.0).abs() < 1e-3);
+    assert!((back.1 - input.1).abs() < 1e-3);
+    let reverse = Transform::with_selection_options(
+        "EPSG:3035",
+        "EPSG:27700",
+        SelectionOptions::new().with_wgs84_pivot(),
+    )
+    .unwrap();
+    let back = reverse.convert(t.convert(input).unwrap()).unwrap();
+    assert!((back.0 - input.0).abs() < 1e-3);
+}
+
+#[test]
+fn wgs84_pivot_respects_require_grids() {
+    let err = expect_transform_error(Transform::with_selection_options(
+        "EPSG:27700",
+        "EPSG:3035",
+        SelectionOptions::new().with_wgs84_pivot().require_grids(),
+    ));
+    assert!(matches!(err, Error::OperationSelection(_)), "{err}");
+}
+
+#[test]
 fn custom_helmert_datum_pair_without_registry_operation_fails() {
     let from = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD27, "Custom NAD27"));
     let to = CrsDef::Geographic(GeographicCrsDef::new(0, datum::OSGB36, "Custom OSGB36"));

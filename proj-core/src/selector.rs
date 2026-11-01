@@ -295,10 +295,147 @@ pub(crate) fn rank_operation_candidates(
     }
 
     candidates.sort_by(compare_candidates);
+    // A non-grid operation always compiles and never misses coverage, so
+    // nothing ranked after it can run.
+    if options.allow_wgs84_pivot
+        && candidates
+            .iter()
+            .all(|candidate| candidate.operation.uses_grids())
+    {
+        candidates.extend(wgs84_pivot_candidates(
+            source,
+            target,
+            options,
+            resolved_aoi.as_ref(),
+        ));
+    }
     Ok(OperationCandidateSet {
         ranked: candidates,
         skipped,
     })
+}
+
+/// Chains considered per CRS pair. Each compiles eagerly as a fallback.
+const MAX_WGS84_PIVOT_CANDIDATES: usize = 8;
+
+struct PivotLeg {
+    operation: &'static CoordinateOperation,
+    direction: OperationStepDirection,
+    area_match: bool,
+}
+
+/// Registry operations from `from` to `to` that a pivot chain may use.
+fn pivot_legs(
+    from: &CrsDef,
+    to: &CrsDef,
+    options: &SelectionOptions,
+    area: Option<&ResolvedAreaOfInterest>,
+) -> Vec<PivotLeg> {
+    let (from_endpoint, to_endpoint) = (OperationEndpoint::of(from), OperationEndpoint::of(to));
+    let mut legs = Vec::new();
+    for operation in registry::related_operations(from, to) {
+        if operation.deprecated {
+            continue;
+        }
+        let area_match = matched_area_of_use(area, operation).is_some();
+        if policy_skip_reason(from, to, options, area_match, operation).is_some() {
+            continue;
+        }
+        for (start, end, direction) in [
+            (from_endpoint, to_endpoint, OperationStepDirection::Forward),
+            (to_endpoint, from_endpoint, OperationStepDirection::Reverse),
+        ] {
+            if start.connects_to(end, operation) {
+                legs.push(PivotLeg {
+                    operation,
+                    direction,
+                    area_match,
+                });
+                break;
+            }
+        }
+    }
+    legs
+}
+
+fn legs_overlap(first: &PivotLeg, second: &PivotLeg) -> bool {
+    first.operation.areas_of_use.iter().any(|first_area| {
+        second
+            .operation
+            .areas_of_use
+            .iter()
+            .any(|second_area| first_area.intersection(second_area).is_some())
+    })
+}
+
+fn chain_accuracy(first: &PivotLeg, second: &PivotLeg) -> f64 {
+    let meters = |leg: &PivotLeg| {
+        leg.operation
+            .accuracy
+            .map_or(f64::MAX, |accuracy| accuracy.meters)
+    };
+    meters(first) + meters(second)
+}
+
+/// Chains of two registry operations through WGS 84, best first.
+fn wgs84_pivot_candidates(
+    source: &CrsDef,
+    target: &CrsDef,
+    options: &SelectionOptions,
+    area: Option<&ResolvedAreaOfInterest>,
+) -> Vec<RankedOperationCandidate> {
+    let Some(pivot) = registry::lookup_epsg(4326) else {
+        return Vec::new();
+    };
+    if requires_no_datum_operation(source, &pivot) || requires_no_datum_operation(target, &pivot) {
+        return Vec::new();
+    }
+
+    let first_legs = pivot_legs(source, &pivot, options, area);
+    let second_legs = pivot_legs(&pivot, target, options, area);
+    let mut chains: Vec<(&PivotLeg, &PivotLeg)> = first_legs
+        .iter()
+        .flat_map(|first| second_legs.iter().map(move |second| (first, second)))
+        .filter(|(first, second)| legs_overlap(first, second))
+        .collect();
+    chains.sort_by(|left, right| {
+        let matches_area =
+            |(first, second): &(&PivotLeg, &PivotLeg)| first.area_match && second.area_match;
+        let superseded = |(first, second): &(&PivotLeg, &PivotLeg)| {
+            first.operation.superseded || second.operation.superseded
+        };
+        matches_area(right)
+            .cmp(&matches_area(left))
+            .then_with(|| superseded(left).cmp(&superseded(right)))
+            .then_with(|| {
+                chain_accuracy(left.0, left.1)
+                    .partial_cmp(&chain_accuracy(right.0, right.1))
+                    .unwrap_or(Ordering::Equal)
+            })
+    });
+    chains.truncate(MAX_WGS84_PIVOT_CANDIDATES);
+
+    chains
+        .into_iter()
+        .filter_map(|(first, second)| {
+            let chain = CoordinateOperation::chain_registry_operations(
+                (first.operation, first.direction),
+                (second.operation, second.direction),
+            )?;
+            let matched_area_of_use = matched_area_of_use(area, &chain);
+            let mut reasons = SmallVec::from_slice(&[SelectionReason::NonDeprecated]);
+            if matched_area_of_use.is_some() {
+                reasons.push(SelectionReason::AreaOfUseMatch);
+            }
+            Some(RankedOperationCandidate {
+                operation: SelectedOperationKind::registry_owned(chain),
+                direction: OperationStepDirection::Forward,
+                match_kind: OperationMatchKind::DatumCompatible,
+                matched_area_of_use,
+                reasons,
+            })
+        })
+        .collect()
 }
 
 fn compatible_direction(
