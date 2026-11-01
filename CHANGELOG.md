@@ -2,6 +2,27 @@
 
 ## Unreleased
 
+- fix CRS definitions without an EPSG code, such as `+proj=utm +zone=18 +datum=NAD83` and ESRI WKT, failing to select registry operations across datums by matching on their recognized datum
+- fix `transform_bounds` and area-of-interest bounds missing a pole inside a projected extent when reprojecting to a geographic CRS
+- breaking: WKT and PROJJSON definitions keep their declared axis order through the new `AxisOrder`, and `Transform` and `transform_bounds` take coordinates in it, so latitude-first EPSG-tagged WKT1 is no longer read as longitude first; `CrsDef::with_axis_order` reads a definition in another order deliberately
+- breaking: EPSG URNs and `/def/crs/EPSG/` URIs use the authority's axis order, with the embedded registry format bumped to v12 to record it
+- breaking: `semantically_equivalent` compares axis order
+- breaking: keep every declared datum shift in the CRS's datum, honoring it on EPSG-tagged WKT, so `Transform::from_crs_defs` rejects such a definition instead of selecting a registry operation
+- apply declared `+towgs84`, WKT1 `TOWGS84`, and WKT2/PROJJSON bound CRS Helmert shifts through `proj-wkt` transform helpers and the `Proj` facade
+- write declared Helmert shifts from `to_wkt`, `to_wkt2`, and `to_projjson`, and reject declared grid shifts those formats cannot state
+- reject WKT abridged transformation parameters that name a unit instead of reading them in the implied unit
+- fix Polar Stereographic Variant A coordinates, including UPS, being about 1% off in distance from the pole
+- breaking: reject PROJ strings whose parameters conflict, such as `+datum=WGS84 +a=6000000`, repeated parameters with different values, and `+alpha` on Krovak other than the standard cone axis
+- accept projected WKT and PROJJSON definitions whose base geographic CRS is latitude-first, as PROJ writes them
+- reject a non-Greenwich WKT2 `PRIMEMERIDIAN` instead of parsing it as Greenwich
+- honor `GDAL_NODATA` and explicit `PixelIsArea` when decoding GeoTIFF grids, and report null horizontal grid cells as coverage misses
+- accept OGC CRS84, CRS83, and CRS27 identifiers, `opengis.net` CRS URIs, and compound `EPSG:horizontal+vertical` codes and URNs in `proj-wkt`
+- accept ISO 19162 long-form WKT2 keywords such as `GEOGRAPHICCRS` and `PROJECTEDCRS`
+- parse `+proj=webmerc`, `eqearth`, `poly`, `aeqd`, and `krovak`, custom `+a`/`+b`/`+rf`/`+f`/`+R` ellipsoids, more `+ellps` names, and the legacy spherical Web Mercator PROJ string
+- breaking: add `SelectionOptions::with_wgs84_pivot` for opt-in chaining of two registry operations through WGS 84; `SelectionOptions` gains the public `allow_wgs84_pivot` field, so struct-literal construction must set it or use `SelectionOptions::new()` / `Default`
+- replace iterative geocentric to geodetic conversion with C PROJ's closed form, refined above 100 km, speeding up Helmert pipelines
+- keep grid coverage detail in `convert` and `convert_3d` errors
+
 ## 0.12.1 - 2026-10-27
 
 - fix RDNAPTRANS2018 (`EPSG:4979` → `EPSG:7415`) failing construction since 0.10: horizontal-only operations into a gravity-related compound now preserve ellipsoidal height like C PROJ's `push`/`pop` `v_3`, composing with geoid grids whose heights are on the ellipsoidal-height endpoint's datum
