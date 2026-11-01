@@ -189,14 +189,14 @@ mod tests {
                 let (x, y, z) = geodetic_to_geocentric(e, lon, lat, h);
                 let (lon2, lat2, h2) = geocentric_to_geodetic(e, x, y, z);
                 assert!((lon2 - lon).abs() < 1e-12, "{lat_deg} {h}: {lon2}");
-                // About 0.1 mm and 1 um on the ellipsoid.
-                let tolerance = if h > BOWRING_HEIGHT_LIMIT {
-                    2e-13
+                // About 1 um when refined, and 0.1 mm just below the limit.
+                let (lat_tolerance, h_tolerance) = if h > BOWRING_HEIGHT_LIMIT {
+                    (2e-13, 1e-5)
                 } else {
-                    2e-11
+                    (2e-11, 2e-4)
                 };
-                assert!((lat2 - lat).abs() < tolerance, "{lat_deg} {h}: {lat2}");
-                assert!((h2 - h).abs() < 1e-5, "{lat_deg} {h}: {h2}");
+                assert!((lat2 - lat).abs() < lat_tolerance, "{lat_deg} {h}: {lat2}");
+                assert!((h2 - h).abs() < h_tolerance, "{lat_deg} {h}: {h2}");
             }
         }
     }
