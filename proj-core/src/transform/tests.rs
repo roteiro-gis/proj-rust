@@ -251,7 +251,9 @@ fn custom_helmert_datum_does_not_synthesize_operation() {
 
 #[test]
 fn custom_wgs84_compatible_datum_does_not_synthesize_identity() {
-    let source = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD83, "Custom NAD83"));
+    // No EPSG datum code, so nothing identifies a registry operation.
+    let custom = datum::Datum::new(datum::NAD83.ellipsoid(), DatumToWgs84::Identity).unwrap();
+    let source = CrsDef::Geographic(GeographicCrsDef::new(0, custom, "Custom GRS80 datum"));
     let target = registry::lookup_epsg(4326).unwrap();
 
     let err = expect_transform_error(Transform::from_crs_defs(&source, &target));
@@ -261,6 +263,22 @@ fn custom_wgs84_compatible_datum_does_not_synthesize_identity() {
         err.to_string()
             .contains("no compatible registry operation found"),
         "{err}"
+    );
+}
+
+#[test]
+fn declared_datum_selects_a_registry_operation_instead_of_identity() {
+    let source = CrsDef::Geographic(GeographicCrsDef::new(0, datum::NAD83, "Custom NAD83"));
+    let target = registry::lookup_epsg(4326).unwrap();
+
+    let parsed = Transform::from_crs_defs(&source, &target).unwrap();
+    let registry = Transform::new("EPSG:4269", "EPSG:4326").unwrap();
+
+    assert!(parsed.selected_operation().id.is_some());
+    assert_ne!(parsed.selected_operation().name, "Identity");
+    assert_eq!(
+        parsed.selected_operation().id,
+        registry.selected_operation().id
     );
 }
 

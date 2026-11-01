@@ -80,16 +80,18 @@ pub(crate) fn related_operations(
     target: &CrsDef,
 ) -> Vec<&'static CoordinateOperation> {
     epsg_db::related_operations(
-        source.base_geographic_crs_epsg(),
-        target.base_geographic_crs_epsg(),
+        epsg_db::OperationEndpoint::of(source),
+        epsg_db::OperationEndpoint::of(target),
     )
 }
 
 /// Return all registry operations compatible with the source and target CRS.
+///
+/// Definitions without an EPSG code match by their declared EPSG datum code.
 pub fn operations_between(source: &CrsDef, target: &CrsDef) -> Vec<CoordinateOperation> {
     epsg_db::forward_operations(
-        source.base_geographic_crs_epsg(),
-        target.base_geographic_crs_epsg(),
+        epsg_db::OperationEndpoint::of(source),
+        epsg_db::OperationEndpoint::of(target),
     )
     .into_iter()
     .cloned()
