@@ -1081,6 +1081,13 @@ pub(crate) struct OperationEndpoint {
 
 impl OperationEndpoint {
     pub(crate) fn of(crs: &CrsDef) -> Self {
+        // A definition's own shift replaces the registry's relationships.
+        if crs.datum().declares_shift() {
+            return Self {
+                crs: None,
+                datum: None,
+            };
+        }
         let base = crs.base_geographic_crs_epsg();
         let declared_datum = Some(crs.datum().epsg()).filter(|code| *code != 0);
         Self {

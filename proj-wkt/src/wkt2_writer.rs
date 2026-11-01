@@ -6,25 +6,58 @@
 //! the roundtrip is asserted by tests and fuzzing.
 
 use proj_core::{
-    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
-    LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
+    AxisOrder, CompoundCrsDef, CrsDef, Datum, GeocentricCrsDef, GeographicCrsDef, HelmertParams,
+    HorizontalCrsDef, LinearUnit, ProjectedCrsDef, VerticalCrsDef, VerticalCrsKind,
 };
 
 use crate::wkt_writer::{
-    datum_wkt, format_f64, linear_unit_wkt, projection_parameters, projection_wkt_name, quote,
-    vertical_datum_name, ParameterKind,
+    datum_wkt, declared_helmert, format_f64, helmert_parameters, linear_unit_wkt,
+    projection_parameters, projection_wkt_name, quote, vertical_datum_name, ParameterKind,
 };
 use crate::{ParseError, Result};
 
 const DEGREE_TO_RADIAN: &str = "0.0174532925199433";
 
 pub(crate) fn to_wkt2(crs: &CrsDef) -> Result<String> {
-    match crs {
+    let definition = match crs {
         CrsDef::Geographic(geographic) => geographic_wkt2(geographic, None, None, None),
         CrsDef::Geocentric(geocentric) => geocentric_wkt2(geocentric),
         CrsDef::Projected(projected) => projected_wkt2(projected),
         CrsDef::Compound(compound) => compound_wkt2(compound),
+    }?;
+    match declared_helmert(crs.datum()) {
+        Some(helmert) => bound_wkt2(&definition, helmert),
+        None => Ok(definition),
     }
+}
+
+/// Write `source` bound to EPSG:4326 by its declared shift, in the form C PROJ
+/// writes for `+towgs84`. Abridged parameters have implied units, and the scale
+/// is a multiplier rather than parts per million.
+fn bound_wkt2(source: &str, helmert: &HelmertParams) -> Result<String> {
+    let wgs84 = proj_core::lookup_epsg(4326)
+        .ok_or_else(|| ParseError::Parse("EPSG:4326 not found in registry".into()))?;
+    let target = to_wkt2(&wgs84)?;
+    let parameters = helmert_parameters(helmert)
+        .map(|(name, code, value)| {
+            let value = if code == 8611 {
+                1.0 + value * 1e-6
+            } else {
+                value
+            };
+            format!(
+                "PARAMETER[{},{},{}]",
+                quote(name),
+                format_f64(value),
+                format_id(code)
+            )
+        })
+        .join(",");
+    let method = "METHOD[\"Position Vector transformation (geog2D domain)\",ID[\"EPSG\",9606]]";
+    Ok(format!(
+        "BOUNDCRS[SOURCECRS[{source}],TARGETCRS[{target}],\
+         ABRIDGEDTRANSFORMATION[\"Transformation to WGS 84\",{method},{parameters}]]"
+    ))
 }
 
 fn compound_wkt2(compound: &CompoundCrsDef) -> Result<String> {

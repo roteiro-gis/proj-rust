@@ -210,6 +210,30 @@ impl CrsDef {
         }
     }
 
+    /// Return this CRS with its geodetic datum replaced, keeping its identity.
+    ///
+    /// This is how a definition's own datum shift replaces the registry datum:
+    /// the CRS still reports its EPSG code, while [`Datum::declares_shift`]
+    /// keeps registry operations from being selected in place of that shift.
+    pub fn with_datum(self, datum: Datum) -> Self {
+        match self {
+            CrsDef::Geographic(g) => CrsDef::Geographic(GeographicCrsDef { datum, ..g }),
+            CrsDef::Geocentric(g) => CrsDef::Geocentric(GeocentricCrsDef { datum, ..g }),
+            CrsDef::Projected(p) => CrsDef::Projected(ProjectedCrsDef { datum, ..p }),
+            CrsDef::Compound(c) => {
+                let horizontal = match c.horizontal {
+                    HorizontalCrsDef::Geographic(g) => {
+                        HorizontalCrsDef::Geographic(GeographicCrsDef { datum, ..g })
+                    }
+                    HorizontalCrsDef::Projected(p) => {
+                        HorizontalCrsDef::Projected(ProjectedCrsDef { datum, ..p })
+                    }
+                };
+                CrsDef::Compound(Box::new(CompoundCrsDef { horizontal, ..*c }))
+            }
+        }
+    }
+
     /// Returns the geographic CRS EPSG code used for operation selection, when known.
     pub fn base_geographic_crs_epsg(&self) -> Option<u32> {
         match self {

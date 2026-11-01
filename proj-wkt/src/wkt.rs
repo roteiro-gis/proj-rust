@@ -9,7 +9,7 @@ use crate::semantics::{
     AxisDirection, CoordinateSystemSpec, CrsTextFormat, DatumAliasScope,
     GeographicCoordinateSystemKind, ProjectionParameterUnitKind, StructuredEllipsoid,
 };
-use crate::{ParseError, ParsedCrs, Result};
+use crate::{with_declared_shift, ParseError, Result};
 use proj_core::{
     AxisOrder, CompoundCrsDef, CrsDef, Datum, DatumToWgs84, GeocentricCrsDef, GeographicCrsDef,
     HelmertParams, HorizontalCrsDef, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
@@ -17,13 +17,13 @@ use proj_core::{
 };
 use std::collections::HashMap;
 
-/// Parse a WKT CRS string.
+/// Parse a WKT CRS string, without any datum shift it declares.
 ///
 /// Strategy:
 /// 1. Extract a top-level AUTHORITY["EPSG","XXXX"] or ID["EPSG",XXXX] if present
 ///    → look up in registry
 /// 2. Otherwise, extract projection parameters from the WKT structure
-pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
+fn parse_wkt_definition(s: &str) -> Result<CrsDef> {
     let s = s.trim();
     let top_level_epsg = extract_top_level_epsg(s);
     let parsed = parse_wkt_structure(s)?;
@@ -35,33 +35,26 @@ pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     Ok(parsed)
 }
 
-/// Parse a WKT CRS along with the WGS 84 shift it declares.
+/// Parse a WKT CRS, keeping any WGS 84 shift it declares in its datum.
 ///
-/// An EPSG-tagged definition resolves to the registry, whose operations are
-/// authoritative, so GDAL's habit of tagging `TOWGS84` onto EPSG definitions
-/// does not override them.
-pub(crate) fn parse_wkt_with_operations(s: &str) -> Result<ParsedCrs> {
+/// A declared shift overrides the registry even on an EPSG-tagged definition,
+/// as it does in C PROJ: the definition says how it reaches WGS 84.
+pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     let s = s.trim();
     if let Some((root, inner, _)) = parse_wkt_element(s, 0) {
         if root.eq_ignore_ascii_case("BOUNDCRS") {
             return parse_wkt_bound_crs(inner);
         }
     }
-    let crs = parse_wkt(s)?;
-    let helmert_to_wgs84 = if extract_top_level_epsg(s).is_some() {
-        None
-    } else {
-        declared_towgs84(s)?
-    };
-    Ok(ParsedCrs {
-        crs,
-        grid_shift_to_wgs84: None,
-        helmert_to_wgs84,
-    })
+    let crs = parse_wkt_definition(s)?;
+    match declared_towgs84(s)? {
+        Some(helmert) => with_declared_shift(crs, helmert),
+        None => Ok(crs),
+    }
 }
 
 /// Parse a WKT2 `BOUNDCRS`, which is how PROJ writes a `+towgs84` definition.
-fn parse_wkt_bound_crs(inner: &str) -> Result<ParsedCrs> {
+fn parse_wkt_bound_crs(inner: &str) -> Result<CrsDef> {
     let element = |name: &str| {
         find_top_level_element_inner(inner, &[name])
             .ok_or_else(|| ParseError::Parse(format!("WKT BOUNDCRS is missing {name}")))
@@ -79,15 +72,12 @@ fn parse_wkt_bound_crs(inner: &str) -> Result<ParsedCrs> {
         abridged_parameter(transformation, name)
     })?;
 
-    Ok(ParsedCrs {
-        crs: parse_wkt(element("SOURCECRS")?)?,
-        grid_shift_to_wgs84: None,
-        helmert_to_wgs84: Some(helmert),
-    })
+    with_declared_shift(parse_wkt(element("SOURCECRS")?)?, helmert)
 }
 
-/// Read an abridged transformation parameter. PROJ writes these without units
-/// in metres, arc-seconds, and a unity scale multiplier.
+/// Read an abridged transformation parameter. Its implied units are metres,
+/// arc-seconds, and a unity scale multiplier, so one naming a unit is rejected
+/// rather than read as if it used them.
 fn abridged_parameter(transformation: &str, name: &str) -> Result<Option<f64>> {
     let mut found = None;
     for_each_top_level_element(transformation, |element, inner| {
@@ -97,13 +87,25 @@ fn abridged_parameter(transformation: &str, name: &str) -> Result<Option<f64>> {
                 .first()
                 .is_some_and(|field| normalize_key(trim_wkt_token(field)) == name)
             {
-                found = fields.get(1).map(|field| field.to_string());
+                found = Some(fields.iter().map(ToString::to_string).collect::<Vec<_>>());
             }
         }
     });
-    let Some(value) = found else {
+    let Some(fields) = found else {
         return Ok(None);
     };
+    let is_identifier = |field: &String| {
+        let field = field.trim_start().to_ascii_uppercase();
+        field.starts_with("ID[") || field.starts_with("AUTHORITY[")
+    };
+    if !fields.iter().skip(2).all(is_identifier) {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "WKT BOUNDCRS parameter `{name}` names a unit, but abridged parameters use implied units"
+        )));
+    }
+    let value = fields.get(1).ok_or_else(|| {
+        ParseError::Parse(format!("WKT BOUNDCRS parameter `{name}` has no value"))
+    })?;
     let value = value
         .parse::<f64>()
         .map_err(|_| ParseError::Parse(format!("invalid WKT BOUNDCRS parameter: {value}")))?;

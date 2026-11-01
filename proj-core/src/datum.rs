@@ -64,6 +64,19 @@ impl Datum {
         !matches!(self.to_wgs84, DatumToWgs84::Unknown)
     }
 
+    /// Returns true if a definition declared this datum's shift to WGS 84
+    /// itself, rather than the datum carrying an EPSG identity.
+    ///
+    /// Registry operations describe the registry datum, so they do not apply to
+    /// such a datum even when its CRS keeps an EPSG code.
+    pub fn declares_shift(&self) -> bool {
+        self.epsg == 0
+            && matches!(
+                self.to_wgs84,
+                DatumToWgs84::Helmert(_) | DatumToWgs84::GridShift(_)
+            )
+    }
+
     /// Returns true if this datum's WGS84 path uses one or more horizontal grids.
     pub fn uses_grid_shift(&self) -> bool {
         self.to_wgs84.uses_grid_shift()
