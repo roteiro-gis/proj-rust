@@ -16,7 +16,7 @@ use proj_core::GridInterpolation;
 use proj_core::HelmertParams;
 
 use crate::semantics::normalize_key;
-use crate::ParsedCrs;
+use crate::{same_ellipsoid, ParsedCrs};
 use crate::{ParseError, Result};
 
 const COMMON_PROJ_PARAMS: &[&str] = &[
@@ -42,6 +42,7 @@ const OMERC_PARAMS: &[&str] = &[
     "lat_0", "lonc", "lon_0", "alpha", "gamma", "k_0", "k", "x_0", "y_0", "no_uoff", "no_off",
 ];
 const CASS_PARAMS: &[&str] = &["lat_0", "lon_0", "x_0", "y_0"];
+const KROVAK_CONE_AXIS_DEGREES: f64 = 30.288_139_752_777_78;
 
 /// Parse a PROJ format string like `+proj=utm +zone=18 +datum=WGS84 +units=m`.
 #[cfg(test)]
@@ -101,11 +102,19 @@ fn parse_params(s: &str) -> Result<HashMap<String, String>> {
     let mut params = HashMap::new();
     for token in s.split_whitespace() {
         let token = token.trim_start_matches('+');
-        if let Some((key, val)) = token.split_once('=') {
-            params.insert(key.to_lowercase(), val.to_string());
-        } else {
-            // Flag-style parameter (e.g., +no_defs, +south)
-            params.insert(token.to_lowercase(), String::new());
+        // Flag-style parameters (e.g., +no_defs, +south) have an empty value.
+        let (key, value) = token.split_once('=').unwrap_or((token, ""));
+        let key = key.to_lowercase();
+        match params.get(&key) {
+            Some(existing) if existing != value => {
+                return Err(ParseError::UnsupportedSemantics(format!(
+                    "PROJ definition gives +{key} conflicting values `{existing}` and `{value}`"
+                )));
+            }
+            Some(_) => {}
+            None => {
+                params.insert(key, value.to_string());
+            }
         }
     }
     Ok(params)
@@ -158,6 +167,13 @@ fn resolve_datum(params: &HashMap<String, String>) -> Result<Datum> {
                 )));
             }
         };
+        if resolve_ellipsoid(params)?
+            .is_some_and(|declared| !same_ellipsoid(declared, datum.ellipsoid()))
+        {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "PROJ definition declares an ellipsoid that conflicts with +datum={d}"
+            )));
+        }
         if let Some(to_wgs84) = towgs84 {
             return Ok(proj_core::Datum::new(datum.ellipsoid(), to_wgs84)?);
         }
@@ -449,13 +465,21 @@ fn get_meter_param(params: &HashMap<String, String>, key: &str) -> Result<f64> {
 }
 
 fn get_scale(params: &HashMap<String, String>) -> Result<f64> {
-    if let Some(value) = params.get("k_0") {
-        return parse_f64_param("k_0", value);
+    let k_0 = params
+        .get("k_0")
+        .map(|value| parse_f64_param("k_0", value))
+        .transpose()?;
+    let k = params
+        .get("k")
+        .map(|value| parse_f64_param("k", value))
+        .transpose()?;
+    match (k_0, k) {
+        (Some(k_0), Some(k)) if k_0 != k => Err(ParseError::UnsupportedSemantics(format!(
+            "PROJ definition gives conflicting scale factors +k_0={k_0} and +k={k}"
+        ))),
+        (Some(scale), _) | (None, Some(scale)) => Ok(scale),
+        (None, None) => Ok(1.0),
     }
-    if let Some(value) = params.get("k") {
-        return parse_f64_param("k", value);
-    }
-    Ok(1.0)
 }
 
 fn parse_f64_param(key: &str, value: &str) -> Result<f64> {
@@ -469,10 +493,6 @@ fn parse_f64_param(key: &str, value: &str) -> Result<f64> {
 }
 
 fn resolve_linear_unit_to_meter(params: &HashMap<String, String>) -> Result<f64> {
-    if let Some(to_meter) = params.get("to_meter") {
-        return parse_f64_param("to_meter", to_meter);
-    }
-
     let factor = match params.get("units").map(|s| s.as_str()) {
         None | Some("m") => 1.0,
         Some("km") => 1000.0,
@@ -490,7 +510,16 @@ fn resolve_linear_unit_to_meter(params: &HashMap<String, String>) -> Result<f64>
         }
     };
 
-    Ok(factor)
+    let Some(to_meter) = params.get("to_meter") else {
+        return Ok(factor);
+    };
+    let to_meter = parse_f64_param("to_meter", to_meter)?;
+    if params.contains_key("units") && to_meter != factor {
+        return Err(ParseError::UnsupportedSemantics(format!(
+            "PROJ definition gives +to_meter={to_meter} that conflicts with +units"
+        )));
+    }
+    Ok(to_meter)
 }
 
 fn resolve_linear_unit(params: &HashMap<String, String>) -> Result<LinearUnit> {
@@ -631,6 +660,8 @@ fn is_legacy_web_mercator(params: &HashMap<String, String>) -> Result<bool> {
     };
     let towgs84_is_null = parse_helmert_is_null(params)?;
     Ok(params.get("nadgrids").map(String::as_str) == Some("@null")
+        && !params.contains_key("datum")
+        && !params.contains_key("ellps")
         && is("a", 6_378_137.0)?
         && is("b", 6_378_137.0)?
         && is("lat_ts", 0.0)?
@@ -1001,13 +1032,19 @@ fn parse_krovak(params: &HashMap<String, String>) -> Result<CrsDef> {
     validate_supported_proj_params(params, KROVAK_PARAMS, LINEAR_UNIT_PARAMS, CONTEXT)?;
     validate_supported_proj_common_semantics(params, CONTEXT)?;
     let d = resolve_datum(params)?;
-    let bessel = ellipsoid::BESSEL1841;
-    if (d.ellipsoid().semi_major_axis() - bessel.semi_major_axis()).abs() > 1e-6
-        || (d.ellipsoid().flattening() - bessel.flattening()).abs() > 1e-12
-    {
+    if !same_ellipsoid(d.ellipsoid(), ellipsoid::BESSEL1841) {
         return Err(ParseError::UnsupportedSemantics(format!(
             "{CONTEXT} requires the Bessel 1841 ellipsoid"
         )));
+    }
+    if let Some(alpha) = params.get("alpha") {
+        // The projection fixes the cone axis, so another value cannot be honored.
+        let alpha = parse_f64_param("alpha", alpha)?;
+        if (alpha - KROVAK_CONE_AXIS_DEGREES).abs() > 1e-6 {
+            return Err(ParseError::UnsupportedSemantics(format!(
+                "{CONTEXT} uses +alpha={alpha}; only the standard cone axis is supported"
+            )));
+        }
     }
     let linear_unit = resolve_linear_unit(params)?;
     let or_default = |key: &str, default: f64| match params.get(key) {
@@ -1025,7 +1062,7 @@ fn parse_krovak(params: &HashMap<String, String>) -> Result<CrsDef> {
         ProjectionMethod::KrovakNorthOrientated {
             lon0: or_default("lon_0", 24.0 + 50.0 / 60.0)?,
             lat0: or_default("lat_0", 49.5)?,
-            co_latitude_cone_axis: 30.288_139_752_777_78,
+            co_latitude_cone_axis: KROVAK_CONE_AXIS_DEGREES,
             lat_pseudo_standard_parallel: 78.5,
             k0,
             false_easting: get_meter_param(params, "x_0")?,
@@ -1676,6 +1713,80 @@ mod tests {
             let parsed = ellipsoid(sphere);
             assert_eq!(parsed.semi_major_axis(), 6_371_000.0, "{sphere}");
             assert_eq!(parsed.flattening(), 0.0, "{sphere}");
+        }
+    }
+
+    #[test]
+    fn datum_with_its_own_ellipsoid_parses() {
+        for (definition, datum) in [
+            ("+proj=longlat +datum=WGS84 +ellps=WGS84", datum::WGS84),
+            ("+proj=longlat +datum=NAD83 +ellps=GRS80", datum::NAD83),
+            ("+proj=longlat +datum=NAD27 +ellps=clrk66", datum::NAD27),
+            ("+proj=longlat +datum=OSGB36 +ellps=airy", datum::OSGB36),
+            ("+proj=longlat +datum=TOKYO +ellps=bessel", datum::TOKYO),
+            ("+proj=longlat +datum=ED50 +ellps=intl", datum::ED50),
+            (
+                "+proj=longlat +datum=WGS84 +a=6378137 +rf=298.257223563",
+                datum::WGS84,
+            ),
+        ] {
+            let crs =
+                parse_proj_string(definition).unwrap_or_else(|err| panic!("{definition}: {err}"));
+            assert!(crs.datum().same_datum(&datum), "{definition}");
+        }
+    }
+
+    #[test]
+    fn conflicting_parameters_are_rejected_instead_of_dropped() {
+        for (definition, expected) in [
+            (
+                "+proj=longlat +datum=WGS84 +a=6000000",
+                "conflicts with +datum",
+            ),
+            (
+                "+proj=longlat +datum=WGS84 +R=6371000",
+                "conflicts with +datum",
+            ),
+            (
+                "+proj=longlat +datum=WGS84 +ellps=clrk66",
+                "conflicts with +datum",
+            ),
+            (
+                "+proj=merc +a=6378137 +b=6378137 +nadgrids=@null +datum=WGS84",
+                "conflicts with +datum",
+            ),
+            (
+                "+proj=longlat +datum=WGS84 +datum=NAD27",
+                "conflicting values",
+            ),
+            (
+                "+proj=utm +zone=18 +zone=19 +datum=WGS84",
+                "conflicting values",
+            ),
+            (
+                "+proj=tmerc +k=0.9996 +k_0=0.9999 +datum=WGS84",
+                "conflicting scale",
+            ),
+            (
+                "+proj=tmerc +units=m +to_meter=0.3048 +datum=WGS84",
+                "conflicts with +units",
+            ),
+            ("+proj=krovak +alpha=45 +ellps=bessel", "standard cone axis"),
+        ] {
+            let err = parse_proj_string(definition).unwrap_err().to_string();
+            assert!(err.contains(expected), "{definition}: {err}");
+        }
+    }
+
+    #[test]
+    fn repeated_parameters_that_agree_parse() {
+        for definition in [
+            "+proj=longlat +datum=WGS84 +datum=WGS84 +no_defs +no_defs",
+            "+proj=tmerc +k=0.9996 +k_0=0.9996 +datum=WGS84",
+            "+proj=tmerc +units=ft +to_meter=0.3048 +datum=WGS84",
+            "+proj=krovak +alpha=30.28813972222222 +k=0.9999 +ellps=bessel",
+        ] {
+            parse_proj_string(definition).unwrap_or_else(|err| panic!("{definition}: {err}"));
         }
     }
 
