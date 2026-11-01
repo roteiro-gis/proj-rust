@@ -721,7 +721,43 @@ fn resolve_area_bounds(
             transformed.include(point);
         }
     }
-    Ok(transformed.into_bounds().unwrap_or(bounds))
+    let mut geographic = transformed.into_bounds().unwrap_or(bounds);
+    include_interior_poles(crs, bounds, &mut geographic)?;
+    Ok(geographic)
+}
+
+/// Extend geographic `transformed` bounds over any pole inside `bounds` of a
+/// projected CRS.
+///
+/// Perimeter sampling cannot see a pole in the interior of a projected extent,
+/// where latitude peaks and every longitude meets. A pole on the boundary
+/// reaches its latitude without spanning every longitude.
+pub(crate) fn include_interior_poles(
+    crs: &CrsDef,
+    bounds: Bounds,
+    transformed: &mut Bounds,
+) -> Result<()> {
+    let Some(projected) = crs.as_projected() else {
+        return Ok(());
+    };
+    let projection = make_projection(&projected.method(), projected.datum())?;
+    let unit = projected.linear_unit();
+    for latitude in [90.0_f64, -90.0] {
+        // Projections that cannot represent this pole have no point to test.
+        let Ok((x, y)) = projection.forward(0.0, latitude.to_radians()) else {
+            continue;
+        };
+        let (x, y) = (unit.from_meters(x), unit.from_meters(y));
+        if x < bounds.min_x || x > bounds.max_x || y < bounds.min_y || y > bounds.max_y {
+            continue;
+        }
+        transformed.expand_to_include(Coord::new(transformed.min_x, latitude));
+        if x > bounds.min_x && x < bounds.max_x && y > bounds.min_y && y < bounds.max_y {
+            transformed.min_x = -180.0;
+            transformed.max_x = 180.0;
+        }
+    }
+    Ok(())
 }
 
 struct GeographicBoundsAccumulator {
@@ -987,10 +1023,12 @@ mod tests {
         let projection = make_projection(&projected.method(), projected.datum()).unwrap();
         let unit = projected.linear_unit();
 
+        // Spans a sector clear of the pole, which would otherwise fix the
+        // longitude span regardless of density.
         let bounds = [
             (-60.0f64, 70.0f64),
-            (60.0, 70.0),
-            (60.0, 80.0),
+            (-20.0, 70.0),
+            (-20.0, 80.0),
             (-60.0, 80.0),
         ]
         .into_iter()
@@ -1016,6 +1054,19 @@ mod tests {
         let dense = resolve_area_bounds(area, bounds, &source, &target, 21).unwrap();
 
         assert_ne!(coarse, dense);
+    }
+
+    #[test]
+    fn projected_area_bounds_reach_an_interior_pole() {
+        let source = registry::lookup_epsg(3031).expect("EPSG:3031");
+        let target = registry::lookup_epsg(4326).expect("EPSG:4326");
+        let bounds = Bounds::new(-3_000_000.0, -3_000_000.0, 3_000_000.0, 3_000_000.0);
+        let area = AreaOfInterest::source_crs_bounds(bounds);
+
+        let resolved = resolve_area_bounds(area, bounds, &source, &target, 21).unwrap();
+
+        assert_eq!(resolved.min_y, -90.0);
+        assert_eq!((resolved.min_x, resolved.max_x), (-180.0, 180.0));
     }
 
     #[test]
