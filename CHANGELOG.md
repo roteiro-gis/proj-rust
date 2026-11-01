@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.13.0 - 2026-11-01
+
 - fix CRS definitions without an EPSG code, such as `+proj=utm +zone=18 +datum=NAD83` and ESRI WKT, failing to select registry operations across datums by matching on their recognized datum
 - fix `transform_bounds` and area-of-interest bounds missing a pole inside a projected extent when reprojecting to a geographic CRS
 - breaking: WKT and PROJJSON definitions keep their declared axis order through the new `AxisOrder`, and `Transform` and `transform_bounds` take coordinates in it, so latitude-first EPSG-tagged WKT1 is no longer read as longitude first; `CrsDef::with_axis_order` reads a definition in another order deliberately
