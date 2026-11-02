@@ -100,8 +100,14 @@ mod tests {
         let (x, y) = proj
             .forward(10.0_f64.to_radians(), 50.0_f64.to_radians())
             .unwrap();
-        assert!((x - expected.0).abs() < 1e-6, "x: {x}");
-        assert!((y - expected.1).abs() < 1e-6, "y: {y}");
+        assert!(
+            (x - expected.0).abs() < 1e-6,
+            "ellipsoidal easting differs from the PROJ reference"
+        );
+        assert!(
+            (y - expected.1).abs() < 1e-6,
+            "ellipsoidal northing differs from the PROJ reference"
+        );
 
         let (lon, lat) = proj.inverse(expected.0, expected.1).unwrap();
         assert!((lon.to_degrees() - 10.0).abs() < 1e-10);
@@ -130,8 +136,14 @@ mod tests {
             (-92.0, -50.0, 307_027.439_498_207, -5_740_847.041_684_148),
         ] {
             let (x, y) = proj.forward(lon.to_radians(), lat.to_radians()).unwrap();
-            assert!((x - expected_x).abs() < 1e-6, "x: {x}");
-            assert!((y - expected_y).abs() < 1e-6, "y: {y}");
+            assert!(
+                (x - expected_x).abs() < 1e-6,
+                "offset easting differs from the PROJ reference"
+            );
+            assert!(
+                (y - expected_y).abs() < 1e-6,
+                "offset northing differs from the PROJ reference"
+            );
             let (lon2, lat2) = proj.inverse(expected_x, expected_y).unwrap();
             assert!((lon2.to_degrees() - lon).abs() < 1e-10);
             assert!((lat2.to_degrees() - lat).abs() < 1e-10);
@@ -153,8 +165,14 @@ mod tests {
         let (x, y) = proj
             .forward((-88.0_f64).to_radians(), 30.0_f64.to_radians())
             .unwrap();
-        assert!((x - expected.0).abs() < 1e-6, "x: {x}");
-        assert!((y - expected.1).abs() < 1e-6, "y: {y}");
+        assert!(
+            (x - expected.0).abs() < 1e-6,
+            "spherical easting differs from the PROJ reference"
+        );
+        assert!(
+            (y - expected.1).abs() < 1e-6,
+            "spherical northing differs from the PROJ reference"
+        );
         let (lon, lat) = proj.inverse(expected.0, expected.1).unwrap();
         assert!((lon.to_degrees() + 88.0).abs() < 1e-10);
         assert!((lat.to_degrees() - 30.0).abs() < 1e-10);
