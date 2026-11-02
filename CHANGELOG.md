@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+## 0.13.1 - 2026-11-01
+
+- fix incorrect longitude when converting southern Lambert Conformal Conic and Albers Equal Area coordinates back to geographic coordinates, including NSW Lambert (`EPSG:8058`) and Australian Albers (`EPSG:9473`)
 - fix Equidistant Cylindrical projections on ellipsoids, including `EPSG:4087` and `EPSG:32662`, using the meridian arc for northing and the prime-vertical radius at the standard parallel for easting, matching EPSG and PROJ 9.8
 
 ## 0.13.0 - 2026-11-01
