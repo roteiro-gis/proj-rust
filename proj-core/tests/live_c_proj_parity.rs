@@ -30,6 +30,7 @@ impl ReferencePoint {
 }
 
 fn load_corpus() -> Vec<ReferencePoint> {
+    c_proj_ffi::assert_reference_version();
     let path = concat!(
         env!("CARGO_MANIFEST_DIR"),
         "/../testdata/reference_values.json"
@@ -247,5 +248,47 @@ fn southern_conic_inverse_matches_c_proj() {
             (ours.0 - lon).abs() < 1e-9 && (ours.1 - lat).abs() < 1e-9,
             "EPSG:{code}: {ours:?}"
         );
+    }
+}
+
+/// PROJ before 9.8 used the spherical formula on ellipsoids. Check the
+/// corrected method in both directions for the modern and deprecated CRS codes.
+#[test]
+fn equidistant_cylindrical_matches_c_proj() {
+    c_proj_ffi::assert_reference_version();
+    for (code, geographic) in [(4087, 4326), (32662, 4326)] {
+        let ours = Transform::from_epsg(geographic, code).unwrap();
+        let inverse = ours.inverse().unwrap();
+        let forward =
+            CProjTransform::new_known_crs(&format!("EPSG:{geographic}"), &format!("EPSG:{code}"))
+                .unwrap();
+        let backward =
+            CProjTransform::new_known_crs(&format!("EPSG:{code}"), &format!("EPSG:{geographic}"))
+                .unwrap();
+        for (lon, lat) in [
+            (10.0, 50.0),
+            (-74.006, 40.7128),
+            (151.2093, -33.8688),
+            (0.0, 90.0),
+            (0.0, -90.0),
+            (180.0, 89.999),
+            (-180.0, -89.999),
+            (0.0, 0.0),
+        ] {
+            let (x, y, _) = forward.convert_3d((lon, lat, 0.0)).unwrap();
+            let actual = ours.convert((lon, lat)).unwrap();
+            assert!(
+                (actual.0 - x).abs() < 1e-6 && (actual.1 - y).abs() < 1e-6,
+                "EPSG:{code} forward ({lon}, {lat}): {actual:?} vs ({x}, {y})"
+            );
+            let (lon2, lat2, _) = backward.convert_3d((x, y, 0.0)).unwrap();
+            let actual = inverse.convert((x, y)).unwrap();
+            // The antimeridian can normalize to either -180 or +180 degrees.
+            let delta_lon = (actual.0 - lon2 + 180.0).rem_euclid(360.0) - 180.0;
+            assert!(
+                delta_lon.abs() < 1e-9 && (actual.1 - lat2).abs() < 1e-9,
+                "EPSG:{code} inverse ({x}, {y}): {actual:?} vs ({lon2}, {lat2})"
+            );
+        }
     }
 }

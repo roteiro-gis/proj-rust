@@ -90,7 +90,7 @@ Coordinates follow the CRS's axis order. Codes such as `EPSG:4326` are longitude
 | Hotine Oblique Mercator / RSO | EPSG:2056, EPSG:3078, EPSG:3375 |
 | Cassini-Soldner | EPSG:30200, EPSG:3377 |
 | Mercator | EPSG:3395 |
-| Equidistant Cylindrical | EPSG:32662 |
+| Equidistant Cylindrical | EPSG:4087, EPSG:32662 |
 | Colombia Urban | EPSG:6247 |
 | Krovak north-orientated and modified north-orientated | EPSG:5514, EPSG:5516, EPSG:8353 |
 | Equal Earth | EPSG:8857, EPSG:8858, EPSG:8859 |
@@ -135,7 +135,7 @@ Grid diagnostics expose selected operation metadata and resolved grid SHA-256 ch
 | `geo-types` | yes | `geo_types::Coord<f64>` conversions and geometry transforms |
 | `geotiff` | no | Decode PROJ-format GeoTIFF/COG datum-shift and geoid grids (e.g. RDNAPTRANS2018) via the pure-Rust `geotiff-reader` crate |
 | `serde` | no | `Serialize`/`Deserialize` for coordinate and operation-metadata value types |
-| `c-proj-compat` | no | Reference-compatibility tests against bundled C PROJ |
+| `c-proj-compat` | no | Reference-compatibility tests against an installed C PROJ 9.8+ |
 
 ## Development
 
@@ -145,11 +145,24 @@ cargo test -p proj-core --no-default-features
 cargo clippy --workspace --all-targets -- -D warnings
 ```
 
-The optional `c-proj-compat` feature and `gen-reference` tool intentionally use
-bundled C PROJ/sqlite for reference comparisons and registry generation; they
-are not part of the default library surface.
+The optional `c-proj-compat` feature requires C PROJ 9.8 or newer, discoverable
+through `pkg-config` (`PKG_CONFIG_PATH` can select an installation). Earlier
+versions use the spherical Equidistant Cylindrical formula even on ellipsoids.
+CI builds and caches PROJ 9.8.1 for live comparisons. These C dependencies are
+not part of the default library surface.
 
-The embedded EPSG registry is generated from the bundled PROJ `proj.db`:
+For installations outside the system library paths, also set `LD_LIBRARY_PATH`
+(Linux) or `DYLD_LIBRARY_PATH` (macOS) to the installation's `lib` directory.
+
+To regenerate coordinate references with that installation:
+
+```sh
+cargo run --manifest-path gen-reference/Cargo.toml --no-default-features --bin gen-reference > testdata/reference_values.json
+./scripts/run-reference-parity.sh
+```
+
+Registry generation stays pinned to the bundled PROJ 9.6.2 `proj.db` through
+the generator's default `bundled-proj` feature:
 
 ```sh
 cargo run --manifest-path gen-reference/Cargo.toml --bin gen-registry

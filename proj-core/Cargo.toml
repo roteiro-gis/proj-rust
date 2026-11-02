@@ -35,14 +35,14 @@ optional = true
 version = "0.7"
 optional = true
 
+# Coordinate parity needs the ellipsoidal EQC implementation in PROJ 9.8+.
+# Use pkg-config's installation rather than proj-sys's bundled PROJ 9.6.2.
 [dependencies.proj]
 version = "0.31"
-features = ["bundled_proj"]
 optional = true
 
 [dependencies.proj-sys]
 version = "0.27"
-features = ["bundled_proj"]
 optional = true
 
 # Pure-Rust GeoTIFF/COG grid reader (PROJ-format datum-shift and geoid grids).

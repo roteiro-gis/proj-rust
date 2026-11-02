@@ -257,6 +257,14 @@ const ANTARCTIC_POINTS: &[(f64, f64, &str)] = &[
 ];
 
 fn main() {
+    let info = unsafe { proj_sys::proj_info() };
+    assert!(
+        (info.major, info.minor, info.patch) >= (9, 8, 0),
+        "coordinate references require PROJ 9.8+ (found {}.{}.{}); install it and run gen-reference with --no-default-features",
+        info.major,
+        info.minor,
+        info.patch
+    );
     let mut points: Vec<ReferencePoint> = Vec::new();
 
     // =========================================================================
@@ -781,6 +789,13 @@ fn main() {
             -74.006,
             40.7128,
             "NYC 4326→32662 EqCyl precise",
+        ),
+        (
+            4326,
+            4087,
+            10.0,
+            50.0,
+            "10E 50N 4326→4087 ellipsoidal EqCyl precise",
         ),
     ];
     for &(from_epsg, to_epsg, lon, lat, name) in precision_targets {
