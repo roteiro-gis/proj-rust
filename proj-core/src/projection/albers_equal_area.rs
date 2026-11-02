@@ -123,7 +123,9 @@ impl super::ProjectionImpl for AlbersEqualArea {
         let dx = x - self.false_easting;
         let dy = self.rho0 - (y - self.false_northing);
         let rho = (dx * dx + dy * dy).sqrt();
-        let theta = dx.atan2(dy);
+        // A southern cone has a negative n, which turns both offsets from the
+        // apex around; without flipping them the angle is off by half a turn.
+        let theta = (dx * self.n.signum()).atan2(dy * self.n.signum());
 
         let q = (self.c - rho * rho * self.n * self.n / (self.a * self.a)) / self.n;
         let lat = lat_from_q(q, self.e, self.e2)?;
@@ -191,5 +193,37 @@ mod tests {
 
         assert!((wrapped.0 - canonical.0).abs() < 1e-8);
         assert!((wrapped.1 - canonical.1).abs() < 1e-8);
+    }
+
+    #[test]
+    fn southern_cone_matches_c_proj() {
+        // EPSG:9473 GDA2020 / Australian Albers, whose standard parallels are
+        // both south of the equator. Reference values from C PROJ 9.8.
+        let proj = AlbersEqualArea::new(
+            ellipsoid::GRS80,
+            132.0_f64.to_radians(),
+            0.0,
+            (-18.0_f64).to_radians(),
+            (-36.0_f64).to_radians(),
+            0.0,
+            0.0,
+        )
+        .unwrap();
+        let (x, y) = proj
+            .forward(135.0_f64.to_radians(), (-25.0_f64).to_radians())
+            .unwrap();
+        assert!((x - 299_362.220_846).abs() < 1e-3 && (y + 2_706_085.979_530).abs() < 1e-3);
+
+        let (lon, lat) = proj.inverse(x, y).unwrap();
+        assert!(
+            (lon.to_degrees() - 135.0).abs() < 1e-9,
+            "lon: {}",
+            lon.to_degrees()
+        );
+        assert!(
+            (lat.to_degrees() + 25.0).abs() < 1e-9,
+            "lat: {}",
+            lat.to_degrees()
+        );
     }
 }

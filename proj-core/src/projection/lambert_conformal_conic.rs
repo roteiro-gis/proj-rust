@@ -152,7 +152,9 @@ impl super::ProjectionImpl for LambertConformalConic {
         let dy = self.rho0 - (y - self.false_northing);
 
         let rho = (dx * dx + dy * dy).sqrt() * self.n.signum();
-        let theta = dx.atan2(dy);
+        // A southern cone has a negative n, which turns both offsets from the
+        // apex around; without flipping them the angle is off by half a turn.
+        let theta = (dx * self.n.signum()).atan2(dy * self.n.signum());
 
         let t = (rho / (self.a * self.f_const)).powf(1.0 / self.n);
         let lat = super::latitude_from_conformal_t(
@@ -250,5 +252,38 @@ mod tests {
 
         assert!((wrapped.0 - canonical.0).abs() < 1e-8);
         assert!((wrapped.1 - canonical.1).abs() < 1e-8);
+    }
+
+    #[test]
+    fn southern_cone_matches_c_proj() {
+        // EPSG:8058 GDA2020 / NSW Lambert, whose standard parallels are both
+        // south of the equator. Reference values from C PROJ 9.8.
+        let proj = LambertConformalConic::new(
+            ellipsoid::GRS80,
+            147.0_f64.to_radians(),
+            (-33.25_f64).to_radians(),
+            (-30.75_f64).to_radians(),
+            (-35.75_f64).to_radians(),
+            1.0,
+            9_300_000.0,
+            4_500_000.0,
+        )
+        .unwrap();
+        let (x, y) = proj
+            .forward(141.625_f64.to_radians(), (-37.061_f64).to_radians())
+            .unwrap();
+        assert!((x - 8_821_546.029_924).abs() < 1e-3 && (y - 4_064_972.077_536).abs() < 1e-3);
+
+        let (lon, lat) = proj.inverse(x, y).unwrap();
+        assert!(
+            (lon.to_degrees() - 141.625).abs() < 1e-9,
+            "lon: {}",
+            lon.to_degrees()
+        );
+        assert!(
+            (lat.to_degrees() + 37.061).abs() < 1e-9,
+            "lat: {}",
+            lat.to_degrees()
+        );
     }
 }

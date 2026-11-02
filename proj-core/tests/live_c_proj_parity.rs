@@ -223,3 +223,29 @@ fn polar_stereographic_scale_at_the_pole_matches_c_proj() {
         );
     }
 }
+
+/// These cones lie south of the equator, so their cone constant is negative,
+/// which the corpus's northern conic CRSs cannot exercise.
+#[test]
+fn southern_conic_inverse_matches_c_proj() {
+    for (code, geographic, lon, lat) in [
+        (8058, 7844, 141.625, -37.061),
+        (9473, 7844, 135.0, -25.0),
+        (3033, 4326, 80.0, -70.0),
+        (3249, 4326, 30.0, -72.0),
+    ] {
+        let (x, y, _) =
+            CProjTransform::new_known_crs(&format!("EPSG:{geographic}"), &format!("EPSG:{code}"))
+                .unwrap()
+                .convert_3d((lon, lat, 0.0))
+                .unwrap();
+        let ours = Transform::from_epsg(code, geographic)
+            .unwrap()
+            .convert((x, y))
+            .unwrap();
+        assert!(
+            (ours.0 - lon).abs() < 1e-9 && (ours.1 - lat).abs() < 1e-9,
+            "EPSG:{code}: {ours:?}"
+        );
+    }
+}
