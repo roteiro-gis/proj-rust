@@ -6,14 +6,16 @@ on:
   pull_request:
     branches: [main]
     # Parity only moves when numerics, selection, grids, or the corpora
-    # change; skip the bundled C PROJ build for unrelated PRs.
+    # change; skip the C PROJ build for unrelated PRs.
     paths:
       - "proj-core/src/**"
       - "proj-core/tests/**"
+      - "proj-core/Cargo.toml"
       - "proj-wkt/src/**"
       - "testdata/**"
       - "scripts/run-reference-parity.sh"
       - ".github/workflows/reference-compat.yml"
+      - ".github/actions/setup-reference-proj/**"
       - "Cargo.lock"
   schedule:
     # Weekly drift check even without PR activity.
@@ -44,10 +46,11 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-reference-proj
       - name: Install Rust
         run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2
-      - name: Run live parity test against bundled C PROJ
+      - name: Run live parity test against PROJ 9.8.1
         run: ./scripts/run-reference-parity.sh
 
   benchmark:
@@ -58,6 +61,7 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-reference-proj
       - name: Install Rust
         run: rustup toolchain install 1.91.0 --profile minimal --component rustfmt,clippy --no-self-update
       - uses: Swatinem/rust-cache@v2

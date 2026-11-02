@@ -1,0 +1,39 @@
+name: Set up reference PROJ
+description: Build and cache PROJ 9.8.1 for live coordinate comparisons
+
+runs:
+  using: composite
+  steps:
+    - uses: actions/cache@v4
+      id: proj-cache
+      with:
+        path: ${{ runner.temp }}/proj-reference-9.8.1
+        key: ${{ runner.os }}-${{ runner.arch }}-proj-reference-9.8.1-v1
+
+    - name: Build PROJ 9.8.1
+      if: steps.proj-cache.outputs.cache-hit != 'true'
+      shell: bash
+      env:
+        PROJ_PREFIX: ${{ runner.temp }}/proj-reference-9.8.1
+      run: |
+        set -euo pipefail
+        source_dir="$(mktemp -d)"
+        curl --fail --location --retry 3 https://download.osgeo.org/proj/proj-9.8.1.tar.gz --output "$source_dir/proj.tar.gz"
+        echo "af5b731c145c1d13c4e3b4eeb7d167e94e845e440f71e3496b4ed8dae0291960  $source_dir/proj.tar.gz" | sha256sum --check
+        tar -xzf "$source_dir/proj.tar.gz" -C "$source_dir"
+        cmake -S "$source_dir/proj-9.8.1" -B "$source_dir/build" \
+          -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX="$PROJ_PREFIX" \
+          -DBUILD_TESTING=OFF -DBUILD_APPS=OFF -DBUILD_SHARED_LIBS=ON \
+          -DENABLE_CURL=OFF -DENABLE_TIFF=OFF
+        cmake --build "$source_dir/build" --parallel 2
+        cmake --install "$source_dir/build"
+
+    - name: Select reference PROJ
+      shell: bash
+      env:
+        PROJ_PREFIX: ${{ runner.temp }}/proj-reference-9.8.1
+      run: |
+        echo "PKG_CONFIG_PATH=$PROJ_PREFIX/lib/pkgconfig" >> "$GITHUB_ENV"
+        echo "LD_LIBRARY_PATH=$PROJ_PREFIX/lib" >> "$GITHUB_ENV"
+        echo "PROJ_DATA=$PROJ_PREFIX/share/proj" >> "$GITHUB_ENV"
+        echo "_PROJ_SYS_TEST_EXPECT_BUILD_FROM_SRC=0" >> "$GITHUB_ENV"

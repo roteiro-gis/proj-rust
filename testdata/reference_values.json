@@ -1055,7 +1055,7 @@
     "input_x": -74.0445,
     "input_y": 40.6892,
     "expected_x": -8242596.036042544,
-    "expected_y": 4529501.024785667,
+    "expected_y": 4506058.669729688,
     "tolerance": 0.01,
     "description": "NYC 4326→32662"
   },
@@ -1065,7 +1065,7 @@
     "input_x": 139.6917,
     "input_y": 35.6895,
     "expected_x": 15550408.912046732,
-    "expected_y": 3972936.9666665373,
+    "expected_y": 3951090.7932181633,
     "tolerance": 0.01,
     "description": "Tokyo 4326→32662"
   },
@@ -1075,7 +1075,7 @@
     "input_x": -0.1278,
     "input_y": 51.5074,
     "expected_x": -14226.630923380362,
-    "expected_y": 5733777.540085458,
+    "expected_y": 5708535.560161769,
     "tolerance": 0.01,
     "description": "London 4326→32662"
   },
@@ -1085,7 +1085,7 @@
     "input_x": 2.3522,
     "input_y": 48.8566,
     "expected_x": 261845.70624393807,
-    "expected_y": 5438691.8338906495,
+    "expected_y": 5413680.355072189,
     "tolerance": 0.01,
     "description": "Paris 4326→32662"
   },
@@ -1095,7 +1095,7 @@
     "input_x": -43.1729,
     "input_y": -22.9068,
     "expected_x": -4805985.24406892,
-    "expected_y": -2549973.3117033592,
+    "expected_y": -2534216.2976202276,
     "tolerance": 0.01,
     "description": "Rio 4326→32662"
   },
@@ -1105,7 +1105,7 @@
     "input_x": 151.2093,
     "input_y": -33.8688,
     "expected_x": 16832542.27920734,
-    "expected_y": -3770257.5697792238,
+    "expected_y": -3749108.5804898874,
     "tolerance": 0.01,
     "description": "Sydney 4326→32662"
   },
@@ -1115,7 +1115,7 @@
     "input_x": 37.6173,
     "input_y": 55.7558,
     "expected_x": 4187538.6810178095,
-    "expected_y": 6206707.264771602,
+    "expected_y": 6181373.880514138,
     "tolerance": 0.01,
     "description": "Moscow 4326→32662"
   },
@@ -1125,7 +1125,7 @@
     "input_x": -96.0,
     "input_y": 37.0,
     "expected_x": -10686671.116154263,
-    "expected_y": 4118821.159351122,
+    "expected_y": 4096510.9748437833,
     "tolerance": 0.01,
     "description": "US center 4326→32662"
   },
@@ -1155,7 +1155,7 @@
     "input_x": 0.0,
     "input_y": 85.0,
     "expected_x": 0.0,
-    "expected_y": 9462156.717428254,
+    "expected_y": 9443510.140666245,
     "tolerance": 0.01,
     "description": "near north pole 4326→32662"
   },
@@ -1165,7 +1165,7 @@
     "input_x": 0.0,
     "input_y": -85.0,
     "expected_x": 0.0,
-    "expected_y": -9462156.717428254,
+    "expected_y": -9443510.140666245,
     "tolerance": 0.01,
     "description": "near south pole 4326→32662"
   },
@@ -1195,7 +1195,7 @@
     "input_x": 0.0,
     "input_y": 45.0,
     "expected_x": 0.0,
-    "expected_y": 5009377.085697311,
+    "expected_y": 4984944.377977743,
     "tolerance": 0.01,
     "description": "45N prime meridian 4326→32662"
   },
@@ -1205,7 +1205,7 @@
     "input_x": 0.0,
     "input_y": -45.0,
     "expected_x": 0.0,
-    "expected_y": -5009377.085697311,
+    "expected_y": -4984944.377977743,
     "tolerance": 0.01,
     "description": "45S prime meridian 4326→32662"
   },
@@ -1235,7 +1235,7 @@
     "input_x": 0.0,
     "input_y": 0.01,
     "expected_x": 0.0,
-    "expected_y": 1113.1949079327358,
+    "expected_y": 1105.7427583286865,
     "tolerance": 0.01,
     "description": "just north of equator 4326→32662"
   },
@@ -1245,7 +1245,7 @@
     "input_x": 0.0,
     "input_y": -0.01,
     "expected_x": 0.0,
-    "expected_y": -1113.1949079327358,
+    "expected_y": -1105.7427583286865,
     "tolerance": 0.01,
     "description": "just south of equator 4326→32662"
   },
@@ -1493,7 +1493,7 @@
     "from_epsg": 32662,
     "to_epsg": 4326,
     "input_x": -8238310.235647004,
-    "input_y": 4532128.1647683885,
+    "input_y": 4508679.405667854,
     "expected_x": -74.006,
     "expected_y": 40.7128,
     "tolerance": 1e-7,
@@ -1755,7 +1755,7 @@
     "input_x": -74.006,
     "input_y": 40.7128,
     "expected_x": -8238310.235647004,
-    "expected_y": 4532128.1647683885,
+    "expected_y": 4508679.405667854,
     "tolerance": 0.001,
     "description": "NYC 4326→32662 EqCyl precise"
   },
@@ -1763,11 +1763,31 @@
     "from_epsg": 32662,
     "to_epsg": 4326,
     "input_x": -8238310.235647004,
-    "input_y": 4532128.1647683885,
+    "input_y": 4508679.405667854,
     "expected_x": -74.006,
     "expected_y": 40.7128,
     "tolerance": 1e-9,
     "description": "NYC 4326→32662 EqCyl precise inverse"
+  },
+  {
+    "from_epsg": 4326,
+    "to_epsg": 4087,
+    "input_x": 10.0,
+    "input_y": 50.0,
+    "expected_x": 1113194.9079327357,
+    "expected_y": 5540847.041684148,
+    "tolerance": 0.001,
+    "description": "10E 50N 4326→4087 ellipsoidal EqCyl precise"
+  },
+  {
+    "from_epsg": 4087,
+    "to_epsg": 4326,
+    "input_x": 1113194.9079327357,
+    "input_y": 5540847.041684148,
+    "expected_x": 10.0,
+    "expected_y": 49.99999999999999,
+    "tolerance": 1e-9,
+    "description": "10E 50N 4326→4087 ellipsoidal EqCyl precise inverse"
   },
   {
     "from_epsg": 4242,

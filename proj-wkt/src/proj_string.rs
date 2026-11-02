@@ -1585,7 +1585,8 @@ mod tests {
 
     #[test]
     fn implemented_projection_families_match_c_proj() {
-        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`.
+        // Reference values from C PROJ 9.6 `proj_create_crs_to_crs`, with
+        // Equidistant Cylindrical updated to the ellipsoidal form in PROJ 9.8.1.
         const WGS84: &str = "+proj=longlat +datum=WGS84";
         const BESSEL: &str = "+proj=longlat +ellps=bessel +towgs84=0,0,0";
         const KROVAK: &str = "+proj=krovak +lat_0=49.5 +lon_0=24.83333333333333 +alpha=30.28813972222222 +k=0.9999 +x_0=0 +y_0=0 +ellps=bessel +towgs84=0,0,0 +units=m +no_defs";
@@ -1624,7 +1625,7 @@ mod tests {
                 WGS84,
                 "+proj=eqc +lat_ts=30 +lat_0=0 +lon_0=10 +x_0=100 +y_0=200 +datum=WGS84 +type=crs",
                 (20.0, 40.0),
-                (964155.0696332284, 4452979.631730943),
+                (964962.802508965, 4429729.030350515),
             ),
             (
                 BESSEL,

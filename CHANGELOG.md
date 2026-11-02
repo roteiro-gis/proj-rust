@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- fix Equidistant Cylindrical projections on ellipsoids, including `EPSG:4087` and `EPSG:32662`, using the meridian arc for northing and the prime-vertical radius at the standard parallel for easting, matching EPSG and PROJ 9.8
+
 ## 0.13.0 - 2026-11-01
 
 - fix CRS definitions without an EPSG code, such as `+proj=utm +zone=18 +datum=NAD83` and ESRI WKT, failing to select registry operations across datums by matching on their recognized datum

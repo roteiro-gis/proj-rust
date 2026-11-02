@@ -11,6 +11,17 @@ use proj_sys::{
 };
 use std::ffi::{CStr, CString};
 
+pub fn assert_reference_version() {
+    let info = unsafe { proj_sys::proj_info() };
+    assert!(
+        (info.major, info.minor, info.patch) >= (9, 8, 0),
+        "coordinate references require PROJ 9.8+ (found {}.{}.{}); set PKG_CONFIG_PATH to a PROJ 9.8+ installation",
+        info.major,
+        info.minor,
+        info.patch
+    );
+}
+
 pub struct CProjTransform {
     ctx: *mut PJ_CONTEXT,
     pj: *mut proj_sys::PJ,

@@ -5,12 +5,18 @@ edition = "2021"
 publish = false
 
 [dependencies]
-proj = { version = "0.31", features = ["bundled_proj"] }
+proj = "0.31"
 proj-epsg-format = { path = "../proj-epsg-format" }
-proj-sys = { version = "0.27", features = ["bundled_proj"] }
+proj-sys = "0.27"
 rusqlite = { version = "0.35", features = ["bundled"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+[features]
+# Keep the embedded registry reproducible from PROJ 9.6.2. Coordinate
+# reference generation uses --no-default-features with PROJ 9.8 or newer.
+default = ["bundled-proj"]
+bundled-proj = ["proj/bundled_proj", "proj-sys/bundled_proj"]
 
 [[bin]]
 name = "gen-reference"
