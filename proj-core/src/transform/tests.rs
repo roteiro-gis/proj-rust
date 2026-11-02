@@ -2031,10 +2031,22 @@ fn transform_wrapped_geographic_bounds_crossing_antimeridian() {
         .transform_geographic_wrapped_bounds(Bounds::new(170.0, -20.0, -170.0, -10.0), 8)
         .unwrap();
 
-    assert!(result.min_x < -20_000_000.0, "min_x = {}", result.min_x);
-    assert!(result.max_x > 20_000_000.0, "max_x = {}", result.max_x);
-    assert!(result.min_y < -1_000_000.0, "min_y = {}", result.min_y);
-    assert!(result.max_y < 0.0, "max_y = {}", result.max_y);
+    assert!(
+        result.min_x < -20_000_000.0,
+        "wrapped bounds must reach the western antimeridian"
+    );
+    assert!(
+        result.max_x > 20_000_000.0,
+        "wrapped bounds must reach the eastern antimeridian"
+    );
+    assert!(
+        result.min_y < -1_000_000.0,
+        "wrapped bounds must reach the expected southern extent"
+    );
+    assert!(
+        result.max_y < 0.0,
+        "wrapped bounds must stay south of the equator"
+    );
 }
 
 #[test]
