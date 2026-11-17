@@ -105,6 +105,10 @@ impl VerticalSampleHorizontal {
                 "vertical grid horizontal CRS EPSG:{grid_horizontal_crs_epsg} is not a supported geographic sampling CRS"
             )));
         }
+        // A null datum shift samples the grid at the same coordinates.
+        if source.datum().shares_ellipsoidal_height(grid_crs.datum()) {
+            return Self::compile(source, None, options);
+        }
 
         let mut horizontal_options = options.clone();
         horizontal_options.vertical_grid_operations.clear();

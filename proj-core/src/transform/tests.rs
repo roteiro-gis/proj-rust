@@ -546,6 +546,28 @@ fn custom_coordinate_operation_is_selected_and_compiled() {
 }
 
 #[test]
+fn deprecated_custom_operation_loses_whatever_its_stated_accuracy() {
+    let mut deprecated = custom_nad27_to_wgs84_operation("deprecated custom");
+    deprecated.deprecated = true;
+    deprecated.accuracy = Some(crate::operation::OperationAccuracy { meters: 0.001 });
+    let mut current = custom_nad27_to_wgs84_operation("current custom");
+    current.accuracy = Some(crate::operation::OperationAccuracy { meters: 50.0 });
+
+    for operations in [
+        vec![deprecated.clone(), current.clone()],
+        vec![current.clone(), deprecated.clone()],
+    ] {
+        let transform = Transform::with_selection_options(
+            "EPSG:4267",
+            "EPSG:4326",
+            SelectionOptions::new().with_coordinate_operations(operations),
+        )
+        .unwrap();
+        assert_eq!(transform.selected_operation().name, "current custom");
+    }
+}
+
+#[test]
 fn custom_coordinate_operation_is_ranked_above_registry_candidates() {
     let t = Transform::with_selection_options(
         "EPSG:4267",

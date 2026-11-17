@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- rank deprecated operations below current ones for the same CRS pair whatever their stated accuracy, as C PROJ leaves them out; this stops the wrong-sign EPSG:15749 being used for `EPSG:4326` → `EPSG:4313` and `EPSG:31370`, and the wrong-scale EPSG:1508 for `EPSG:4149` → `EPSG:4326`
+- break remaining selection ties in C PROJ's listing order (larger area of use, null Helmert, shorter name, greater name), improving direct C PROJ selection matches from 218 to 236 of 250 probes; default selection without an area of interest changes between equal-accuracy operations for 46 EPSG code pairs
+- route the horizontal leg of a compound CRS transform through the geographic CRS of its geoid grid like C PROJ, so `EPSG:4979` → `EPSG:6190` uses BD72 to ETRS89 (3) while `EPSG:4326` → `EPSG:4313` keeps the direct Helmert
+- sum step accuracies on generated concatenated operations like C PROJ instead of taking the largest, and sample bridged geoid grids in their own geographic CRS
+- fix `EPSG:4979` ↔ `EPSG:8370` and other WGS 84 3D transforms to compounds on the geoid grid's own CRS failing with no supported vertical grid operation; the embedded registry gains 80 generated vertical bridges and keeps format v12
+
 ## 0.13.1 - 2026-11-01
 
 - fix incorrect longitude when converting southern Lambert Conformal Conic and Albers Equal Area coordinates back to geographic coordinates, including NSW Lambert (`EPSG:8058`) and Australian Albers (`EPSG:9473`)

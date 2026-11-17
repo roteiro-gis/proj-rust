@@ -385,13 +385,13 @@ mod tests {
             .as_str()
             .unwrap()
             .starts_with("sha256:"));
-        assert_eq!(value["output"]["byte_len"], 1_103_075);
+        assert_eq!(value["output"]["byte_len"], 1_114_228);
         assert_eq!(value["counts"]["vertical_crs"], 293);
         assert_eq!(value["counts"]["compound_crs"], 684);
         assert_eq!(value["counts"]["geocentric_crs"], 217);
         assert_eq!(value["counts"]["grid_resources"], 726);
         assert_eq!(value["counts"]["operations"], 2157);
-        assert_eq!(value["counts"]["vertical_operations"], 716);
+        assert_eq!(value["counts"]["vertical_operations"], 796);
         assert!(value["output"]["sha256"]
             .as_str()
             .unwrap()
