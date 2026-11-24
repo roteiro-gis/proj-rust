@@ -371,6 +371,11 @@ const SIMILARITY_ARCSEC_TO_RAD: f64 = (std::f64::consts::PI / 180.0) / 3600.0;
 /// metres. Unlike [`HelmertParams`], whose small-angle matrix suits datum
 /// shifts of a few arc-seconds, it stays exact for a frame turned by any
 /// angle.
+///
+/// In the position vector convention a positive `rz` turns the frame
+/// counter-clockwise: a frame whose north is θ clockwise from the target
+/// CRS's grid north has `rz = −θ·3600″` (`+θ·3600″` in the coordinate frame
+/// convention).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Similarity3DParams {
     translation: [f64; 3],
@@ -413,6 +418,68 @@ impl Similarity3DParams {
             convention,
             matrix: exact_rotation_matrix(rotation_arcsec, convention),
         })
+    }
+
+    /// Create a similarity from a rotation matrix, such as a Procrustes
+    /// (Umeyama) fit's, applied as `p' = T + (1 + s·10⁻⁶)·R·p` with `R`
+    /// row-major.
+    ///
+    /// The rotations are the ones whose exact matrix in `convention` is `R`,
+    /// so [`Self::rotation_matrix`] returns `R` and C PROJ's
+    /// `+proj=helmert +exact` with [`Self::rotation_arcsec`] applies it.
+    /// `R` must be a proper rotation to within 1e-9; a reflection or a matrix
+    /// that is not orthonormal is an error. The angles returned always
+    /// rebuild `R` to within 1e-9, including at a 90° turn about the y axis,
+    /// where they are not unique.
+    pub fn from_rotation_matrix(
+        translation: [f64; 3],
+        rotation_matrix: [f64; 9],
+        scale_ppm: f64,
+        convention: RotationConvention,
+    ) -> Result<Self> {
+        let m = rotation_matrix;
+        if !m.iter().all(|value| value.is_finite()) {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix must be finite".into(),
+            ));
+        }
+        let determinant = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
+            + m[2] * (m[3] * m[7] - m[4] * m[6]);
+        if determinant < 0.0 {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix is a reflection, not a rotation".into(),
+            ));
+        }
+        // The coordinate frame matrix is Rz(rz)·Ry(ry)·Rx(rx) of frame
+        // rotations; the position vector matrix is its transpose.
+        let c = match convention {
+            RotationConvention::CoordinateFrame => m,
+            RotationConvention::PositionVector => {
+                [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]
+            }
+        };
+        let radians = [
+            (-c[7]).atan2(c[8]),
+            c[6].clamp(-1.0, 1.0).asin(),
+            (-c[3]).atan2(c[0]),
+        ];
+        let params = Self::new(
+            translation,
+            radians.map(|angle| angle / SIMILARITY_ARCSEC_TO_RAD),
+            scale_ppm,
+            convention,
+        )?;
+        if params
+            .matrix
+            .iter()
+            .zip(&m)
+            .any(|(rebuilt, given)| (rebuilt - given).abs() > 1e-9)
+        {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix is not a rotation to within 1e-9".into(),
+            ));
+        }
+        Ok(params)
     }
 
     /// The similarity that changes nothing.
