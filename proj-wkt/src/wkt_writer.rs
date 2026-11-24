@@ -15,6 +15,7 @@ pub(crate) fn to_wkt(crs: &CrsDef) -> Result<String> {
         CrsDef::Geocentric(geocentric) => format_geocentric_crs(geocentric),
         CrsDef::Projected(projected) => format_projected_crs(projected),
         CrsDef::Compound(compound) => format_compound_crs(compound),
+        CrsDef::Engineering(engineering) => crate::engineering::engineering_wkt1(engineering),
     }
 }
 

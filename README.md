@@ -66,8 +66,9 @@ With the default `geo-types` feature, `Transform` also supports `geo_types::Coor
 - WKT1 `GEOCCS`, WKT2 geocentric `GEODCRS`, and PROJJSON Cartesian `GeodeticCRS` for ECEF definitions such as EPSG:4978.
 - WKT1 `COMPD_CS` and WKT2 `COMPOUNDCRS` definitions with explicit vertical components.
 - Basic PROJJSON geographic, projected, geocentric, and compound CRS definitions.
+- WKT2 `ENGCRS`, WKT1 `LOCAL_CS`, and PROJJSON `EngineeringCRS` local frames, and WKT2/PROJJSON bound engineering CRSs (see [Local Frames](#local-frames)).
 
-Custom definitions are accepted only when they map to this library's CRS model: longitude and latitude in degrees with a Greenwich prime meridian; geocentric ECEF X/Y/Z axes in metres; and projected easting and northing in a single linear unit. Other axis directions, prime meridians, angular units, projections, and vertical transformation semantics return errors.
+Custom definitions are accepted only when they map to this library's CRS model: longitude and latitude in degrees with a Greenwich prime meridian; geocentric ECEF X/Y/Z axes in metres; projected easting and northing in a single linear unit; and engineering east, north, and up axes in a single linear unit. Other axis directions, prime meridians, angular units, projections, and vertical transformation semantics return errors.
 
 Coordinates follow the CRS's axis order. Codes such as `EPSG:4326` are longitude/easting first whatever the authority's order, while the OGC URN and URI forms use the authority's order, as in C PROJ, and are rejected for a CRS whose axes the model cannot state. A WKT or PROJJSON definition keeps the order it declares, tagged or not, as in C PROJ, so `pyproj.CRS(4326).to_wkt()` takes latitude first and `transform_bounds` takes its bounds in that order too. `CrsDef::axis_order` reports the order, and `CrsDef::with_axis_order` reads a definition in another order deliberately. The axis order of a projected CRS's base geographic CRS does not affect its coordinates and is ignored.
 
@@ -106,6 +107,53 @@ Shifts a definition declares itself are explicit operations: `proj-wkt` applies 
 Geodetic to geocentric pairs such as `EPSG:4326` or `EPSG:4979` to `EPSG:4978`, and cross-datum ellipsoidal-height compounds such as `EPSG:4937` to `EPSG:4978`, use the selected horizontal operation plus geocentric framing. Gravity-related heights cannot target ECEF. Use `convert_3d` for ECEF coordinates.
 
 `SelectionOptions::with_wgs84_pivot()` opts in to chaining two registry operations through WGS84 when no direct operation can run, as C PROJ does, for example `EPSG:27700` to `EPSG:3035` without the OSTN15 grid. Chains require overlapping areas of use and rank after every direct operation.
+
+## Local Frames
+
+An engineering CRS (`CrsDef::Engineering`) is a local Cartesian frame, such as a plant grid, a total-station frame, or a scanner's own frame, with axes east, north and, in 3D, up. It has no relation to the earth of its own, so a transform reaches only the same frame, or another CRS through an operation the caller supplies: a seven-parameter `OperationMethod::Similarity3D` on the frame's (x, y, h) and a projected or compound CRS's (easting, northing, height), with the exact rotation matrix of C PROJ's `+proj=helmert +exact`. The transform runs that operation, then the registry's own from that CRS on:
+
+```rust
+use proj_core::{
+    lookup_epsg, CoordinateOperation, CrsDef, EngineeringCrsDef, Identifier, OperationDomain,
+    OperationMethod, RotationConvention, SelectionOptions, Similarity3DParams, Transform,
+};
+
+let site_grid = CrsDef::Engineering(Box::new(
+    EngineeringCrsDef::new("Site grid", "Site grid", 3)?
+        .with_identifier(Identifier::new("GEORIZON", "12")?),
+));
+let positioning = CoordinateOperation {
+    id: None,
+    name: "Site grid to RD + NAP".into(),
+    source_crs_epsg: None,
+    target_crs_epsg: Some(7415),
+    source_crs_id: site_grid.identifier().cloned(),
+    target_crs_id: None,
+    source_datum_epsg: None,
+    target_datum_epsg: None,
+    accuracy: None,
+    areas_of_use: Default::default(),
+    deprecated: false,
+    preferred: true,
+    approximate: false,
+    superseded: false,
+    domain: OperationDomain::IncludesHeight,
+    method: OperationMethod::Similarity3D {
+        params: Similarity3DParams::new(
+            [90512.334, 435870.112, -3.418],   // metres
+            [-12.6, 31.4, 133200.0],           // arc-seconds
+            -41.7,                             // parts per million
+            RotationConvention::PositionVector,
+        )?,
+    },
+};
+let options = SelectionOptions::new().with_coordinate_operation(positioning);
+let to_rd_nap =
+    Transform::from_crs_defs_with_selection_options(&site_grid, &lookup_epsg(7415).unwrap(), options)?;
+let (x, y, h) = to_rd_nap.convert_3d((1000.0, 2000.0, 10.0))?;
+```
+
+`convert` takes 2D frame coordinates as points on the frame's `h = 0` plane, so both directions stay exact inverses however the frame is tilted. `proj-wkt` reads and writes the frame as WKT2 `ENGCRS`, WKT1 `LOCAL_CS`, and PROJJSON `EngineeringCRS`; the operation as WKT2 `COORDINATEOPERATION` and PROJJSON `Transformation` (`parse_operation`, `operation_to_wkt2`, `operation_to_projjson`); and both together as a `BOUNDCRS` (`parse_bound_crs`, `bound_crs_to_wkt2`, `bound_crs_to_projjson`). `transform_from_crs_strings` and the `Proj` facade run the operation a bound frame carries. EPSG has no method for this similarity, so its WKT names it `Similarity transformation 3D, position vector` (or `coordinate frame`), which C PROJ reads but cannot run.
 
 ## Grids
 

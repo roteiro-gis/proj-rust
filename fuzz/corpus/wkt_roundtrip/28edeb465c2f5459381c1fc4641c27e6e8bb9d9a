@@ -1,0 +1,1 @@
+LOCAL_CS["Site grid Example",LOCAL_DATUM["Site grid Example",32767],UNIT["metre",1,AUTHORITY["EPSG","9001"]],AXIS["site east (x)",EAST],AXIS["site north (y)",NORTH],AXIS["height (h)",UP],AUTHORITY["GEORIZON","12"]]

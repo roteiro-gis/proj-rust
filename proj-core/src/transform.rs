@@ -12,6 +12,7 @@ use crate::operation::{
 use crate::registry;
 use crate::selector::{include_interior_poles, SelectedOperationKind};
 
+mod frame;
 #[cfg(feature = "geo-types")]
 mod geo_adapters;
 mod pipeline;
@@ -76,8 +77,12 @@ fn non_metre_height_unit(crs: &CrsDef) -> Option<LinearUnit> {
 /// A reusable coordinate transformation between two CRS.
 #[derive(Clone)]
 pub struct Transform {
+    /// The CRSs the pipelines run between. With an engineering endpoint these
+    /// are its base CRSs, and `frames` holds the requested ones.
     source: CrsDef,
     target: CrsDef,
+    /// Engineering endpoints and their stages.
+    frames: Option<Box<frame::FrameEnds>>,
     /// Pipelines run in east/north. These are the only place the CRS orders
     /// apply, at the coordinate boundary in `convert_coord` and its siblings.
     source_axes: AxisOrder,
@@ -97,8 +102,8 @@ impl std::fmt::Debug for Transform {
     /// CRS pair and the selected operation identify the transform.
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Transform")
-            .field("source", &self.source)
-            .field("target", &self.target)
+            .field("source", self.source_crs())
+            .field("target", self.target_crs())
             .field("selected_operation", &self.selected_operation)
             .finish_non_exhaustive()
     }
@@ -263,11 +268,35 @@ impl Transform {
     ///
     /// Use this when a custom CRS references grid resources and the transform
     /// needs an application-supplied [`crate::grid::GridProvider`].
+    ///
+    /// An engineering CRS reaches only the same frame, or another CRS
+    /// through a [`crate::OperationMethod::Similarity3D`] operation in
+    /// `options` that positions it on an EPSG CRS: the transform runs that
+    /// operation, then the one selected from that CRS on. Its height enters
+    /// the similarity in [`Self::convert_3d`]; [`Self::convert`] reads 2D
+    /// frame coordinates as points on the frame's `h = 0` plane, so both
+    /// directions stay exact inverses however the frame is tilted.
     pub fn from_crs_defs_with_selection_options(
         from: &CrsDef,
         to: &CrsDef,
         options: SelectionOptions,
     ) -> Result<Self> {
+        if !from.is_engineering() && !to.is_engineering() {
+            return Self::between_base_crs(from, to, options);
+        }
+        let plan = frame::plan(from, to, &options)?;
+        let mut transform =
+            Self::between_base_crs(&plan.base_source, &plan.base_target, plan.base_options)?;
+        transform.source_axes = from.axis_order().unwrap_or_default();
+        transform.target_axes = to.axis_order().unwrap_or_default();
+        transform.frames = Some(Box::new(plan.ends));
+        transform.apply_frame_metadata();
+        Ok(transform)
+    }
+
+    /// The transform between two CRSs that are not engineering ones, or two
+    /// definitions of the same frame in metres.
+    fn between_base_crs(from: &CrsDef, to: &CrsDef, options: SelectionOptions) -> Result<Self> {
         let grid_runtime = GridRuntime::new(options.grid_provider.clone());
         let vertical_transform = compile_vertical_transform(from, to, &options, &grid_runtime)?;
         let selected = compile_selected_pipelines(from, to, &options, &grid_runtime)?;
@@ -279,6 +308,7 @@ impl Transform {
         Ok(Self {
             source: from.clone(),
             target: to.clone(),
+            frames: None,
             source_axes: from.axis_order().unwrap_or_default(),
             target_axes: to.axis_order().unwrap_or_default(),
             selected_operation_kind: selected.operation,
@@ -384,14 +414,75 @@ impl Transform {
         })
     }
 
+    /// The CRS a transform between the engineering CRS `frame` and `other`
+    /// reaches the frame through: the EPSG CRS on which the
+    /// [`crate::OperationMethod::Similarity3D`] operation in `options`
+    /// positions it, in the frame's dimension.
+    ///
+    /// `None` when `frame` is not an engineering CRS, `other` is the same
+    /// frame, or no operation in `options` positions it. Parsers use this to
+    /// state their own operations between that CRS and `other`.
+    pub fn engineering_base_crs(
+        frame: &CrsDef,
+        other: &CrsDef,
+        options: &SelectionOptions,
+    ) -> Option<CrsDef> {
+        frame::positioned_base_crs(frame.as_engineering()?, other, options)
+    }
+
     /// Return the source CRS definition for this transform.
     pub fn source_crs(&self) -> &CrsDef {
-        &self.source
+        self.frames
+            .as_ref()
+            .map_or(&self.source, |frames| &frames.source)
     }
 
     /// Return the target CRS definition for this transform.
     pub fn target_crs(&self) -> &CrsDef {
-        &self.target
+        self.frames
+            .as_ref()
+            .map_or(&self.target, |frames| &frames.target)
+    }
+
+    /// Report the operations an engineering endpoint adds in the selected
+    /// operation, its fallbacks, and the selection diagnostics.
+    fn apply_frame_metadata(&mut self) {
+        let Some(frames) = self.frames.as_deref() else {
+            return;
+        };
+        let selected_is_identity = matches!(
+            self.selected_operation_kind,
+            crate::selector::SelectedOperationKind::Identity
+        );
+        let selected =
+            std::sync::Arc::new(frames.metadata(&self.selected_operation, selected_is_identity));
+        for fallback in &mut self.fallback_pipelines {
+            let is_identity = matches!(
+                fallback.operation,
+                crate::selector::SelectedOperationKind::Identity
+            );
+            fallback.metadata =
+                std::sync::Arc::new(frames.metadata(&fallback.metadata, is_identity));
+        }
+        if frames.has_operation() {
+            self.diagnostics.selected_match_kind = crate::operation::OperationMatchKind::Custom;
+            if !self
+                .diagnostics
+                .selected_reasons
+                .contains(&crate::operation::SelectionReason::CustomOperation)
+            {
+                self.diagnostics
+                    .selected_reasons
+                    .insert(0, crate::operation::SelectionReason::CustomOperation);
+            }
+        }
+        self.diagnostics.selected_operation = (*selected).clone();
+        self.diagnostics.fallback_operations = self
+            .fallback_pipelines
+            .iter()
+            .map(|fallback| (*fallback.metadata).clone())
+            .collect();
+        self.selected_operation = selected;
     }
 
     /// Return metadata for the selected coordinate operation.
@@ -489,9 +580,13 @@ impl Transform {
             missing_required_grid: self.diagnostics.missing_required_grid.clone(),
         };
         validate_vertical_composition(&vertical_transform, &pipeline, &fallback_pipelines)?;
-        Ok(Self {
+        let mut inverse = Self {
             source: self.target.clone(),
             target: self.source.clone(),
+            frames: self
+                .frames
+                .as_ref()
+                .map(|frames| Box::new(frames.inverse())),
             source_axes: self.target_axes,
             target_axes: self.source_axes,
             selected_operation_kind,
@@ -502,7 +597,9 @@ impl Transform {
             selection_options: inverse_options,
             pipeline,
             fallback_pipelines,
-        })
+        };
+        inverse.apply_frame_metadata();
+        Ok(inverse)
     }
 
     /// Reproject a 2D bounding box by sampling its perimeter.
@@ -543,7 +640,7 @@ impl Transform {
         bounds: Bounds,
         densify_points: usize,
     ) -> Result<Bounds> {
-        if !self.source.is_geographic() {
+        if !self.source_crs().is_geographic() {
             return Err(Error::InvalidDefinition(
                 "wrapped geographic bounds require a geographic source CRS".into(),
             ));
@@ -587,8 +684,8 @@ impl Transform {
 
         let mut transformed =
             transformed.ok_or_else(|| Error::OutOfRange("failed to sample bounds".into()))?;
-        if self.target.is_geographic() {
-            include_interior_poles(&self.source, bounds, &mut transformed)?;
+        if self.target_crs().is_geographic() {
+            include_interior_poles(self.source_crs(), bounds, &mut transformed)?;
         }
         Ok(transformed)
     }
@@ -656,9 +753,34 @@ impl Transform {
         ))
     }
 
+    /// Requested source east/north/height to the pipelines' source CRS.
+    fn enter_frame(&self, c: Coord3D) -> Coord3D {
+        self.frames.as_ref().map_or(c, |frames| frames.enter(c))
+    }
+
+    /// The pipelines' target CRS east/north/height to the requested target.
+    fn leave_frame(&self, c: Coord3D) -> Result<Coord3D> {
+        self.frames.as_ref().map_or(Ok(c), |frames| frames.leave(c))
+    }
+
+    /// [`Self::enter_frame`] for a 2D coordinate, which is at height 0 in the
+    /// frame and again for the pipelines, as for any 2D conversion.
+    fn enter_frame_2d(&self, c: Coord) -> Coord3D {
+        let c = self.frames.as_ref().map_or(c, |frames| frames.enter_2d(c));
+        Coord3D::new(c.x, c.y, 0.0)
+    }
+
+    /// [`Self::leave_frame`] for a 2D result.
+    fn leave_frame_2d(&self, c: Coord) -> Result<Coord> {
+        self.frames
+            .as_ref()
+            .map_or(Ok(c), |frames| frames.leave_2d(c))
+    }
+
     fn convert_east_north(&self, c: Coord) -> Result<Coord> {
-        let c = Coord3D::new(c.x, c.y, 0.0);
+        let c = self.enter_frame_2d(c);
         self.first_covering(|pipeline| execute_pipeline_xy(pipeline, c))
+            .and_then(|coord| self.leave_frame_2d(coord))
     }
 
     fn convert_coord(&self, c: Coord) -> Result<Coord> {
@@ -667,29 +789,33 @@ impl Transform {
     }
 
     fn convert_coord3d(&self, c: Coord3D) -> Result<Coord3D> {
-        let c = self.source_axes.reorder_3d(c);
+        let c = self.enter_frame(self.source_axes.reorder_3d(c));
         self.first_covering(|pipeline| self.execute_pipeline_coord3d(pipeline, c))
+            .and_then(|coord| self.leave_frame(coord))
             .map(|coord| self.target_axes.reorder_3d(coord))
     }
 
     fn convert_coord_with_diagnostics(&self, c: Coord) -> Result<TransformOutcome<Coord>> {
-        let c = self.source_axes.reorder(c);
-        let c = Coord3D::new(c.x, c.y, 0.0);
+        let c = self.enter_frame_2d(self.source_axes.reorder(c));
         let mut outcome = self.first_covering_with_diagnostics(|pipeline| {
             let vertical = vertical_diagnostics(VerticalTransformAction::None, None, None, None);
             Ok((execute_pipeline_xy(pipeline, c)?, vertical))
         })?;
-        outcome.coord = self.target_axes.reorder(outcome.coord);
+        outcome.coord = self
+            .target_axes
+            .reorder(self.leave_frame_2d(outcome.coord)?);
         Ok(outcome)
     }
 
     fn convert_coord3d_with_diagnostics(&self, c: Coord3D) -> Result<TransformOutcome<Coord3D>> {
-        let c = self.source_axes.reorder_3d(c);
+        let c = self.enter_frame(self.source_axes.reorder_3d(c));
         let mut outcome = self.first_covering_with_diagnostics(|pipeline| {
             let outcome = self.execute_pipeline(pipeline, c)?;
             Ok((outcome.coord, outcome.vertical))
         })?;
-        outcome.coord = self.target_axes.reorder_3d(outcome.coord);
+        outcome.coord = self
+            .target_axes
+            .reorder_3d(self.leave_frame(outcome.coord)?);
         Ok(outcome)
     }
 

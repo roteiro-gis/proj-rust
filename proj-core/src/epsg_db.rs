@@ -448,6 +448,8 @@ fn parse_db() -> RegistryDb {
                 name,
                 source_crs_epsg: opt_code(source_crs_epsg),
                 target_crs_epsg: opt_code(target_crs_epsg),
+                source_crs_id: None,
+                target_crs_id: None,
                 source_datum_epsg: opt_code(source_datum_epsg),
                 target_datum_epsg: opt_code(target_datum_epsg),
                 accuracy: if accuracy.is_nan() {

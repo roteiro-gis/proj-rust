@@ -16,11 +16,17 @@
 //!   equality-checked z preservation and same-reference vertical unit conversion
 //! - **WKT output**: serializes [`proj_core::CrsDef`] values to WKT1-style
 //!   `GEOGCS[...]`, `PROJCS[...]`, `GEOCCS[...]`, and `COMPD_CS[...]` definitions
+//! - **Engineering CRS**: WKT2 `ENGCRS[...]`, WKT1 `LOCAL_CS[...]`, and PROJJSON
+//!   `EngineeringCRS`, read and written. The operation that positions such a
+//!   frame is an [`OperationDefinition`]: WKT2 `COORDINATEOPERATION[...]` or
+//!   PROJJSON `Transformation` through [`parse_operation`], and a frame bound to
+//!   its target CRS through [`parse_bound_crs`]
 //!
 //! Custom CRS definitions are only accepted when their semantics fit the
 //! `proj_core::CrsDef` model: longitude and latitude in degrees with a Greenwich
 //! prime meridian, geocentric ECEF coordinates in metres with geocentric X/Y/Z
-//! axes, projected easting and northing, and compound vertical components that
+//! axes, projected easting and northing, engineering east, north, and up axes,
+//! and compound vertical components that
 //! can be preserved or unit-converted only when source and target vertical CRS
 //! definitions use the same vertical reference frame.
 //! A definition keeps the axis order it declares, east/north or north/east:
@@ -49,6 +55,8 @@
 //! let (x, y) = t.convert((-74.006, 40.7128)).unwrap();
 //! ```
 
+mod engineering;
+mod operation;
 mod proj_string;
 mod projjson;
 mod projjson_writer;
@@ -79,6 +87,8 @@ pub enum ParseError {
 
 pub type Result<T> = std::result::Result<T, ParseError>;
 
+pub use operation::OperationDefinition;
+
 /// Parse a CRS definition string in any supported format.
 ///
 /// Automatically detects and handles:
@@ -100,6 +110,9 @@ pub type Result<T> = std::result::Result<T, ParseError>;
 ///   `BOUNDCRS[...]`, which returns its source CRS with the declared shift in its
 ///   datum, and the long-form `GEODETICCRS`, `GEOGRAPHICCRS`, and `PROJECTEDCRS`
 ///   keywords
+/// - **Engineering CRS**: WKT2 `ENGCRS[...]` / `ENGINEERINGCRS[...]`, WKT1
+///   `LOCAL_CS[...]`, and PROJJSON `EngineeringCRS`. A `BOUNDCRS` or `BoundCRS`
+///   of one returns the frame; [`parse_bound_crs`] returns its operation too
 pub fn parse_crs(s: &str) -> Result<CrsDef> {
     let s = s.trim();
 
@@ -159,6 +172,9 @@ pub fn parse_crs(s: &str) -> Result<CrsDef> {
         || upper.starts_with("VERT_CS")
         || upper.starts_with("VERTCRS")
         || upper.starts_with("VERTICALCRS")
+        || upper.starts_with("ENGCRS")
+        || upper.starts_with("ENGINEERINGCRS")
+        || upper.starts_with("LOCAL_CS")
     {
         return wkt::parse_wkt(s);
     }
@@ -205,6 +221,69 @@ pub fn to_wkt2(crs: &CrsDef) -> Result<String> {
 /// definition; EPSG identities present on the definition are preserved.
 pub fn to_projjson(crs: &CrsDef) -> Result<String> {
     let value = projjson_writer::to_projjson_value(crs)?;
+    serde_json::to_string(&value)
+        .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
+}
+
+/// Parse an operation that positions an engineering CRS: a WKT2
+/// `COORDINATEOPERATION` or a PROJJSON `Transformation` with the method
+/// `Similarity transformation 3D, position vector` (or `coordinate frame`).
+///
+/// Pass [`OperationDefinition::coordinate_operation`] to
+/// [`SelectionOptions::with_coordinate_operation`] to transform from the frame.
+pub fn parse_operation(s: &str) -> Result<OperationDefinition> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        let value: serde_json::Value = serde_json::from_str(s)
+            .map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
+        return operation::parse_projjson_operation(&value);
+    }
+    operation::parse_wkt_operation(s)
+}
+
+/// Parse a bound engineering CRS, a WKT2 `BOUNDCRS` or PROJJSON `BoundCRS`
+/// whose source is an engineering CRS, into the operation it carries: its
+/// source CRS is the frame and its target the CRS the frame is positioned on.
+///
+/// [`parse_crs`] reads such a definition as the frame alone.
+pub fn parse_bound_crs(s: &str) -> Result<OperationDefinition> {
+    let s = s.trim();
+    if s.starts_with('{') {
+        let value: serde_json::Value = serde_json::from_str(s)
+            .map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
+        return operation::parse_projjson_bound_crs(&value);
+    }
+    operation::parse_wkt_bound_crs(s)
+}
+
+/// Serialize an operation as a WKT2 `COORDINATEOPERATION`, with a unit on
+/// every parameter.
+pub fn operation_to_wkt2(operation: &OperationDefinition) -> Result<String> {
+    operation::operation_wkt2(operation)
+}
+
+/// Serialize an operation as a PROJJSON `Transformation`.
+///
+/// PROJJSON has no operation version, so [`OperationDefinition::version`] is
+/// not written; the identifier tells versions apart.
+pub fn operation_to_projjson(operation: &OperationDefinition) -> Result<String> {
+    let value = operation::operation_projjson(operation)?;
+    serde_json::to_string(&value)
+        .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
+}
+
+/// Serialize an operation from an engineering CRS as a WKT2 `BOUNDCRS`: the
+/// frame, the CRS it is positioned on, and the operation abridged, whose
+/// parameters are in metres and arc-seconds with the scale as a multiplier.
+pub fn bound_crs_to_wkt2(operation: &OperationDefinition) -> Result<String> {
+    operation::bound_crs_wkt2(operation)
+}
+
+/// Serialize an operation from an engineering CRS as a PROJJSON `BoundCRS`.
+///
+/// Its abridged transformation has no version or accuracy.
+pub fn bound_crs_to_projjson(operation: &OperationDefinition) -> Result<String> {
+    let value = operation::bound_crs_projjson(operation)?;
     serde_json::to_string(&value)
         .map_err(|e| ParseError::Parse(format!("PROJJSON serialization failed: {e}")))
 }
@@ -392,6 +471,7 @@ pub fn transform_from_crs_strings_with_selection_options(
 ) -> std::result::Result<proj_core::Transform, ParseError> {
     let from_crs = parse_crs(from)?;
     let to_crs = parse_crs(to)?;
+    let options = with_bound_frame_operations(options, [from, to])?;
     let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(proj_core::Transform::from_crs_defs_with_selection_options(
         &from_crs, &to_crs, options,
@@ -423,6 +503,7 @@ pub fn transform_from_crs_strings_horizontal_with_selection_options(
 ) -> std::result::Result<proj_core::Transform, ParseError> {
     let from_crs = parse_crs(from)?;
     let to_crs = parse_crs(to)?;
+    let options = with_bound_frame_operations(options, [from, to])?;
     let options = with_parsed_coordinate_operations(options, &from_crs, &to_crs);
     Ok(
         proj_core::Transform::from_horizontal_components_with_selection_options(
@@ -431,11 +512,31 @@ pub fn transform_from_crs_strings_horizontal_with_selection_options(
     )
 }
 
+/// Add the operation a bound engineering CRS carries, so a transform from a
+/// frame's `BOUNDCRS` runs it.
+fn with_bound_frame_operations<'a>(
+    mut options: SelectionOptions,
+    definitions: impl IntoIterator<Item = &'a str>,
+) -> Result<SelectionOptions> {
+    for definition in definitions {
+        if let Some(operation) = operation::bound_engineering_operation(definition)? {
+            options = options.with_coordinate_operation(operation.coordinate_operation()?);
+        }
+    }
+    Ok(options)
+}
+
 fn with_parsed_coordinate_operations(
     options: SelectionOptions,
     source: &CrsDef,
     target: &CrsDef,
 ) -> SelectionOptions {
+    // An engineering CRS meets the other side at the CRS its positioning
+    // reaches, so a declared shift applies from there.
+    let source_base = Transform::engineering_base_crs(source, target, &options);
+    let target_base = Transform::engineering_base_crs(target, source, &options);
+    let source = source_base.as_ref().unwrap_or(source);
+    let target = target_base.as_ref().unwrap_or(target);
     if let Some(operation) = parsed_datum_operation(source, target) {
         options.with_coordinate_operation(operation)
     } else {
@@ -505,6 +606,8 @@ fn parsed_coordinate_operation(
         name: name.into(),
         source_crs_epsg: source.base_geographic_crs_epsg(),
         target_crs_epsg: target.base_geographic_crs_epsg(),
+        source_crs_id: None,
+        target_crs_id: None,
         source_datum_epsg: None,
         target_datum_epsg: None,
         accuracy: None,
@@ -678,6 +781,8 @@ fn split_compatibility_values(value: &str) -> impl Iterator<Item = &str> {
 /// 3. convert coordinates with [`Proj::convert`]
 pub struct Proj {
     inner: ProjInner,
+    /// The operation a bound engineering CRS definition carries.
+    frame_operation: Option<Box<CoordinateOperation>>,
 }
 
 enum ProjInner {
@@ -690,6 +795,10 @@ impl Proj {
     pub fn new(definition: &str) -> Result<Self> {
         Ok(Self {
             inner: ProjInner::Definition(Box::new(parse_crs(definition)?)),
+            frame_operation: operation::bound_engineering_operation(definition)?
+                .map(|operation| operation.coordinate_operation())
+                .transpose()?
+                .map(Box::new),
         })
     }
 
@@ -709,6 +818,7 @@ impl Proj {
         options: SelectionOptions,
     ) -> Result<Self> {
         Ok(Self {
+            frame_operation: None,
             inner: ProjInner::Transform(Box::new(
                 transform_from_crs_strings_with_selection_options(from, to, options)?,
             )),
@@ -731,6 +841,7 @@ impl Proj {
         options: SelectionOptions,
     ) -> Result<Self> {
         Ok(Self {
+            frame_operation: None,
             inner: ProjInner::Transform(Box::new(
                 transform_from_crs_strings_horizontal_with_selection_options(from, to, options)?,
             )),
@@ -756,10 +867,12 @@ impl Proj {
         target: &Self,
         options: SelectionOptions,
     ) -> Result<Self> {
+        let options = self.with_frame_operations(target, options);
         let source = self.parsed_definition()?;
         let target = target.parsed_definition()?;
         let options = with_parsed_coordinate_operations(options, source, target);
         Ok(Self {
+            frame_operation: None,
             inner: ProjInner::Transform(Box::new(Transform::from_crs_defs_with_selection_options(
                 source, target, options,
             )?)),
@@ -785,10 +898,12 @@ impl Proj {
         target: &Self,
         options: SelectionOptions,
     ) -> Result<Self> {
+        let options = self.with_frame_operations(target, options);
         let source = self.parsed_definition()?;
         let target = target.parsed_definition()?;
         let options = with_parsed_coordinate_operations(options, source, target);
         Ok(Self {
+            frame_operation: None,
             inner: ProjInner::Transform(Box::new(
                 Transform::from_horizontal_components_with_selection_options(
                     source, target, options,
@@ -832,6 +947,7 @@ impl Proj {
         match &self.inner {
             ProjInner::Transform(transform) => Ok(Self {
                 inner: ProjInner::Transform(Box::new(transform.inverse()?)),
+                frame_operation: None,
             }),
             ProjInner::Definition(_) => Err(ParseError::Parse(
                 "inverse requires a CRS-to-CRS transform, not a standalone CRS definition".into(),
@@ -851,6 +967,20 @@ impl Proj {
                 "bounds reprojection requires a CRS-to-CRS transform, not a standalone CRS definition".into(),
             )),
         }
+    }
+
+    fn with_frame_operations(
+        &self,
+        target: &Self,
+        mut options: SelectionOptions,
+    ) -> SelectionOptions {
+        for operation in [&self.frame_operation, &target.frame_operation]
+            .into_iter()
+            .flatten()
+        {
+            options = options.with_coordinate_operation(operation.as_ref().clone());
+        }
+        options
     }
 
     fn parsed_definition(&self) -> Result<&CrsDef> {

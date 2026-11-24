@@ -459,6 +459,14 @@ fn custom_operation_direction(
     target: &CrsDef,
     operation: &CoordinateOperation,
 ) -> Option<OperationStepDirection> {
+    // Engineering endpoints and the similarities that position them are the
+    // transform's frame stages, never a pipeline step.
+    if source.is_engineering()
+        || target.is_engineering()
+        || matches!(operation.method, OperationMethod::Similarity3D { .. })
+    {
+        return None;
+    }
     if custom_operation_matches_pair(source, target, operation) {
         Some(OperationStepDirection::Forward)
     } else if custom_operation_matches_pair_reversed(source, target, operation) {
@@ -475,6 +483,8 @@ fn custom_operation_matches_pair(
 ) -> bool {
     operation_crs_filter_matches(operation.source_crs_epsg, source)
         && operation_crs_filter_matches(operation.target_crs_epsg, target)
+        && operation_crs_id_filter_matches(operation.source_crs_id.as_ref(), source)
+        && operation_crs_id_filter_matches(operation.target_crs_id.as_ref(), target)
         && operation_datum_filter_matches(operation.source_datum_epsg, source)
         && operation_datum_filter_matches(operation.target_datum_epsg, target)
 }
@@ -486,8 +496,14 @@ fn custom_operation_matches_pair_reversed(
 ) -> bool {
     operation_crs_filter_matches(operation.source_crs_epsg, target)
         && operation_crs_filter_matches(operation.target_crs_epsg, source)
+        && operation_crs_id_filter_matches(operation.source_crs_id.as_ref(), target)
+        && operation_crs_id_filter_matches(operation.target_crs_id.as_ref(), source)
         && operation_datum_filter_matches(operation.source_datum_epsg, target)
         && operation_datum_filter_matches(operation.target_datum_epsg, source)
+}
+
+fn operation_crs_id_filter_matches(filter: Option<&crate::crs::Identifier>, crs: &CrsDef) -> bool {
+    filter.is_none_or(|id| crs.identifier() == Some(id))
 }
 
 fn operation_crs_filter_matches(filter: Option<u32>, crs: &CrsDef) -> bool {
@@ -545,6 +561,9 @@ fn match_kind_for_candidate(
 }
 
 fn requires_no_datum_operation(source: &CrsDef, target: &CrsDef) -> bool {
+    if let (Some(source), Some(target)) = (source.as_engineering(), target.as_engineering()) {
+        return source.same_frame(target);
+    }
     (source.epsg() != 0 && source.epsg() == target.epsg())
         || (source.base_geographic_crs_epsg().is_some()
             && source.base_geographic_crs_epsg() == target.base_geographic_crs_epsg())

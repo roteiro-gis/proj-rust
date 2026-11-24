@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- breaking: add `CrsDef::Engineering` and `EngineeringCrsDef` for local Cartesian frames (plant grids, total-station and scanner frames), identified by an authority code such as `GEORIZON:12` through the new `Identifier`; exhaustive matches on `CrsDef` must handle the new variant. A frame transforms to the same frame, converting units and axis order, and to nothing else without an operation
+- breaking: add `OperationMethod::Similarity3D` and `Similarity3DParams`, a seven-parameter similarity with the exact rotation matrix of C PROJ's `+proj=helmert +exact` and an explicit `RotationConvention`, matching `cct` to 1e-9 m; exhaustive matches on `OperationMethod` must handle the new variant
+- breaking: `CoordinateOperation` gains `source_crs_id` and `target_crs_id`, so struct-literal construction must set them; a custom operation that names one only matches a CRS with that identifier
+- transform from an engineering CRS through a caller-supplied `Similarity3D` operation to an EPSG projected or compound CRS, then the registry's operation from there, and back; two frames positioned on the same CRS transform to each other, an area of interest in frame coordinates selects like one in the base CRS, and the reported operation names both steps. 2D conversions read frame coordinates on the frame's `h = 0` plane and fail for a near-vertical one; `Transform::engineering_base_crs` reports the CRS a frame is reached through. Frames without identifiers are the same frame only when their CRS and datum names both match
+- read and write WKT2 `ENGCRS`, WKT1 `LOCAL_CS`, and PROJJSON `EngineeringCRS` in `proj-wkt`
+- add `proj_wkt::OperationDefinition` with `parse_operation`, `operation_to_wkt2`, and `operation_to_projjson` for WKT2 `COORDINATEOPERATION` and PROJJSON `Transformation`, and `parse_bound_crs`, `bound_crs_to_wkt2`, and `bound_crs_to_projjson` for a frame bound to the CRS it is positioned on; `parse_crs` reads such a bound CRS as the frame, and `transform_from_crs_strings` and the `Proj` facade run its operation, applying a declared `+towgs84` or `+nadgrids` shift on the other side from the frame's base CRS
 ## 0.13.1 - 2026-11-01
 
 - fix incorrect longitude when converting southern Lambert Conformal Conic and Albers Equal Area coordinates back to geographic coordinates, including NSW Lambert (`EPSG:8058`) and Australian Albers (`EPSG:9473`)

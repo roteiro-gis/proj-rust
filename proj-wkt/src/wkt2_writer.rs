@@ -24,6 +24,7 @@ pub(crate) fn to_wkt2(crs: &CrsDef) -> Result<String> {
         CrsDef::Geocentric(geocentric) => geocentric_wkt2(geocentric),
         CrsDef::Projected(projected) => projected_wkt2(projected),
         CrsDef::Compound(compound) => compound_wkt2(compound),
+        CrsDef::Engineering(engineering) => crate::engineering::engineering_wkt2(engineering),
     }?;
     match declared_helmert(crs.datum()) {
         Some(helmert) => bound_wkt2(&definition, helmert),
@@ -254,7 +255,7 @@ fn angle_unit_wkt2() -> String {
     format!("ANGLEUNIT[\"degree\",{DEGREE_TO_RADIAN}]")
 }
 
-fn length_unit_wkt2(unit: LinearUnit) -> Result<String> {
+pub(crate) fn length_unit_wkt2(unit: LinearUnit) -> Result<String> {
     let info = linear_unit_wkt(unit)?;
     Ok(format!("LENGTHUNIT[{},{}]", quote(info.name), info.factor))
 }

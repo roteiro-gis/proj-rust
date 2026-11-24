@@ -140,6 +140,10 @@ pub fn operation_candidates_between(
 
 /// Return selectable operation metadata using the same policy and AOI validation
 /// rules as [`crate::Transform::with_selection_options`].
+///
+/// Engineering CRSs have no candidates here: a transform reaches one only
+/// through the operation that positions it, then the candidates from
+/// [`crate::Transform::engineering_base_crs`] on.
 pub fn operation_candidates_between_with_selection_options(
     source: &CrsDef,
     target: &CrsDef,
@@ -660,6 +664,8 @@ mod tests {
             name: "Custom candidate".into(),
             source_crs_epsg: Some(4267),
             target_crs_epsg: Some(4326),
+            source_crs_id: None,
+            target_crs_id: None,
             source_datum_epsg: None,
             target_datum_epsg: None,
             accuracy: None,

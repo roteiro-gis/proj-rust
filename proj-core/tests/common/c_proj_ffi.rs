@@ -134,6 +134,31 @@ impl CProjTransform {
         }
     }
 
+    /// Create an operation from a PROJ string such as a `+proj=pipeline`,
+    /// run in the order it states.
+    pub fn new_proj_string(definition: &str) -> Result<Self, String> {
+        let c_definition = CString::new(definition)
+            .map_err(|e| format!("invalid PROJ string {definition}: {e}"))?;
+
+        unsafe {
+            let ctx = proj_context_create();
+            if ctx.is_null() {
+                return Err("failed to create PROJ context".into());
+            }
+
+            let pj = proj_create(ctx, c_definition.as_ptr());
+            if pj.is_null() {
+                let message = error_message(proj_context_errno(ctx));
+                proj_context_destroy(ctx);
+                return Err(format!(
+                    "failed to create C PROJ operation {definition}: {message}"
+                ));
+            }
+
+            Ok(Self { ctx, pj })
+        }
+    }
+
     pub fn convert_3d(&self, coord: (f64, f64, f64)) -> Result<(f64, f64, f64), String> {
         unsafe {
             proj_errno_reset(self.pj);

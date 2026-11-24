@@ -144,6 +144,7 @@ fn coordinate_operation_literals_stay_in_registry_parser_or_custom_paths() {
                 | "proj-core/src/registry.rs"
                 | "proj-core/src/transform/tests.rs"
                 | "proj-wkt/src/lib.rs"
+                | "proj-wkt/src/operation.rs"
         )
     });
 }

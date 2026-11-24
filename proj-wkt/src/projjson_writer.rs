@@ -20,12 +20,15 @@ use crate::{ParseError, Result};
 
 const PROJJSON_SCHEMA: &str = "https://proj.org/schemas/v0.7/projjson.schema.json";
 
-fn crs_value(crs: &CrsDef) -> Result<Value> {
+pub(crate) fn crs_value(crs: &CrsDef) -> Result<Value> {
     match crs {
         CrsDef::Geographic(geographic) => geographic_crs_value(geographic, None),
         CrsDef::Geocentric(geocentric) => geocentric_crs_value(geocentric),
         CrsDef::Projected(projected) => projected_crs_value(projected),
         CrsDef::Compound(compound) => compound_crs_value(compound),
+        CrsDef::Engineering(engineering) => {
+            Ok(crate::engineering::engineering_projjson(engineering))
+        }
     }
 }
 
@@ -378,7 +381,7 @@ fn datum_value(datum: &Datum, datum_epsg: Option<u32>) -> Result<Value> {
     Ok(Value::Object(object))
 }
 
-fn linear_unit_value(unit: LinearUnit) -> Value {
+pub(crate) fn linear_unit_value(unit: LinearUnit) -> Value {
     if unit.meters_per_unit() == 1.0 {
         return Value::String("metre".into());
     }
@@ -389,7 +392,7 @@ fn linear_unit_value(unit: LinearUnit) -> Value {
     })
 }
 
-fn number(value: f64) -> Result<Value> {
+pub(crate) fn number(value: f64) -> Result<Value> {
     serde_json::Number::from_f64(value)
         .map(Value::Number)
         .ok_or_else(|| {
