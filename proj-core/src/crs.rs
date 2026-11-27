@@ -88,27 +88,47 @@ pub enum CrsDef {
     Projected(ProjectedCrsDef),
     /// Compound horizontal + vertical CRS.
     Compound(Box<CompoundCrsDef>),
+    /// Engineering CRS: a local Cartesian frame with no tie to the earth of
+    /// its own, such as a site grid or a total-station frame.
+    Engineering(Box<EngineeringCrsDef>),
 }
 
 impl CrsDef {
     /// Get the horizontal datum for this CRS.
+    ///
+    /// An engineering CRS has no geodetic datum. It answers a datum with no
+    /// known relation to WGS 84 that is never the same as any other datum, so
+    /// datum comparisons fail closed; use [`Self::as_engineering`] to tell.
     pub fn datum(&self) -> &Datum {
         match self {
             CrsDef::Geographic(g) => g.datum(),
             CrsDef::Geocentric(g) => g.datum(),
             CrsDef::Projected(p) => p.datum(),
             CrsDef::Compound(c) => c.horizontal_datum(),
+            CrsDef::Engineering(_) => &crate::datum::NO_GEODETIC_DATUM,
         }
     }
 
-    /// Get the EPSG code for this CRS.
+    /// Get the EPSG code for this CRS, or 0 when it has none.
+    ///
+    /// An engineering CRS reports 0 even when its identifier is an EPSG one;
+    /// see [`Self::identifier`].
     pub fn epsg(&self) -> u32 {
         match self {
             CrsDef::Geographic(g) => g.epsg(),
             CrsDef::Geocentric(g) => g.epsg(),
             CrsDef::Projected(p) => p.epsg(),
             CrsDef::Compound(c) => c.epsg(),
+            CrsDef::Engineering(_) => 0,
         }
+    }
+
+    /// Identifier of an engineering CRS, such as `GEORIZON:12`.
+    ///
+    /// Registry CRSs are identified by [`Self::epsg`] instead and answer `None`.
+    pub fn identifier(&self) -> Option<&Identifier> {
+        self.as_engineering()
+            .and_then(EngineeringCrsDef::identifier)
     }
 
     /// Get the CRS name.
@@ -118,6 +138,7 @@ impl CrsDef {
             CrsDef::Geocentric(g) => g.name(),
             CrsDef::Projected(p) => p.name(),
             CrsDef::Compound(c) => c.name(),
+            CrsDef::Engineering(e) => e.name(),
         }
     }
 
@@ -141,6 +162,11 @@ impl CrsDef {
         matches!(self, CrsDef::Compound(_))
     }
 
+    /// Returns true if this is an engineering (local Cartesian) CRS.
+    pub fn is_engineering(&self) -> bool {
+        matches!(self, CrsDef::Engineering(_))
+    }
+
     /// Geographic or projected CRS with no vertical component.
     pub fn is_horizontal_2d(&self) -> bool {
         matches!(self, CrsDef::Geographic(_) | CrsDef::Projected(_))
@@ -148,13 +174,14 @@ impl CrsDef {
 
     /// Domain implied by this CRS type.
     ///
-    /// Geocentric CRS and ellipsoidal-height compounds include height.
-    /// Gravity-related compounds stay horizontal-only.
+    /// Geocentric CRS, ellipsoidal-height compounds, and 3D engineering CRSs
+    /// include height. Gravity-related compounds stay horizontal-only.
     pub fn operation_domain(&self) -> OperationDomain {
         if self.is_geocentric()
             || self
                 .vertical_crs()
                 .is_some_and(|vertical| vertical.kind().is_ellipsoidal_height())
+            || self.as_engineering().is_some_and(|e| e.dimension() == 3)
         {
             OperationDomain::IncludesHeight
         } else {
@@ -166,7 +193,7 @@ impl CrsDef {
     pub fn as_geographic(&self) -> Option<&GeographicCrsDef> {
         match self {
             CrsDef::Geographic(g) => Some(g),
-            CrsDef::Geocentric(_) | CrsDef::Projected(_) => None,
+            CrsDef::Geocentric(_) | CrsDef::Projected(_) | CrsDef::Engineering(_) => None,
             CrsDef::Compound(c) => c.as_geographic(),
         }
     }
@@ -175,24 +202,44 @@ impl CrsDef {
     pub fn as_geocentric(&self) -> Option<&GeocentricCrsDef> {
         match self {
             CrsDef::Geocentric(g) => Some(g),
-            CrsDef::Geographic(_) | CrsDef::Projected(_) | CrsDef::Compound(_) => None,
+            CrsDef::Geographic(_)
+            | CrsDef::Projected(_)
+            | CrsDef::Compound(_)
+            | CrsDef::Engineering(_) => None,
         }
     }
 
     /// Return the projected horizontal component, when present.
     pub fn as_projected(&self) -> Option<&ProjectedCrsDef> {
         match self {
-            CrsDef::Geographic(_) | CrsDef::Geocentric(_) => None,
+            CrsDef::Geographic(_) | CrsDef::Geocentric(_) | CrsDef::Engineering(_) => None,
             CrsDef::Projected(p) => Some(p),
             CrsDef::Compound(c) => c.as_projected(),
         }
     }
 
+    /// Return the engineering CRS definition, when present.
+    pub fn as_engineering(&self) -> Option<&EngineeringCrsDef> {
+        match self {
+            CrsDef::Engineering(e) => Some(e),
+            CrsDef::Geographic(_)
+            | CrsDef::Geocentric(_)
+            | CrsDef::Projected(_)
+            | CrsDef::Compound(_) => None,
+        }
+    }
+
     /// Return the explicit vertical CRS component, when this is compound.
+    ///
+    /// A 3D engineering CRS's height is part of its own frame, not a vertical
+    /// CRS, so it answers `None`.
     pub fn vertical_crs(&self) -> Option<&VerticalCrsDef> {
         match self {
             CrsDef::Compound(c) => Some(c.vertical_crs()),
-            CrsDef::Geographic(_) | CrsDef::Geocentric(_) | CrsDef::Projected(_) => None,
+            CrsDef::Geographic(_)
+            | CrsDef::Geocentric(_)
+            | CrsDef::Projected(_)
+            | CrsDef::Engineering(_) => None,
         }
     }
 
@@ -200,13 +247,15 @@ impl CrsDef {
     ///
     /// This intentionally drops an explicit vertical component. Use it only for
     /// horizontal-only workflows such as AOI filtering, footprint reprojection,
-    /// and 2D previews where `z` is outside the operation contract.
+    /// and 2D previews where `z` is outside the operation contract. A 3D
+    /// engineering CRS answers its 2D form, with the same identity.
     pub fn horizontal_crs(&self) -> Option<CrsDef> {
         match self {
             CrsDef::Geographic(_) | CrsDef::Geocentric(_) | CrsDef::Projected(_) => {
                 Some(self.clone())
             }
             CrsDef::Compound(c) => Some(c.horizontal().to_crs_def()),
+            CrsDef::Engineering(e) => Some(CrsDef::Engineering(Box::new(e.horizontal()))),
         }
     }
 
@@ -215,8 +264,10 @@ impl CrsDef {
     /// This is how a definition's own datum shift replaces the registry datum:
     /// the CRS still reports its EPSG code, while [`Datum::declares_shift`]
     /// keeps registry operations from being selected in place of that shift.
+    /// An engineering CRS has no geodetic datum and is returned unchanged.
     pub fn with_datum(self, datum: Datum) -> Self {
         match self {
+            CrsDef::Engineering(_) => self,
             CrsDef::Geographic(g) => CrsDef::Geographic(GeographicCrsDef { datum, ..g }),
             CrsDef::Geocentric(g) => CrsDef::Geocentric(GeocentricCrsDef { datum, ..g }),
             CrsDef::Projected(p) => CrsDef::Projected(ProjectedCrsDef { datum, ..p }),
@@ -256,6 +307,7 @@ impl CrsDef {
             CrsDef::Geocentric(_) => None,
             CrsDef::Projected(p) => Some(p.axis_order()),
             CrsDef::Compound(c) => Some(c.horizontal().axis_order()),
+            CrsDef::Engineering(e) => Some(e.axis_order()),
         }
     }
 
@@ -272,6 +324,7 @@ impl CrsDef {
                 let horizontal = c.horizontal.with_axis_order(axis_order);
                 CrsDef::Compound(Box::new(CompoundCrsDef { horizontal, ..*c }))
             }
+            CrsDef::Engineering(e) => CrsDef::Engineering(Box::new(e.with_axis_order(axis_order))),
         }
     }
 
@@ -290,9 +343,235 @@ impl CrsDef {
                     && projection_methods_equivalent(&a.method(), &b.method())
             }
             (CrsDef::Compound(a), CrsDef::Compound(b)) => a.semantically_equivalent(b),
+            (CrsDef::Engineering(a), CrsDef::Engineering(b)) => a.semantically_equivalent(b),
             _ => false,
         }
     }
+}
+
+/// An identifier an authority gives a CRS or an operation, such as
+/// `GEORIZON:12`.
+///
+/// Authorities compare without regard to ASCII case; codes compare exactly.
+#[derive(Debug, Clone, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct Identifier {
+    authority: String,
+    code: String,
+}
+
+impl Identifier {
+    /// Create an identifier from an authority name and its code.
+    pub fn new(authority: impl Into<String>, code: impl Into<String>) -> Result<Self> {
+        let authority = authority.into();
+        let code = code.into();
+        if authority.trim().is_empty() || code.trim().is_empty() {
+            return Err(Error::InvalidDefinition(
+                "an identifier needs an authority and a code".into(),
+            ));
+        }
+        Ok(Self { authority, code })
+    }
+
+    /// The authority, such as `GEORIZON`.
+    pub fn authority(&self) -> &str {
+        &self.authority
+    }
+
+    /// The code within the authority, such as `12`.
+    pub fn code(&self) -> &str {
+        &self.code
+    }
+}
+
+impl PartialEq for Identifier {
+    fn eq(&self, other: &Self) -> bool {
+        self.authority.eq_ignore_ascii_case(&other.authority) && self.code == other.code
+    }
+}
+
+impl std::hash::Hash for Identifier {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.authority.to_ascii_uppercase().hash(state);
+        self.code.hash(state);
+    }
+}
+
+impl std::fmt::Display for Identifier {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.authority, self.code)
+    }
+}
+
+/// Definition of an engineering CRS: a local Cartesian frame such as a plant
+/// grid, a total-station frame, or a scanner's own frame.
+///
+/// Its axes point east, north and, in 3D, up, in one linear unit. The frame
+/// has no relation to the earth of its own: a transform reaches another CRS
+/// only through an operation the caller supplies (see
+/// [`crate::OperationMethod::Similarity3D`]), and otherwise only the same
+/// frame.
+#[derive(Debug, Clone, PartialEq)]
+pub struct EngineeringCrsDef {
+    name: String,
+    datum_name: String,
+    dimension: usize,
+    linear_unit: LinearUnit,
+    axis_order: AxisOrder,
+    axis_names: Vec<String>,
+    identifier: Option<Identifier>,
+}
+
+impl EngineeringCrsDef {
+    /// Create a 2D or 3D engineering CRS in metres, with east/north axes
+    /// named `x`, `y` and `h`.
+    pub fn new(
+        name: impl Into<String>,
+        datum_name: impl Into<String>,
+        dimension: usize,
+    ) -> Result<Self> {
+        if !(2..=3).contains(&dimension) {
+            return Err(Error::InvalidDefinition(format!(
+                "an engineering CRS has 2 or 3 axes, not {dimension}"
+            )));
+        }
+        Ok(Self {
+            name: name.into(),
+            datum_name: datum_name.into(),
+            dimension,
+            linear_unit: LinearUnit::metre(),
+            axis_order: AxisOrder::EastNorth,
+            axis_names: default_engineering_axis_names(AxisOrder::EastNorth, dimension),
+            identifier: None,
+        })
+    }
+
+    /// Return this definition with an identifier, such as `GEORIZON:12`.
+    pub fn with_identifier(mut self, identifier: Identifier) -> Self {
+        self.identifier = Some(identifier);
+        self
+    }
+
+    /// Return this definition with every axis in `linear_unit`.
+    pub fn with_linear_unit(mut self, linear_unit: LinearUnit) -> Self {
+        self.linear_unit = linear_unit;
+        self
+    }
+
+    /// Return this definition with coordinates in `axis_order`.
+    ///
+    /// Axis names follow their axes.
+    pub fn with_axis_order(mut self, axis_order: AxisOrder) -> Self {
+        if axis_order != self.axis_order {
+            self.axis_names.swap(0, 1);
+            self.axis_order = axis_order;
+        }
+        self
+    }
+
+    /// Return this definition with its axes named, in axis order.
+    pub fn with_axis_names<I, S>(mut self, names: I) -> Result<Self>
+    where
+        I: IntoIterator<Item = S>,
+        S: Into<String>,
+    {
+        let names: Vec<String> = names.into_iter().map(Into::into).collect();
+        if names.len() != self.dimension {
+            return Err(Error::InvalidDefinition(format!(
+                "an engineering CRS with {} axes needs {} axis names, not {}",
+                self.dimension,
+                self.dimension,
+                names.len()
+            )));
+        }
+        self.axis_names = names;
+        Ok(self)
+    }
+
+    /// The CRS name.
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
+    /// The engineering datum's name.
+    pub fn datum_name(&self) -> &str {
+        &self.datum_name
+    }
+
+    /// 2 or 3.
+    pub const fn dimension(&self) -> usize {
+        self.dimension
+    }
+
+    /// The unit of every axis.
+    pub const fn linear_unit(&self) -> LinearUnit {
+        self.linear_unit
+    }
+
+    /// Order of the horizontal axes.
+    pub const fn axis_order(&self) -> AxisOrder {
+        self.axis_order
+    }
+
+    /// Axis names, in axis order.
+    pub fn axis_names(&self) -> &[String] {
+        &self.axis_names
+    }
+
+    /// The identifier, such as `GEORIZON:12`, when the definition has one.
+    pub fn identifier(&self) -> Option<&Identifier> {
+        self.identifier.as_ref()
+    }
+
+    /// This frame in 2D, keeping its identity.
+    pub fn horizontal(&self) -> Self {
+        let mut horizontal = self.clone();
+        horizontal.dimension = 2;
+        horizontal.axis_names.truncate(2);
+        horizontal
+    }
+
+    /// True when both definitions are the same frame: the same identifier,
+    /// or, when neither has one, the same non-empty CRS and datum names, as
+    /// C PROJ compares engineering CRSs. A frame that should be told apart
+    /// from others with generic names needs an identifier.
+    ///
+    /// Coordinates in the same frame differ at most in unit, axis order, and
+    /// whether they carry a height.
+    pub fn same_frame(&self, other: &Self) -> bool {
+        match (&self.identifier, &other.identifier) {
+            (Some(a), Some(b)) => a == b,
+            (None, None) => {
+                !self.datum_name.is_empty()
+                    && self.datum_name == other.datum_name
+                    && self.name == other.name
+            }
+            _ => false,
+        }
+    }
+
+    /// True when both definitions are the same frame with the same axes and
+    /// unit.
+    pub fn semantically_equivalent(&self, other: &Self) -> bool {
+        self.same_frame(other)
+            && self.dimension == other.dimension
+            && self.axis_order == other.axis_order
+            && approx_eq(
+                self.linear_unit.meters_per_unit(),
+                other.linear_unit.meters_per_unit(),
+            )
+    }
+}
+
+fn default_engineering_axis_names(axis_order: AxisOrder, dimension: usize) -> Vec<String> {
+    let mut names: Vec<String> = match axis_order {
+        AxisOrder::EastNorth => vec!["x".into(), "y".into()],
+        AxisOrder::NorthEast => vec!["y".into(), "x".into()],
+    };
+    if dimension == 3 {
+        names.push("h".into());
+    }
+    names
 }
 
 /// Order of the horizontal axes in a CRS's coordinates.
@@ -680,6 +959,9 @@ impl TryFrom<CrsDef> for HorizontalCrsDef {
             )),
             CrsDef::Compound(_) => Err(Error::InvalidDefinition(
                 "compound CRS horizontal component cannot itself be compound".into(),
+            )),
+            CrsDef::Engineering(_) => Err(Error::InvalidDefinition(
+                "an engineering CRS cannot be a compound horizontal component".into(),
             )),
         }
     }

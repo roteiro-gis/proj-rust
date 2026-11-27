@@ -41,6 +41,9 @@ fn parse_wkt_definition(s: &str) -> Result<CrsDef> {
 /// as it does in C PROJ: the definition says how it reaches WGS 84.
 pub(crate) fn parse_wkt(s: &str) -> Result<CrsDef> {
     let s = s.trim();
+    if crate::engineering::is_engineering_wkt(s) {
+        return crate::engineering::parse_wkt_engineering(s);
+    }
     if let Some((root, inner, _)) = parse_wkt_element(s, 0) {
         if root.eq_ignore_ascii_case("BOUNDCRS") {
             return parse_wkt_bound_crs(inner);
@@ -59,6 +62,11 @@ fn parse_wkt_bound_crs(inner: &str) -> Result<CrsDef> {
         find_top_level_element_inner(inner, &[name])
             .ok_or_else(|| ParseError::Parse(format!("WKT BOUNDCRS is missing {name}")))
     };
+    // A frame's transformation has no place in its definition; the bound CRS
+    // stands for the frame, and `parse_bound_crs` reads the transformation.
+    if crate::engineering::is_engineering_wkt(element("SOURCECRS")?) {
+        return crate::engineering::parse_wkt_engineering(element("SOURCECRS")?);
+    }
     let target = element("TARGETCRS")?;
     if extract_top_level_epsg(target.trim()) != Some(4326) {
         return Err(ParseError::UnsupportedSemantics(
@@ -198,7 +206,7 @@ fn extract_top_level_epsg(s: &str) -> Option<u32> {
     None
 }
 
-fn parse_wkt_element(s: &str, start: usize) -> Option<(&str, &str, usize)> {
+pub(crate) fn parse_wkt_element(s: &str, start: usize) -> Option<(&str, &str, usize)> {
     let bytes = s.as_bytes();
     let first = *bytes.get(start)?;
     if !first.is_ascii_alphabetic() {
@@ -294,7 +302,7 @@ fn first_two_fields(s: &str) -> Option<(&str, &str)> {
     None
 }
 
-fn trim_wkt_token(token: &str) -> &str {
+pub(crate) fn trim_wkt_token(token: &str) -> &str {
     token.trim().trim_matches('"')
 }
 
@@ -1267,7 +1275,7 @@ fn parse_wkt_parameter_unit_factor(parameter_name: &str, inner: &str) -> Result<
     Ok(factor)
 }
 
-fn split_top_level_fields(s: &str) -> Vec<&str> {
+pub(crate) fn split_top_level_fields(s: &str) -> Vec<&str> {
     let mut fields = Vec::new();
     let mut field_start = 0usize;
     let mut depth = 0usize;
@@ -1300,7 +1308,7 @@ fn split_top_level_fields(s: &str) -> Vec<&str> {
     fields
 }
 
-fn root_inner(s: &str) -> Option<&str> {
+pub(crate) fn root_inner(s: &str) -> Option<&str> {
     parse_wkt_element(s, 0).map(|(_, inner, _)| inner)
 }
 
@@ -1391,7 +1399,7 @@ fn extract_prime_meridian_degrees(inner: &str, default_angle_unit_to_degree: f64
     prime_meridian
 }
 
-fn extract_coordinate_system(inner: &str) -> CoordinateSystemSpec {
+pub(crate) fn extract_coordinate_system(inner: &str) -> CoordinateSystemSpec {
     let mut coordinate_system = CoordinateSystemSpec::default();
     for_each_top_level_element(inner, |name, element_inner| {
         if name.eq_ignore_ascii_case("CS") {
@@ -1423,7 +1431,7 @@ fn extract_coordinate_system(inner: &str) -> CoordinateSystemSpec {
     coordinate_system
 }
 
-fn coordinate_system_linear_unit(
+pub(crate) fn coordinate_system_linear_unit(
     context: &str,
     coordinate_system: &CoordinateSystemSpec,
 ) -> Result<Option<LinearUnit>> {
@@ -1505,7 +1513,10 @@ fn extract_vertical_crs_linear_unit(inner: &str) -> Option<LinearUnit> {
     extract_vertical_axis_linear_unit(inner).or_else(|| extract_top_level_length_unit(inner, true))
 }
 
-fn extract_top_level_length_unit(inner: &str, include_legacy_unit: bool) -> Option<LinearUnit> {
+pub(crate) fn extract_top_level_length_unit(
+    inner: &str,
+    include_legacy_unit: bool,
+) -> Option<LinearUnit> {
     let mut linear_unit = None;
     for_each_top_level_element(inner, |name, element_inner| {
         if linear_unit.is_some() {
@@ -1552,7 +1563,7 @@ fn axis_angle_unit_to_degree(axis_inner: &str) -> Option<f64> {
         })
 }
 
-fn find_top_level_element_inner<'a>(inner: &'a str, names: &[&str]) -> Option<&'a str> {
+pub(crate) fn find_top_level_element_inner<'a>(inner: &'a str, names: &[&str]) -> Option<&'a str> {
     let mut found = None;
     for_each_top_level_element(inner, |name, element_inner| {
         if found.is_none()
@@ -1566,7 +1577,7 @@ fn find_top_level_element_inner<'a>(inner: &'a str, names: &[&str]) -> Option<&'
     found
 }
 
-fn for_each_top_level_element<'a, F>(inner: &'a str, mut f: F)
+pub(crate) fn for_each_top_level_element<'a, F>(inner: &'a str, mut f: F)
 where
     F: FnMut(&'a str, &'a str),
 {
@@ -1607,7 +1618,7 @@ where
     }
 }
 
-fn parse_unit_factor(inner: &str) -> Option<f64> {
+pub(crate) fn parse_unit_factor(inner: &str) -> Option<f64> {
     let fields = split_top_level_fields(inner);
     fields.get(1)?.trim().parse::<f64>().ok()
 }

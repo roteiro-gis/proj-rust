@@ -23,6 +23,15 @@ pub(crate) fn parse_projjson(s: &str) -> Result<CrsDef> {
     let value: Value =
         serde_json::from_str(s).map_err(|e| ParseError::Parse(format!("invalid PROJJSON: {e}")))?;
     if value.get("type").and_then(Value::as_str) == Some("BoundCRS") {
+        // A frame's transformation has no place in its definition; the bound
+        // CRS stands for the frame, and `parse_bound_crs` reads the
+        // transformation.
+        if let Some(source) = value
+            .get("source_crs")
+            .filter(|source| source.get("type").and_then(Value::as_str) == Some("EngineeringCRS"))
+        {
+            return crate::engineering::parse_projjson_engineering(source);
+        }
         return parse_bound_projjson(&value);
     }
     parse_projjson_value(&value)
@@ -105,7 +114,10 @@ fn bound_parameter(transformation: &Value, name: &str) -> Result<Option<f64>> {
     Ok(Some(value))
 }
 
-fn parse_projjson_value(value: &Value) -> Result<CrsDef> {
+pub(crate) fn parse_projjson_value(value: &Value) -> Result<CrsDef> {
+    if value.get("type").and_then(Value::as_str) == Some("EngineeringCRS") {
+        return crate::engineering::parse_projjson_engineering(value);
+    }
     let top_level_epsg = top_level_epsg_id(value);
 
     if let Some(epsg) = top_level_epsg {
@@ -970,7 +982,7 @@ fn coordinate_system_angle_unit_to_degree(value: &Value) -> Result<Option<f64>> 
     Ok(angle_unit_to_degree)
 }
 
-fn coordinate_system_from_json(value: &Value) -> CoordinateSystemSpec {
+pub(crate) fn coordinate_system_from_json(value: &Value) -> CoordinateSystemSpec {
     let subtype = value
         .get("coordinate_system")
         .and_then(|cs| cs.get("subtype"))

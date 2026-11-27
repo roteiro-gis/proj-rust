@@ -1,5 +1,5 @@
 use crate::coord::{Bounds, Coord};
-use crate::crs::{LinearUnit, ProjectionMethod};
+use crate::crs::{Identifier, LinearUnit, ProjectionMethod};
 use crate::datum::{DatumToWgs84, HelmertParams};
 use crate::error::{Error, Result};
 use smallvec::SmallVec;
@@ -339,6 +339,240 @@ impl GeocentricAffineParams {
     }
 }
 
+/// How the rotation angles of a seven-parameter transformation are read.
+///
+/// The two conventions rotate in opposite senses. With the exact rotation
+/// matrix of [`Similarity3DParams`] the position vector matrix is the
+/// transpose of the coordinate frame one, as in C PROJ's
+/// `+proj=helmert +exact`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub enum RotationConvention {
+    /// Rotations turn the position vector (EPSG method 1033; PROJ
+    /// `+convention=position_vector`).
+    PositionVector,
+    /// Rotations turn the coordinate frame (EPSG method 1032; PROJ
+    /// `+convention=coordinate_frame`).
+    CoordinateFrame,
+}
+
+const SIMILARITY_ARCSEC_TO_RAD: f64 = (std::f64::consts::PI / 180.0) / 3600.0;
+
+/// A seven-parameter similarity transformation on Cartesian coordinates,
+/// with the exact rotation matrix:
+///
+/// ```text
+/// p' = T + (1 + s·10⁻⁶) · R(rx, ry, rz) · p
+/// ```
+///
+/// This is C PROJ's `+proj=helmert +exact` with the given convention, applied
+/// to whatever triple the operation connects. For an engineering CRS that is
+/// its (x, y, h) and the target CRS's (easting, northing, height), all in
+/// metres. Unlike [`HelmertParams`], whose small-angle matrix suits datum
+/// shifts of a few arc-seconds, it stays exact for a frame turned by any
+/// angle.
+///
+/// In the position vector convention a positive `rz` turns the frame
+/// counter-clockwise: a frame whose north is θ clockwise from the target
+/// CRS's grid north has `rz = −θ·3600″` (`+θ·3600″` in the coordinate frame
+/// convention).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Similarity3DParams {
+    translation: [f64; 3],
+    rotation: [f64; 3],
+    scale_ppm: f64,
+    convention: RotationConvention,
+    /// Row-major exact rotation matrix, unscaled.
+    matrix: [f64; 9],
+}
+
+impl Similarity3DParams {
+    /// Create a similarity from translations in metres, rotations about the
+    /// x, y and z axes in arc-seconds, and a scale difference in parts per
+    /// million.
+    pub fn new(
+        translation: [f64; 3],
+        rotation_arcsec: [f64; 3],
+        scale_ppm: f64,
+        convention: RotationConvention,
+    ) -> Result<Self> {
+        if !translation
+            .iter()
+            .chain(&rotation_arcsec)
+            .all(|value| value.is_finite())
+            || !scale_ppm.is_finite()
+        {
+            return Err(Error::InvalidDefinition(
+                "similarity transformation parameters must be finite".into(),
+            ));
+        }
+        if 1.0 + scale_ppm * 1e-6 <= 0.0 {
+            return Err(Error::InvalidDefinition(
+                "similarity transformation scale must stay positive".into(),
+            ));
+        }
+        Ok(Self {
+            translation,
+            rotation: rotation_arcsec,
+            scale_ppm,
+            convention,
+            matrix: exact_rotation_matrix(rotation_arcsec, convention),
+        })
+    }
+
+    /// Create a similarity from a rotation matrix, such as a Procrustes
+    /// (Umeyama) fit's, applied as `p' = T + (1 + s·10⁻⁶)·R·p` with `R`
+    /// row-major.
+    ///
+    /// The rotations are the ones whose exact matrix in `convention` is `R`,
+    /// so [`Self::rotation_matrix`] returns `R` and C PROJ's
+    /// `+proj=helmert +exact` with [`Self::rotation_arcsec`] applies it.
+    /// `R` must be a proper rotation to within 1e-9; a reflection or a matrix
+    /// that is not orthonormal is an error. The angles returned always
+    /// rebuild `R` to within 1e-9, including at a 90° turn about the y axis,
+    /// where they are not unique.
+    pub fn from_rotation_matrix(
+        translation: [f64; 3],
+        rotation_matrix: [f64; 9],
+        scale_ppm: f64,
+        convention: RotationConvention,
+    ) -> Result<Self> {
+        let m = rotation_matrix;
+        if !m.iter().all(|value| value.is_finite()) {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix must be finite".into(),
+            ));
+        }
+        let determinant = m[0] * (m[4] * m[8] - m[5] * m[7]) - m[1] * (m[3] * m[8] - m[5] * m[6])
+            + m[2] * (m[3] * m[7] - m[4] * m[6]);
+        if determinant < 0.0 {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix is a reflection, not a rotation".into(),
+            ));
+        }
+        // The coordinate frame matrix is Rz(rz)·Ry(ry)·Rx(rx) of frame
+        // rotations; the position vector matrix is its transpose.
+        let c = match convention {
+            RotationConvention::CoordinateFrame => m,
+            RotationConvention::PositionVector => {
+                [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]
+            }
+        };
+        let radians = [
+            (-c[7]).atan2(c[8]),
+            c[6].clamp(-1.0, 1.0).asin(),
+            (-c[3]).atan2(c[0]),
+        ];
+        let params = Self::new(
+            translation,
+            radians.map(|angle| angle / SIMILARITY_ARCSEC_TO_RAD),
+            scale_ppm,
+            convention,
+        )?;
+        if params
+            .matrix
+            .iter()
+            .zip(&m)
+            .any(|(rebuilt, given)| (rebuilt - given).abs() > 1e-9)
+        {
+            return Err(Error::InvalidDefinition(
+                "similarity rotation matrix is not a rotation to within 1e-9".into(),
+            ));
+        }
+        Ok(params)
+    }
+
+    /// The similarity that changes nothing.
+    pub fn identity() -> Self {
+        Self {
+            translation: [0.0; 3],
+            rotation: [0.0; 3],
+            scale_ppm: 0.0,
+            convention: RotationConvention::PositionVector,
+            matrix: [1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0],
+        }
+    }
+
+    /// Translations along x, y and z, in metres.
+    pub const fn translation(&self) -> [f64; 3] {
+        self.translation
+    }
+
+    /// Rotations about x, y and z, in arc-seconds.
+    pub const fn rotation_arcsec(&self) -> [f64; 3] {
+        self.rotation
+    }
+
+    /// Scale difference in parts per million.
+    pub const fn scale_ppm(&self) -> f64 {
+        self.scale_ppm
+    }
+
+    /// The convention the rotations are stated in.
+    pub const fn convention(&self) -> RotationConvention {
+        self.convention
+    }
+
+    /// The exact rotation matrix, row-major and without the scale.
+    pub const fn rotation_matrix(&self) -> [f64; 9] {
+        self.matrix
+    }
+
+    /// Apply the transformation to a triple in metres.
+    pub fn forward(&self, point: [f64; 3]) -> [f64; 3] {
+        let m = self.matrix;
+        let scale = 1.0 + self.scale_ppm * 1e-6;
+        let [x, y, z] = point;
+        // C PROJ's operation order, so results agree to the last bit.
+        [
+            scale * (m[0] * x + m[1] * y + m[2] * z) + self.translation[0],
+            scale * (m[3] * x + m[4] * y + m[5] * z) + self.translation[1],
+            scale * (m[6] * x + m[7] * y + m[8] * z) + self.translation[2],
+        ]
+    }
+
+    /// Undo [`Self::forward`] exactly: `p = Rᵀ · (p' − T) / (1 + s)`.
+    pub fn inverse(&self, point: [f64; 3]) -> [f64; 3] {
+        let m = self.matrix;
+        let scale = 1.0 + self.scale_ppm * 1e-6;
+        let x = point[0] - self.translation[0];
+        let y = point[1] - self.translation[1];
+        let z = point[2] - self.translation[2];
+        [
+            (m[0] * x + m[3] * y + m[6] * z) / scale,
+            (m[1] * x + m[4] * y + m[7] * z) / scale,
+            (m[2] * x + m[5] * y + m[8] * z) / scale,
+        ]
+    }
+}
+
+/// C PROJ's exact Helmert rotation matrix: `Rz·Ry·Rx` of frame rotations for
+/// the coordinate frame convention, its transpose for position vector.
+fn exact_rotation_matrix(rotation_arcsec: [f64; 3], convention: RotationConvention) -> [f64; 9] {
+    let [f, t, p] = rotation_arcsec.map(|value| value * SIMILARITY_ARCSEC_TO_RAD);
+    let (sf, cf) = f.sin_cos();
+    let (st, ct) = t.sin_cos();
+    let (sp, cp) = p.sin_cos();
+    let coordinate_frame = [
+        ct * cp,
+        cf * sp + sf * st * cp,
+        sf * sp - cf * st * cp,
+        -ct * sp,
+        cf * cp - sf * st * sp,
+        sf * cp + cf * st * sp,
+        st,
+        -sf * ct,
+        cf * ct,
+    ];
+    match convention {
+        RotationConvention::CoordinateFrame => coordinate_frame,
+        RotationConvention::PositionVector => {
+            let m = coordinate_frame;
+            [m[0], m[3], m[6], m[1], m[4], m[7], m[2], m[5], m[8]]
+        }
+    }
+}
+
 /// Enum-backed operation method model used by selection and compilation.
 #[derive(Debug, Clone, PartialEq)]
 pub enum OperationMethod {
@@ -348,6 +582,19 @@ pub enum OperationMethod {
     },
     GeocentricAffine {
         params: GeocentricAffineParams,
+    },
+    /// A seven-parameter similarity between an engineering CRS and a
+    /// projected CRS or a compound CRS with a projected horizontal component,
+    /// on (x, y, h) and (easting, northing, height) in metres.
+    ///
+    /// It positions a local frame: pass it in
+    /// [`SelectionOptions::coordinate_operations`] with the engineering CRS
+    /// named by [`CoordinateOperation::source_crs_id`] (or
+    /// [`CoordinateOperation::target_crs_id`] for the reverse) and the other
+    /// CRS by its EPSG code. A transform from the frame then runs this
+    /// operation and the registry's own from that CRS on.
+    Similarity3D {
+        params: Similarity3DParams,
     },
     GridShift {
         grid_id: GridId,
@@ -399,6 +646,13 @@ pub struct CoordinateOperation {
     pub name: String,
     pub source_crs_epsg: Option<u32>,
     pub target_crs_epsg: Option<u32>,
+    /// Identifier of a source CRS outside the EPSG registry, such as the
+    /// engineering CRS `GEORIZON:12`. `None` sets no such filter, and an
+    /// engineering CRS without an identifier matches only `None`.
+    pub source_crs_id: Option<Identifier>,
+    /// Identifier of a target CRS outside the EPSG registry; see
+    /// [`Self::source_crs_id`].
+    pub target_crs_id: Option<Identifier>,
     pub source_datum_epsg: Option<u32>,
     pub target_datum_epsg: Option<u32>,
     pub accuracy: Option<OperationAccuracy>,
@@ -505,6 +759,8 @@ impl CoordinateOperation {
             ),
             source_crs_epsg,
             target_crs_epsg,
+            source_crs_id: None,
+            target_crs_id: None,
             source_datum_epsg,
             target_datum_epsg,
             accuracy: first_leg
@@ -954,6 +1210,8 @@ mod tests {
             name: name.into(),
             source_crs_epsg: None,
             target_crs_epsg: None,
+            source_crs_id: None,
+            target_crs_id: None,
             source_datum_epsg: None,
             target_datum_epsg: None,
             accuracy: Some(OperationAccuracy { meters: 0.0 }),

@@ -363,6 +363,11 @@ impl HelmertParams {
 /// WGS 84 datum.
 pub const WGS84: Datum = Datum::new_unchecked(ellipsoid::WGS84, DatumToWgs84::Identity, 6326);
 
+/// What [`crate::CrsDef::datum`] answers for an engineering CRS: no relation to
+/// WGS 84 and no code, so it is never the same as any datum, itself included.
+pub(crate) static NO_GEODETIC_DATUM: Datum =
+    Datum::new_unchecked(ellipsoid::WGS84, DatumToWgs84::Unknown, 0);
+
 /// NAD83 datum (functionally identical to WGS84 for sub-meter work).
 pub const NAD83: Datum = Datum::new_unchecked(ellipsoid::GRS80, DatumToWgs84::Identity, 6269);
 

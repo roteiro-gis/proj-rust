@@ -1,0 +1,1 @@
+ENGCRS["Site grid Example",EDATUM["Site grid Example"],CS[Cartesian,3],AXIS["site east (x)",east,ORDER[1],LENGTHUNIT["metre",1]],AXIS["site north (y)",north,ORDER[2],LENGTHUNIT["metre",1]],AXIS["height (h)",up,ORDER[3],LENGTHUNIT["metre",1]],ID["GEORIZON",12]]

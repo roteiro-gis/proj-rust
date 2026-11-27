@@ -62,6 +62,13 @@ impl PipelineSourceXyUnits {
         if source.is_geocentric() {
             return Self::GeocentricMeters;
         }
+        // Frame stages hand the pipeline engineering coordinates in metres.
+        if let Some(engineering) = source.as_engineering() {
+            return match engineering.linear_unit() {
+                unit if unit.meters_per_unit() == 1.0 => Self::ProjectedMeters,
+                unit => Self::ProjectedNativeToMeters(unit),
+            };
+        }
         match source.as_projected() {
             Some(projected) if projected.linear_unit_to_meter() == 1.0 => Self::ProjectedMeters,
             Some(projected) => Self::ProjectedNativeToMeters(projected.linear_unit()),
@@ -100,6 +107,12 @@ impl PipelineTargetXyUnits {
     fn compile(target: &CrsDef) -> Self {
         if target.is_geocentric() {
             return Self::GeocentricMeters;
+        }
+        if let Some(engineering) = target.as_engineering() {
+            return match engineering.linear_unit() {
+                unit if unit.meters_per_unit() == 1.0 => Self::ProjectedMeters,
+                unit => Self::ProjectedMetersToNative(unit),
+            };
         }
         match target.as_projected() {
             Some(projected) if projected.linear_unit_to_meter() == 1.0 => Self::ProjectedMeters,
@@ -679,6 +692,12 @@ fn compile_operation(
             return Err(Error::UnsupportedProjection(
                 "direct projection operations are not emitted by the embedded selector".into(),
             ));
+        }
+        (OperationMethod::Similarity3D { .. }, _) => {
+            return Err(Error::OperationSelection(format!(
+                "operation {} connects an engineering CRS and applies only at a transform's engineering endpoint",
+                operation.name
+            )));
         }
     }
     Ok(())

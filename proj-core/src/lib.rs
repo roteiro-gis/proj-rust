@@ -32,6 +32,9 @@
 //! ordinate. Use [`Transform::new_horizontal`] or
 //! [`Transform::from_horizontal_components`] when the operation is explicitly
 //! limited to XY coordinates.
+//! An engineering CRS ([`CrsDef::Engineering`]) reaches another CRS only
+//! through a caller-supplied [`OperationMethod::Similarity3D`] operation in
+//! [`SelectionOptions`], then the selected operation from that CRS on.
 //! Geographic antimeridian AOIs use
 //! [`AreaOfInterest::geographic_wrapped_bounds`], while ordinary projected and
 //! source/target bounds keep strict `min <= max` validation.
@@ -76,8 +79,9 @@ pub use coord::{
     Bounds, Coord, Coord3D, Transformable, Transformable3D, MAX_BOUNDS_DENSIFY_POINTS,
 };
 pub use crs::{
-    AxisOrder, CompoundCrsDef, CrsDef, GeocentricCrsDef, GeographicCrsDef, HorizontalCrsDef,
-    LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef, VerticalCrsKind,
+    AxisOrder, CompoundCrsDef, CrsDef, EngineeringCrsDef, GeocentricCrsDef, GeographicCrsDef,
+    HorizontalCrsDef, Identifier, LinearUnit, ProjectedCrsDef, ProjectionMethod, VerticalCrsDef,
+    VerticalCrsKind,
 };
 pub use datum::{Datum, DatumGridShift, DatumGridShiftEntry, DatumToWgs84, HelmertParams};
 pub use ellipsoid::Ellipsoid;
@@ -91,9 +95,10 @@ pub use operation::{
     CoordinateOperationMetadata, GeocentricAffineParams, GridCoverageMiss, GridId,
     GridInterpolation, GridShiftDirection, OperationAccuracy, OperationDomain, OperationMatchKind,
     OperationMethod, OperationSelectionDiagnostics, OperationStep, OperationStepDirection,
-    SelectionOptions, SelectionPolicy, SelectionReason, SkippedOperation, SkippedOperationReason,
-    TransformOutcome, VerticalGridOffsetConvention, VerticalGridOperation, VerticalGridProvenance,
-    VerticalTransformAction, VerticalTransformDiagnostics,
+    RotationConvention, SelectionOptions, SelectionPolicy, SelectionReason, Similarity3DParams,
+    SkippedOperation, SkippedOperationReason, TransformOutcome, VerticalGridOffsetConvention,
+    VerticalGridOperation, VerticalGridProvenance, VerticalTransformAction,
+    VerticalTransformDiagnostics,
 };
 pub use registry::{
     lookup_authority_axis_order, lookup_authority_code, lookup_datum_code_for_crs,
