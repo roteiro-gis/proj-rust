@@ -81,11 +81,13 @@ fn frame_to_its_base_crs_runs_the_similarity() {
             .unwrap();
 
     // cct +proj=helmert +convention=position_vector +exact (appendix values).
+    // RD + NAP to itself runs RD's projection there and back, which costs up
+    // to a few nanometres depending on the platform's libm.
     let actual = transform.convert_3d((1000.0, 2000.0, 10.0)).unwrap();
     assert_close3(
         actual,
         (90107.3578789594, 438069.1069518616, 6.5089042981),
-        1e-9,
+        1e-8,
     );
 
     assert!(transform.source_crs().is_engineering());
@@ -104,7 +106,7 @@ fn frame_to_its_base_crs_runs_the_similarity() {
     assert_close3(
         back.convert_3d(actual).unwrap(),
         (1000.0, 2000.0, 10.0),
-        1e-9,
+        1e-8,
     );
     assert_eq!(back.selected_operation().name, "12 to RD + NAP");
     assert_eq!(back.selected_operation().source_crs_epsg, Some(7415));
@@ -116,7 +118,7 @@ fn base_crs_to_frame_is_the_inverse_similarity() {
         Transform::from_crs_defs_with_selection_options(&epsg(7415), &site_grid(), options())
             .unwrap();
     let actual = transform.convert_3d((91000.0, 436500.0, 5.0)).unwrap();
-    assert_close3(actual, (768.5741526816, 209.5753048870, 8.5310714247), 1e-9);
+    assert_close3(actual, (768.5741526816, 209.5753048870, 8.5310714247), 1e-8);
 }
 
 #[test]
